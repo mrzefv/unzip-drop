@@ -1,0 +1,88 @@
+name: Unzip Drop
+
+on:
+  push:
+    paths:
+      - 'drop/**'
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: unzip-drop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply dropped zip
+        env:
+          DROP_DIR: ${{ vars.DROP_DIR }}
+          SYNC_MODE: ${{ vars.SYNC_MODE }}
+        run: |
+          set -euo pipefail
+          shopt -s dotglob nullglob
+
+          DROP_DIR="${DROP_DIR:-drop}"
+          SYNC_MODE="${SYNC_MODE:-folder}"   # folder = each zip into its own folder (safe, default)
+                                             # merge  = overlay files into repo root
+                                             # mirror = repo root becomes the zip
+          SELF=".github/workflows/unzip.yml"
+
+          ZIP="$(find "$DROP_DIR" -maxdepth 1 -name '*.zip' -printf '%T@ %p\n' 2>/dev/null \
+                 | sort -rn | head -n1 | cut -d' ' -f2-)"
+          if [ -z "$ZIP" ]; then echo "No zip in $DROP_DIR — nothing to do."; exit 0; fi
+          echo "Applying $ZIP  (mode: $SYNC_MODE)"
+
+          rm -rf _extract && mkdir _extract
+          unzip -q "$ZIP" -d _extract
+
+          ENTRIES=(_extract/*)
+          if [ ${#ENTRIES[@]} -eq 1 ] && [ -d "${ENTRIES[0]}" ]; then SRC="${ENTRIES[0]}"; else SRC="_extract"; fi
+
+          case "$SYNC_MODE" in
+            folder)
+              DEST="$(basename "$ZIP" .zip)"
+              rm -rf "$DEST" && mkdir -p "$DEST"
+              rsync -a "$SRC"/ "$DEST"/
+              ;;
+            merge)
+              rsync -a "$SRC"/ ./
+              ;;
+            mirror)
+              rsync -a --delete \
+                --exclude='.git' --exclude="$SELF" --exclude="$DROP_DIR" \
+                --exclude='README.md' --exclude='.gitignore' \
+                "$SRC"/ ./
+              ;;
+            *)
+              echo "Unknown SYNC_MODE: $SYNC_MODE"; exit 1 ;;
+          esac
+
+          rm -rf _extract
+          rm -f "$ZIP"
+          mkdir -p "$DROP_DIR" && touch "$DROP_DIR/.gitkeep"
+
+          git config user.name  "zip-drop[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "Nothing changed."; exit 0; fi
+          git commit -m "Unzip drop: $(basename "$ZIP")"
+          git push
+
+      - name: Trigger build (optional)
+        if: ${{ vars.TRIGGER_BUILD == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_WORKFLOW: ${{ vars.BUILD_WORKFLOW }}
+        run: |
+          set -euo pipefail
+          BUILD_WORKFLOW="${BUILD_WORKFLOW:-build.yml}"
+          gh workflow run "$BUILD_WORKFLOW" --ref "$GITHUB_REF_NAME" \
+            && echo "Dispatched $BUILD_WORKFLOW" \
+            || echo "Could not dispatch $BUILD_WORKFLOW (needs 'on: workflow_dispatch')."

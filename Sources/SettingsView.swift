@@ -9,36 +9,35 @@ import SwiftUI
 
 // MARK: - Root list
 
+private enum Screen: String, Identifiable {
+    case about, repo, token
+    var id: String { rawValue }
+}
+
 struct SettingsView: View {
     @EnvironmentObject var config: Config
+    @State private var screen: Screen?
 
     var body: some View {
-        NavigationStack {
-            ZStack {
+        ZStack {
                 Theme.bg.ignoresSafeArea()
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
 
                         SettingsSection("General", trailing: "\(Theme.appName.uppercased()) \(Theme.appVersion)") {
-                            SettingsRow(icon: "info.circle.fill", title: "About", subtitle: "App information and version") {
-                                AboutScreen()
-                            }
+                            SettingsRow(icon: "info.circle.fill", title: "About", subtitle: "App information and version") { screen = .about }
                         }
 
                         SettingsSection("Target") {
                             SettingsRow(icon: "point.3.connected.trianglepath.dotted",
                                         title: "Repository",
-                                        subtitle: repoSubtitle) {
-                                RepoScreen()
-                            }
+                                        subtitle: repoSubtitle) { screen = .repo }
                         }
 
                         SettingsSection("Security") {
                             SettingsRow(icon: "key.fill",
                                         title: "Access token",
-                                        subtitle: config.hasToken ? "GitHub PAT stored in Keychain" : "No token set") {
-                                TokenScreen()
-                            }
+                                        subtitle: config.hasToken ? "GitHub PAT stored in Keychain" : "No token set") { screen = .token }
                         }
 
                         SettingsSection("Support") {
@@ -55,11 +54,19 @@ struct SettingsView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 6)
                     .padding(.bottom, 20)
+            }
+        }
+        .fullScreenCover(item: $screen) { s in
+            Group {
+                switch s {
+                case .about: AboutScreen()
+                case .repo:  RepoScreen()
+                case .token: TokenScreen()
                 }
             }
-            .toolbar(.hidden, for: .navigationBar)
+            .environmentObject(config)
+            .preferredColorScheme(.dark)
         }
-        .tint(Theme.accent)
     }
 
     private var repoSubtitle: String {
@@ -137,14 +144,14 @@ private struct RowBody: View {
     }
 }
 
-private struct SettingsRow<Destination: View>: View {
+private struct SettingsRow: View {
     let icon: String
     let title: String
     let subtitle: String
-    @ViewBuilder var destination: Destination
+    let action: () -> Void
 
     var body: some View {
-        NavigationLink { destination } label: {
+        Button(action: action) {
             RowBody(icon: icon, title: title, subtitle: subtitle)
         }
         .buttonStyle(RowPressStyle())
@@ -209,20 +216,46 @@ private struct StatusFooter: View {
 private struct DetailScreen<Content: View>: View {
     let title: String
     @ViewBuilder var content: Content
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ZStack {
-            Theme.bg.ignoresSafeArea()
+        VStack(spacing: 0) {
+            ZStack {
+                HStack(spacing: 8) {
+                    Image(systemName: "archivebox.fill").foregroundStyle(Theme.accent)
+                    Text("UNZIP DROP")
+                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .kerning(1).foregroundStyle(Theme.text)
+                    Spacer()
+                }
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.subtle)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 140)
+                    .lineLimit(1)
+                HStack {
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 34, height: 34)
+                            .background(Theme.accent.opacity(0.14))
+                            .clipShape(Circle())
+                    }
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(Theme.bg)
+            .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
+
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 14) { content }
                     .padding(16)
             }
         }
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Theme.bg, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .background(Theme.bg.ignoresSafeArea())
+        .scrollDismissesKeyboard(.interactively)
     }
 }
 

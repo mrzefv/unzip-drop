@@ -18,7 +18,7 @@ enum Unzipper {
 
     /// Extract a zip into a fresh temp dir. If the archive is a single top-level
     /// folder, its contents become the payload root (auto-flatten).
-    nonisolated static func extract(_ zipURL: URL) throws -> (root: URL, name: String) {
+    static func extract(_ zipURL: URL) throws -> (root: URL, name: String) {
         let fm = FileManager.default
 
         // Sanity: a real zip starts with "PK".
@@ -44,12 +44,12 @@ enum Unzipper {
         return (root, zipURL.deletingPathExtension().lastPathComponent)
     }
 
-    nonisolated private static func skip(_ url: URL) -> Bool {
+    private static func skip(_ url: URL) -> Bool {
         url.lastPathComponent == ".DS_Store" || url.path.contains("__MACOSX")
     }
 
     /// Count + total bytes of regular files under root (junk filtered).
-    nonisolated static func stats(under root: URL) -> (count: Int, bytes: Int64) {
+    static func stats(under root: URL) -> (count: Int, bytes: Int64) {
         let fm = FileManager.default
         var c = 0; var b: Int64 = 0
         if let en = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) {
@@ -63,7 +63,7 @@ enum Unzipper {
 
     /// Every regular file under root as (repo-relative path, bytes). Hidden files
     /// like .github ARE included; macOS cruft is not.
-    nonisolated static func files(under root: URL) throws -> [(path: String, data: Data)] {
+    static func files(under root: URL) throws -> [(path: String, data: Data)] {
         let fm = FileManager.default
         var out: [(String, Data)] = []
         let base = root.standardizedFileURL.path

@@ -426,7 +426,7 @@ private struct TokenScreen: View {
             Card {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Required scope").font(.headline).foregroundStyle(Theme.text)
-                    Text("Fine-grained: Repository permissions → Contents: Read and write.\nClassic: repo.")
+                    Text("Fine-grained: Repository permissions → Contents: Read and write, Actions: Read and write (Build tab), Workflows: Read and write (if the drop has .github/workflows).\nClassic: repo + workflow.")
                         .font(.caption).foregroundStyle(Theme.subtle)
                     Link("Create a token on GitHub", destination: URL(string: "https://github.com/settings/tokens")!)
                         .font(.caption.weight(.semibold)).foregroundStyle(Theme.accent)

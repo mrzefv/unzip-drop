@@ -7,10 +7,27 @@ import ZIPFoundation
 
 enum Unzipper {
 
+    enum Failure: LocalizedError {
+        case notAZip
+        var errorDescription: String? {
+            switch self {
+            case .notAZip: return "That file isn't a zip archive."
+            }
+        }
+    }
+
     /// Extract a zip into a fresh temp dir. If the archive is a single top-level
     /// folder, its contents become the payload root (auto-flatten).
-    static func extract(_ zipURL: URL) throws -> (root: URL, name: String) {
+    nonisolated static func extract(_ zipURL: URL) throws -> (root: URL, name: String) {
         let fm = FileManager.default
+
+        // Sanity: a real zip starts with "PK".
+        if let fh = try? FileHandle(forReadingFrom: zipURL) {
+            let magic = try? fh.read(upToCount: 2)
+            try? fh.close()
+            if magic != Data([0x50, 0x4B]) { throw Failure.notAZip }
+        }
+
         let work = fm.temporaryDirectory
             .appendingPathComponent("uzd-" + UUID().uuidString, isDirectory: true)
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
@@ -27,12 +44,12 @@ enum Unzipper {
         return (root, zipURL.deletingPathExtension().lastPathComponent)
     }
 
-    private static func skip(_ url: URL) -> Bool {
+    nonisolated private static func skip(_ url: URL) -> Bool {
         url.lastPathComponent == ".DS_Store" || url.path.contains("__MACOSX")
     }
 
     /// Count + total bytes of regular files under root (junk filtered).
-    static func stats(under root: URL) -> (count: Int, bytes: Int64) {
+    nonisolated static func stats(under root: URL) -> (count: Int, bytes: Int64) {
         let fm = FileManager.default
         var c = 0; var b: Int64 = 0
         if let en = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) {
@@ -46,7 +63,7 @@ enum Unzipper {
 
     /// Every regular file under root as (repo-relative path, bytes). Hidden files
     /// like .github ARE included; macOS cruft is not.
-    static func files(under root: URL) throws -> [(path: String, data: Data)] {
+    nonisolated static func files(under root: URL) throws -> [(path: String, data: Data)] {
         let fm = FileManager.default
         var out: [(String, Data)] = []
         let base = root.standardizedFileURL.path

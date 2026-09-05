@@ -3,20 +3,9 @@
 //
 
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ImportView: View {
     @EnvironmentObject var session: Session
-    @State private var picking = false
-
-    // Accept zips typed any of the common ways; .item is a catch-all so a real
-    // zip is never greyed out in the picker. Non-zips just fail on extract.
-    static let importTypes: [UTType] = {
-        var t: [UTType] = [.zip, .archive]
-        if let z = UTType("com.pkware.zip-archive") { t.append(z) }
-        t.append(.item)
-        return t
-    }()
 
     var body: some View {
         ZStack {
@@ -28,28 +17,41 @@ struct ImportView: View {
                     Card {
                         VStack(alignment: .leading, spacing: 12) {
                             Label("Open a .zip", systemImage: "archivebox").font(.headline).foregroundStyle(Theme.text)
-                            Text("Pick a zip, or share one into Unzip Drop from Files or Safari. It extracts on-device â a single wrapping folder is flattened automatically.")
+                            Text("Pick a zip, or share one into Unzip Drop from Files or Safari. It extracts on-device — a single wrapping folder is flattened automatically.")
                                 .font(.caption).foregroundStyle(Theme.subtle)
-                            Button { picking = true } label: {
+                            Button {
+                                DocumentPickerPresenter.pickZip { url in
+                                    if let url { session.importPicked(url) }
+                                }
+                            } label: {
                                 HStack {
                                     Image(systemName: "tray.and.arrow.down.fill")
                                     Text("Choose Zip").fontWeight(.semibold)
                                     Spacer()
                                 }
                                 .padding(.vertical, 12).padding(.horizontal, 14)
-                                .background(Theme.accent).foregroundStyle(.black)
+                                .background(session.busy ? Theme.subtle : Theme.accent)
+                                .foregroundStyle(.black)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                             }
+                            .disabled(session.busy)
                         }
                     }
 
-                    if session.busy { ProgressView().tint(Theme.accent).padding(.top, 4) }
+                    if session.busy {
+                        HStack(spacing: 10) {
+                            ProgressView().tint(Theme.accent)
+                            Text(session.status ?? "Working…").font(.caption).foregroundStyle(Theme.subtle)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 4)
+                    }
 
-                    if let name = session.archiveName, session.root != nil {
+                    if let name = session.archiveName, session.root != nil, !session.busy {
                         Card {
                             VStack(alignment: .leading, spacing: 8) {
                                 Label(name, systemImage: "shippingbox.fill").font(.headline).foregroundStyle(Theme.text)
-                                Text("\(session.fileCount) files Â· \(ByteCountFormatter.string(fromByteCount: session.totalBytes, countStyle: .file))")
+                                Text("\(session.fileCount) files · \(ByteCountFormatter.string(fromByteCount: session.totalBytes, countStyle: .file))")
                                     .font(.caption).foregroundStyle(Theme.subtle)
                                 Text("Browse it in Contents, or send it up in Push.")
                                     .font(.caption2).foregroundStyle(Theme.subtle)
@@ -60,17 +62,16 @@ struct ImportView: View {
                             }
                         }
                     }
-
-                    if let s = session.status, session.root == nil, !session.busy {
-                        Text(s).font(.caption).foregroundStyle(.orange)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
                 }
                 .padding(16)
             }
         }
-        .fileImporter(isPresented: $picking, allowedContentTypes: Self.importTypes, allowsMultipleSelection: false) { res in
-            if case let .success(urls) = res, let u = urls.first { session.importPicked(u) }
+        .alert("Import failed",
+               isPresented: Binding(get: { session.errorMessage != nil },
+                                    set: { if !$0 { session.errorMessage = nil } })) {
+            Button("OK", role: .cancel) { session.errorMessage = nil }
+        } message: {
+            Text(session.errorMessage ?? "")
         }
     }
 }

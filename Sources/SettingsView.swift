@@ -9,13 +9,22 @@ import SwiftUI
 
 // MARK: - Root list
 
-private enum Screen: String, Identifiable {
+private enum Screen: Identifiable, Hashable {
     case about, repo, token
-    var id: String { rawValue }
+    case dylibTemplate, ipaTemplate
+    case tutorial(String)
+    var id: String {
+        switch self {
+        case .about: return "about"; case .repo: return "repo"; case .token: return "token"
+        case .dylibTemplate: return "tpl-dylib"; case .ipaTemplate: return "tpl-ipa"
+        case .tutorial(let t): return "tut-" + t
+        }
+    }
 }
 
 struct SettingsView: View {
     @EnvironmentObject var config: Config
+    @EnvironmentObject var session: Session
     @State private var screen: Screen?
 
     var body: some View {
@@ -40,6 +49,19 @@ struct SettingsView: View {
                                         subtitle: config.hasToken ? "GitHub PAT stored in Keychain" : "No token set") { screen = .token }
                         }
 
+                        SettingsSection("Templates") {
+                            SettingsRow(icon: "puzzlepiece.extension.fill", title: "Dylib project",
+                                        subtitle: "Theos · runtime swizzle · Actions build") { screen = .dylibTemplate }
+                            SettingsRow(icon: "app.badge.fill", title: "IPA app project",
+                                        subtitle: "SwiftUI · XcodeGen · unsigned Actions build") { screen = .ipaTemplate }
+                        }
+
+                        SettingsSection("Tutorials") {
+                            ForEach(TutorialLibrary.all) { t in
+                                SettingsRow(icon: t.icon, title: t.title, subtitle: t.subtitle) { screen = .tutorial(t.id) }
+                            }
+                        }
+
                         SettingsSection("Support") {
                             SettingsLink(icon: "globe", title: "MRzefV", subtitle: "mrzefv.com | Founder MRzefv",
                                          url: URL(string: "https://mrzefv.com")!)
@@ -62,9 +84,14 @@ struct SettingsView: View {
                 case .about: AboutScreen()
                 case .repo:  RepoScreen()
                 case .token: TokenScreen()
+                case .dylibTemplate: DylibTemplateScreen()
+                case .ipaTemplate:   IPATemplateScreen()
+                case .tutorial(let id):
+                    TutorialScreen(tutorial: TutorialLibrary.all.first { $0.id == id } ?? TutorialLibrary.flex)
                 }
             }
             .environmentObject(config)
+            .environmentObject(session)
             .preferredColorScheme(.dark)
         }
     }
@@ -433,5 +460,105 @@ private struct TokenScreen: View {
                 }
             }
         }
+    }
+}
+
+
+// MARK: - Templates
+
+private struct DylibTemplateScreen: View {
+    @EnvironmentObject var session: Session
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = "MRvEKTweak"
+    @State private var target = ""
+    @State private var author = "MRzefv"
+
+    var body: some View {
+        DetailScreen(title: "Dylib project") {
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Theos dylib, no Substrate", systemImage: "puzzlepiece.extension.fill")
+                        .font(.headline).foregroundStyle(Theme.text)
+                    Text("Makefile + Tweak.xm with a runtime-swizzle helper and an example overlay hook, bundle-filter plist, control, and a GitHub Actions workflow that installs Theos and uploads the .dylib as an artifact. Works sideloaded via mSign or on a jailbreak.")
+                        .font(.caption).foregroundStyle(Theme.subtle)
+                    Field(label: "Tweak name", text: $name, placeholder: "MRvEKTweak")
+                    Field(label: "Target bundle id", text: $target, placeholder: "com.audiomack.iphone")
+                    Field(label: "Author handle", text: $author, placeholder: "MRzefv")
+                }
+            }
+            Card {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Files").font(.headline).foregroundStyle(Theme.text)
+                    ForEach(["Makefile", "Tweak.xm", "<name>.plist", "control", ".github/workflows/build.yml", "README.md"], id: \.self) {
+                        Text("· " + $0).font(.caption.monospaced()).foregroundStyle(Theme.subtle)
+                    }
+                }
+            }
+            generate("Generate dylib project") {
+                ProjectTemplate.dylib(name: name, target: target, author: author.isEmpty ? "MRzefv" : author)
+            }
+            Text("Then: Push → Build tab → download <name>-dylib → inject with mSign. See Tutorials for the FLEX walkthrough.")
+                .font(.caption2).foregroundStyle(Theme.subtle)
+        }
+    }
+
+    private func generate(_ title: String, _ make: @escaping () -> [(path: String, content: String)]) -> some View {
+        Button {
+            session.loadGenerated(name: name.isEmpty ? "MRvEKTweak" : name, files: make())
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            dismiss()
+        } label: {
+            HStack { Image(systemName: "wand.and.stars"); Text(title).fontWeight(.semibold); Spacer() }
+                .padding(.vertical, 12).padding(.horizontal, 14)
+                .background(Theme.accent).foregroundStyle(.black)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+}
+
+private struct IPATemplateScreen: View {
+    @EnvironmentObject var session: Session
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = "MRvEKApp"
+    @State private var bundle = ""
+    @State private var author = "MRzefv"
+
+    var body: some View {
+        DetailScreen(title: "IPA app project") {
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("SwiftUI app, unsigned IPA", systemImage: "app.badge.fill")
+                        .font(.headline).foregroundStyle(Theme.text)
+                    Text("project.yml (XcodeGen) so there's no pbxproj to maintain by hand, a custom-shell RootView with the same header/tab-bar pattern as this app, launch screen set so it's full-screen, and a workflow that generates the project, builds unsigned and uploads <name>.ipa. Sign with mSign to install.")
+                        .font(.caption).foregroundStyle(Theme.subtle)
+                    Field(label: "App name", text: $name, placeholder: "MRvEKApp")
+                    Field(label: "Bundle id", text: $bundle, placeholder: "party.mrvek.app")
+                    Field(label: "Author handle", text: $author, placeholder: "MRzefv")
+                }
+            }
+            Card {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Files").font(.headline).foregroundStyle(Theme.text)
+                    ForEach(["project.yml", "Sources/<name>App.swift", "Sources/Theme.swift", "Sources/RootView.swift", "Assets.xcassets/…", ".github/workflows/build.yml", "README.md"], id: \.self) {
+                        Text("· " + $0).font(.caption.monospaced()).foregroundStyle(Theme.subtle)
+                    }
+                }
+            }
+            Button {
+                session.loadGenerated(name: name.isEmpty ? "MRvEKApp" : name,
+                                      files: ProjectTemplate.ipaApp(name: name, bundleID: bundle, author: author.isEmpty ? "MRzefv" : author))
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                dismiss()
+            } label: {
+                HStack { Image(systemName: "wand.and.stars"); Text("Generate IPA project").fontWeight(.semibold); Spacer() }
+                    .padding(.vertical, 12).padding(.horizontal, 14)
+                    .background(Theme.accent).foregroundStyle(.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            Text("Then: Push → Build tab → download <name>-ipa → sign in mSign.")
+                .font(.caption2).foregroundStyle(Theme.subtle)
+        }
+    }
+}
     }
 }

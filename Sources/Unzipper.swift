@@ -16,18 +16,13 @@ enum Unzipper {
         }
     }
 
-    /// Extract a zip into a fresh temp dir. If the archive is a single top-level
-    /// folder, its contents become the payload root (auto-flatten).
     static func extract(_ zipURL: URL) throws -> (root: URL, name: String) {
         let fm = FileManager.default
-
-        // Sanity: a real zip starts with "PK".
         if let fh = try? FileHandle(forReadingFrom: zipURL) {
             let magic = try? fh.read(upToCount: 2)
             try? fh.close()
             if magic != Data([0x50, 0x4B]) { throw Failure.notAZip }
         }
-
         let work = fm.temporaryDirectory
             .appendingPathComponent("uzd-" + UUID().uuidString, isDirectory: true)
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
@@ -44,11 +39,22 @@ enum Unzipper {
         return (root, zipURL.deletingPathExtension().lastPathComponent)
     }
 
+    /// Repackage a folder tree into a fresh .zip in temp; returns its URL.
+    static func makeZip(from root: URL, name: String) throws -> URL {
+        let fm = FileManager.default
+        let outDir = fm.temporaryDirectory.appendingPathComponent("zip-" + UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: outDir, withIntermediateDirectories: true)
+        let safe = name.isEmpty ? "archive" : name
+        let dest = outDir.appendingPathComponent(safe + ".zip")
+        try? fm.removeItem(at: dest)
+        try fm.zipItem(at: root, to: dest, shouldKeepParent: false, compressionMethod: .deflate)
+        return dest
+    }
+
     private static func skip(_ url: URL) -> Bool {
         url.lastPathComponent == ".DS_Store" || url.path.contains("__MACOSX")
     }
 
-    /// Count + total bytes of regular files under root (junk filtered).
     static func stats(under root: URL) -> (count: Int, bytes: Int64) {
         let fm = FileManager.default
         var c = 0; var b: Int64 = 0
@@ -61,8 +67,6 @@ enum Unzipper {
         return (c, b)
     }
 
-    /// Every regular file under root as (repo-relative path, bytes). Hidden files
-    /// like .github ARE included; macOS cruft is not.
     static func files(under root: URL) throws -> [(path: String, data: Data)] {
         let fm = FileManager.default
         var out: [(String, Data)] = []

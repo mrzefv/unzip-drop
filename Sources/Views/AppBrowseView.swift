@@ -7,7 +7,6 @@
 //
 
 import SwiftUI
-import SDWebImageSwiftUI
 
 // MARK: - App Browse View Store
 
@@ -215,12 +214,12 @@ struct AppRowView: View {
             Button(action: onTap) {
                 HStack(spacing: 12) {
                     // App Icon
-                    WebImage(url: app.iconURL)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 60, height: 60)
-                        .cornerRadius(14)
-                        .background(Color.white.opacity(0.08))
+                    AsyncImage(url: app.iconURL) { phase in
+                        if let img = phase.image { img.resizable().scaledToFill() }
+                        else { Color.white.opacity(0.08).overlay(Image(systemName: "app.dashed").foregroundStyle(Theme.accent)) }
+                    }
+                    .frame(width: 60, height: 60)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
                     
                     // App Info
                     VStack(alignment: .leading, spacing: 4) {
@@ -350,12 +349,13 @@ struct ScreenshotCarouselView: View {
             // Carousel
             TabView(selection: $currentIndex) {
                 ForEach(0..<screenshots.count, id: \.self) { index in
-                    WebImage(url: screenshots[index])
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 250)
-                        .cornerRadius(12)
-                        .tag(index)
+                    AsyncImage(url: screenshots[index]) { phase in
+                        if let img = phase.image { img.resizable().scaledToFit() }
+                        else { Color.white.opacity(0.06).overlay(ProgressView().tint(Theme.accent)) }
+                    }
+                    .frame(maxHeight: 250)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .tag(index)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))

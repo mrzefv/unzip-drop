@@ -56,7 +56,7 @@ struct SettingsView: View {
                             SettingsRow(icon: "checkmark.seal.fill", title: "Certificates",
                                         subtitle: certs.active?.name ?? "No signing certificate") { screen = .certificates }
                             SettingsRow(icon: "network", title: "On-Device OTA Domain",
-                                        subtitle: "\(ServerConfig.installHost) · backloop.dev") { screen = .otaDomain }
+                                        subtitle: "\(ServerConfig.installHost) · zefv.dev cert") { screen = .otaDomain }
                         }
 
                         SettingsSection("Templates") {
@@ -574,14 +574,15 @@ private struct IPATemplateScreen: View {
 }
 
 
-// MARK: - OTA domain (backloop.dev)
+// MARK: - OTA domain (zefv.dev)
 
 private struct OTADomainScreen: View {
     @State private var host = ServerConfig.installHost
     @State private var saved = false
     @State private var refreshing = false
-    @State private var meta = BackloopCert.meta
-    @State private var cached = BackloopCert.hasCached
+    @State private var expires = ZefvCert.effectiveNotAfter
+    @State private var cached = ZefvCert.hasCached
+    @State private var fetchedAt = ZefvCert.meta?.fetchedAt
     @State private var error: String?
 
     private var clean: String {
@@ -589,21 +590,21 @@ private struct OTADomainScreen: View {
             .replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: "")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
-    private var hostOK: Bool { clean.lowercased().hasSuffix(".backloop.dev") }
+    private var hostOK: Bool { clean.lowercased().hasSuffix(".zefv.dev") || clean.lowercased() == "zefv.dev" }
 
     var body: some View {
         DetailScreen(title: "On-Device OTA Domain") {
             Card {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Install host", systemImage: "network").font(.headline).foregroundStyle(Theme.text)
-                    Text("Installs run over an on-device Vapor HTTPS server. Any *.backloop.dev name resolves to 127.0.0.1, and backloop.dev publishes the matching wildcard cert + key. iOS trusts it, connects to loopback, installs.")
+                    Text("Installs run over an on-device Vapor HTTPS server, same as mSign. *.zefv.dev resolves to 127.0.0.1 and is covered by the bundled Let's Encrypt wildcard cert. iOS trusts it, connects to loopback, installs.")
                         .font(.caption).foregroundStyle(Theme.subtle)
-                    Field(label: "Host", text: $host, placeholder: "DELvEK.backloop.dev", keyboard: .URL)
+                    Field(label: "Host", text: $host, placeholder: "mr.zefv.dev", keyboard: .URL)
                     if !hostOK {
-                        Text("Host must end in .backloop.dev to match the cert.").font(.caption).foregroundStyle(.orange)
+                        Text("Host must be under zefv.dev to match the cert.").font(.caption).foregroundStyle(.orange)
                     }
                     Button {
-                        ServerConfig.setInstallHost(clean.isEmpty ? "DELvEK.backloop.dev" : clean)
+                        ServerConfig.setInstallHost(clean.isEmpty ? "mr.zefv.dev" : clean)
                         host = ServerConfig.installHost; saved = true
                         UINotificationFeedbackGenerator().notificationOccurred(.success)
                     } label: {
@@ -622,16 +623,17 @@ private struct OTADomainScreen: View {
                         Spacer()
                         statusPill
                     }
-                    kv("Source", "https://backloop.dev/pack.json")
-                    kv("Common name", meta?.commonName ?? (cached ? "*.backloop.dev" : "—"))
-                    kv("Expires", meta?.notAfter.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
-                    kv("Fetched", meta?.fetchedAt.formatted(date: .abbreviated, time: .shortened) ?? "never")
+                    kv("In use", cached ? "Refreshed copy" : "Bundled (mSign server.crt)")
+                    kv("Covers", "*.zefv.dev, zefv.dev")
+                    kv("Expires", expires.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
+                    kv("Refreshed", fetchedAt?.formatted(date: .abbreviated, time: .shortened) ?? "never")
+                    kv("Source", ServerConfig.refreshURL.absoluteString)
                     if let error { Text(error).font(.caption).foregroundStyle(.orange) }
                     HStack(spacing: 10) {
                         Button { Task { await refresh() } } label: {
                             HStack {
                                 if refreshing { ProgressView().tint(.black) } else { Image(systemName: "arrow.triangle.2.circlepath") }
-                                Text(refreshing ? "Fetching…" : (cached ? "Refresh certificate" : "Fetch certificate")).fontWeight(.semibold)
+                                Text(refreshing ? "Fetching…" : "Refresh certificate").fontWeight(.semibold)
                                 Spacer()
                             }
                             .padding(.vertical, 12).padding(.horizontal, 14)
@@ -640,9 +642,7 @@ private struct OTADomainScreen: View {
                         }
                         .disabled(refreshing)
                         if cached {
-                            Button {
-                                BackloopCert.clearCache(); meta = nil; cached = false
-                            } label: {
+                            Button { ZefvCert.clearCache(); reload() } label: {
                                 Image(systemName: "trash").frame(width: 46, height: 46)
                                     .background(Theme.card).foregroundStyle(.orange)
                                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
@@ -650,7 +650,7 @@ private struct OTADomainScreen: View {
                             }
                         }
                     }
-                    Text("Auto-refreshes before it's \(ServerConfig.refreshBufferDays) days from expiry whenever you install. Works offline once cached.")
+                    Text("Auto-refreshes on install when within \(ServerConfig.refreshBufferDays) days of expiry. certbot on mrzefv.com republishes pack.json; the bundled pair keeps working offline until then.")
                         .font(.caption2).foregroundStyle(Theme.subtle)
                 }
             }
@@ -659,19 +659,21 @@ private struct OTADomainScreen: View {
                     Text("Manifest URL shape").font(.headline).foregroundStyle(Theme.text)
                     Text("https://\(ServerConfig.installHost):<port>/<id>.plist")
                         .font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.accent)
-                    Text("Same pipeline as mSign: Vapor + NIOSSL on-device, backloop.dev wildcard, itms-services hand-off.")
-                        .font(.caption).foregroundStyle(Theme.subtle)
                 }
             }
         }
         .onChange(of: host) { _ in saved = false }
-        .onAppear { meta = BackloopCert.meta; cached = BackloopCert.hasCached }
+        .onAppear(perform: reload)
+    }
+
+    private func reload() {
+        expires = ZefvCert.effectiveNotAfter; cached = ZefvCert.hasCached; fetchedAt = ZefvCert.meta?.fetchedAt
     }
 
     private var statusPill: some View {
-        let expired = (meta?.notAfter ?? .distantFuture) < Date()
-        let color: Color = !cached ? .orange : (expired ? .red : .green)
-        let text = !cached ? "NOT FETCHED" : (expired ? "EXPIRED" : "READY")
+        let days = expires.map { Calendar.current.dateComponents([.day], from: Date(), to: $0).day ?? 0 } ?? -1
+        let color: Color = expires == nil ? .orange : (days < 0 ? .red : (days < ServerConfig.refreshBufferDays ? .orange : .green))
+        let text = expires == nil ? "MISSING" : (days < 0 ? "EXPIRED" : (days < ServerConfig.refreshBufferDays ? "\(days)D LEFT" : "READY"))
         return Text(text).font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(1)
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background(color.opacity(0.18)).foregroundStyle(color).clipShape(Capsule())
@@ -681,14 +683,14 @@ private struct OTADomainScreen: View {
         HStack {
             Text(k).font(.caption).foregroundStyle(Theme.subtle)
             Spacer()
-            Text(v).font(.caption.monospaced()).foregroundStyle(Theme.text).lineLimit(1)
+            Text(v).font(.caption.monospaced()).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
         }
     }
 
     private func refresh() async {
         refreshing = true; error = nil
         do {
-            meta = try await BackloopCert.fetch(); cached = true
+            _ = try await ZefvCert.fetch(); reload()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch { self.error = error.localizedDescription }
         refreshing = false

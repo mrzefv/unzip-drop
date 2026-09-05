@@ -167,12 +167,12 @@ struct CertificatesScreen: View {
             }.frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 2) {
                 Text(c.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
-                if let t = info.1 { Text(t).font(.caption).foregroundStyle(Theme.subtle).lineLimit(1) }
-                if let e = info.2 {
-    let expired = e < Date()
-    Text((expired ? "Expired " : "Expires ") + e.formatted(date: .abbreviated, time: .omitted))
-        .font(.caption2).foregroundStyle(expired ? .orange : Theme.subtle)
-}
+                if let t = info.team { Text(t).font(.caption).foregroundStyle(Theme.subtle).lineLimit(1) }
+                if let e = info.expires {
+                    let expired = e < Date()
+                    Text((expired ? "Expired " : "Expires ") + e.formatted(date: .abbreviated, time: .omitted))
+                        .font(.caption2).foregroundStyle(expired ? .orange : Theme.subtle)
+                }
             }
             Spacer()
             if active {

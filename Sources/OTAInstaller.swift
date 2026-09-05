@@ -1,7 +1,7 @@
 //
 //  OTAInstaller.swift
 //  Serves a locally-signed IPA over the on-device Vapor HTTPS server
-//  (backloop.dev cert) and hands iOS the itms-services URL. Keeps the server
+//  (zefv.dev cert) and hands iOS the itms-services URL. Keeps the server
 //  alive under a background task for the ~90s installd needs.
 //
 
@@ -21,7 +21,7 @@ final class OTAInstaller {
         var errorDescription: String? {
             switch self {
             case .ipaMissing: return "Signed IPA not found on disk."
-            case .openFailed: return "iOS refused the itms-services URL. Check the OTA host resolves to 127.0.0.1 and the cert is fetched."
+            case .openFailed: return "iOS refused the itms-services URL. Check the OTA host resolves to 127.0.0.1 and is covered by the zefv.dev cert."
             }
         }
     }
@@ -34,9 +34,9 @@ final class OTAInstaller {
     func install(ipaURL: URL, bundleID: String, name: String, version: String, iconData: Data?) async throws {
         guard FileManager.default.fileExists(atPath: ipaURL.path) else { throw InstallError.ipaMissing }
 
-        // First run / near expiry: pull the backloop.dev pack. Offline with a cached cert = fine.
-        if BackloopCert.needsRefresh { await BackloopCert.refreshIfNeeded() }
-        guard BackloopCert.isAvailable else { throw BackloopCert.CertError.unavailable }
+        // Near expiry: pull a fresh chain from mrzefv.com (no-op offline; bundled pair still works).
+        if ZefvCert.needsRefresh { await ZefvCert.refreshIfNeeded() }
+        guard ZefvCert.isAvailable else { throw ZefvCert.CertError.unavailable }
 
         let icon57  = Self.squarePNG(iconData, side: 57)
         let icon512 = Self.squarePNG(iconData, side: 512)

@@ -83,7 +83,7 @@ struct SignView: View {
                         Button { clear() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.subtle) }
                     }
                 } else {
-                    Text("Pick an .ipa from Files, or download a build artifact in the Build tab and it lands here. Installs go over the on-device Vapor server on \(ServerConfig.installHost).")
+                    Text("Pick an .ipa from Files, or download a build artifact in the Build tab and it lands here. Installs go over the on-device Vapor server at \(ServerConfig.installHost).")
                         .font(.caption).foregroundStyle(Theme.subtle)
                 }
                 Button { pick() } label: {

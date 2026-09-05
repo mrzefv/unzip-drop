@@ -20,6 +20,7 @@ struct RootView: View {
                 case 0: ImportView()
                 case 1: ContentsView()
                 case 2: PushView()
+                case 3: BuildView()
                 default: SettingsView()
                 }
             }
@@ -39,6 +40,7 @@ private struct TabBar: View {
         ("Import",   "tray.and.arrow.down.fill"),
         ("Contents", "folder.fill"),
         ("Push",     "arrow.up.circle.fill"),
+        ("Build",    "hammer.fill"),
         ("Settings", "gearshape.fill"),
     ]
 

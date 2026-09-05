@@ -29,7 +29,7 @@ final class Session: ObservableObject {
 
     private func ingest(_ url: URL) async {
         busy = true
-        status = "Reading…"
+        status = "Readingâ¦"
         errorMessage = nil
 
         // 1. Copy the source into our sandbox (handles iCloud / in-place / Inbox).
@@ -42,7 +42,7 @@ final class Session: ObservableObject {
         }
 
         // 2. Extract off the main thread.
-        status = "Extracting…"
+        status = "Extractingâ¦"
         let prev = root
         let result = await Self.extract(copied)
 
@@ -110,6 +110,33 @@ final class Session: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Load a generated project (template) as the current workspace so the
+    /// Contents / Push / Build tabs treat it exactly like an extracted zip.
+    func loadGenerated(name: String, files: [(path: String, content: String)]) {
+        lastEventID = UUID()
+        busy = true; status = "Generatingâ¦"; errorMessage = nil
+        let prev = root
+        let wrapper = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gen-" + UUID().uuidString, isDirectory: true)
+        let dir = wrapper.appendingPathComponent(name, isDirectory: true)
+        var count = 0; var bytes: Int64 = 0
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            for f in files {
+                let u = dir.appendingPathComponent(f.path)
+                try FileManager.default.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let d = Data(f.content.utf8)
+                try d.write(to: u)
+                count += 1; bytes += Int64(d.count)
+            }
+        } catch {
+            busy = false; status = nil; errorMessage = "Template failed: \(error.localizedDescription)"; return
+        }
+        if let prev { try? FileManager.default.removeItem(at: prev.deletingLastPathComponent()) }
+        root = dir; archiveName = name; fileCount = count; totalBytes = bytes
+        busy = false; status = "Generated \(count) files â review in Contents, then Push"
     }
 
     func reset() {

@@ -1,9 +1,8 @@
 //
 //  DocumentPicker.swift
-//  The same import method mSign uses: a UIKit UIDocumentPickerViewController
-//  presented directly, with asCopy: true. iOS hands back a local, fully-readable
-//  copy — no security-scoped / iCloud issues that .fileImporter trips over.
-//  MainActor-isolated throughout (no cross-thread closures to trip concurrency).
+//  mSign-style UIKit document picker (asCopy: true → local, readable copies).
+//  pickZip: single archive.  pickFiles: any files, multi-select (for importing
+//  files into the working tree).
 //
 
 import UIKit
@@ -16,16 +15,21 @@ enum DocumentPickerPresenter {
     static func pickZip(onPicked: @escaping (URL?) -> Void) {
         var types: [UTType] = [.zip]
         if let z = UTType("com.pkware.zip-archive") { types.append(z) }
-        types.append(.item)   // catch-all so a real zip is never greyed out
+        types.append(.item)
+        present(types: types, multiple: false) { urls in onPicked(urls.first) }
+    }
 
+    static func pickFiles(onPicked: @escaping ([URL]) -> Void) {
+        present(types: [.item], multiple: true, onPicked: onPicked)
+    }
+
+    private static func present(types: [UTType], multiple: Bool, onPicked: @escaping ([URL]) -> Void) {
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
-        picker.allowsMultipleSelection = false
-
+        picker.allowsMultipleSelection = multiple
         let p = Proxy(onPicked: onPicked)
         proxy = p
         picker.delegate = p
-
-        guard let top = topMostViewController() else { onPicked(nil); proxy = nil; return }
+        guard let top = topMostViewController() else { onPicked([]); proxy = nil; return }
         top.present(picker, animated: true)
     }
 
@@ -40,16 +44,13 @@ enum DocumentPickerPresenter {
     }
 
     final class Proxy: NSObject, UIDocumentPickerDelegate {
-        let onPicked: (URL?) -> Void
-        init(onPicked: @escaping (URL?) -> Void) { self.onPicked = onPicked }
-
+        let onPicked: ([URL]) -> Void
+        init(onPicked: @escaping ([URL]) -> Void) { self.onPicked = onPicked }
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            onPicked(urls.first)
-            DocumentPickerPresenter.proxy = nil
+            onPicked(urls); DocumentPickerPresenter.proxy = nil
         }
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            onPicked(nil)
-            DocumentPickerPresenter.proxy = nil
+            onPicked([]); DocumentPickerPresenter.proxy = nil
         }
     }
 }

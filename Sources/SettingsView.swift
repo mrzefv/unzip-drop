@@ -560,5 +560,3 @@ private struct IPATemplateScreen: View {
         }
     }
 }
-    }
-}

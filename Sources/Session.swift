@@ -6,6 +6,12 @@
 
 import SwiftUI
 
+/// Lightweight error so we can carry a message through Result (String isn't Error).
+private struct IngestError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
 @MainActor
 final class Session: ObservableObject {
     @Published var archiveName: String?
@@ -29,8 +35,8 @@ final class Session: ObservableObject {
         // 1. Copy the source into our sandbox (handles iCloud / in-place / Inbox).
         let copied: URL
         switch await Self.copyIntoSandbox(url) {
-        case .failure(let msg):
-            busy = false; status = nil; errorMessage = msg; return
+        case .failure(let e):
+            busy = false; status = nil; errorMessage = e.message; return
         case .success(let u):
             copied = u
         }
@@ -44,9 +50,9 @@ final class Session: ObservableObject {
         try? FileManager.default.removeItem(at: copied.deletingLastPathComponent())
 
         switch result {
-        case .failure(let msg):
+        case .failure(let e):
             root = nil; archiveName = nil; fileCount = 0; totalBytes = 0
-            busy = false; status = nil; errorMessage = msg
+            busy = false; status = nil; errorMessage = e.message
         case .success(let out):
             root = out.root; archiveName = out.name
             fileCount = out.count; totalBytes = out.bytes
@@ -57,7 +63,7 @@ final class Session: ObservableObject {
 
     /// Copy the picked/opened file into our sandbox using NSFileCoordinator so
     /// security-scoped and iCloud files read reliably. Keeps the original name.
-    private static func copyIntoSandbox(_ src: URL) async -> Result<URL, String> {
+    private static func copyIntoSandbox(_ src: URL) async -> Result<URL, IngestError> {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
                 let scoped = src.startAccessingSecurityScopedResource()
@@ -79,28 +85,28 @@ final class Session: ObservableObject {
                         innerErr = "Couldn't read the file: \(error.localizedDescription)"
                     }
                 }
-                if let coordErr { cont.resume(returning: .failure("Couldn't access the file: \(coordErr.localizedDescription)")); return }
-                if let innerErr { cont.resume(returning: .failure(innerErr)); return }
+                if let coordErr { cont.resume(returning: .failure(IngestError(message: "Couldn't access the file: \(coordErr.localizedDescription)"))); return }
+                if let innerErr { cont.resume(returning: .failure(IngestError(message: innerErr))); return }
                 guard FileManager.default.fileExists(atPath: dest.path) else {
-                    cont.resume(returning: .failure("The file couldn't be copied in.")); return
+                    cont.resume(returning: .failure(IngestError(message: "The file couldn't be copied in."))); return
                 }
                 cont.resume(returning: .success(dest))
             }
         }
     }
 
-    private static func extract(_ zipURL: URL) async -> Result<(root: URL, name: String, count: Int, bytes: Int64), String> {
+    private static func extract(_ zipURL: URL) async -> Result<(root: URL, name: String, count: Int, bytes: Int64), IngestError> {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     let (r, name) = try Unzipper.extract(zipURL)
                     let s = Unzipper.stats(under: r)
                     guard s.count > 0 else {
-                        cont.resume(returning: .failure("Extracted, but the archive has no files inside.")); return
+                        cont.resume(returning: .failure(IngestError(message: "Extracted, but the archive has no files inside."))); return
                     }
                     cont.resume(returning: .success((r, name, s.count, s.bytes)))
                 } catch {
-                    cont.resume(returning: .failure("Extract failed: \(error.localizedDescription)"))
+                    cont.resume(returning: .failure(IngestError(message: "Extract failed: \(error.localizedDescription)")))
                 }
             }
         }

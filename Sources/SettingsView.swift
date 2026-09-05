@@ -334,10 +334,10 @@ private struct RepoScreen: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Target repo", systemImage: "point.3.connected.trianglepath.dotted")
                         .font(.headline).foregroundStyle(Theme.text)
-                    Field(label: "Owner", text: $config.owner, placeholder: "mrzefv")
-                    Field(label: "Repo", text: $config.repo, placeholder: "my-repo")
-                    Field(label: "Branch", text: $config.branch, placeholder: "main")
-                    Field(label: "Subpath (optional)", text: $config.subpath, placeholder: "e.g. incoming")
+                    Field(label: "Owner", text: config.cleaned(\.owner), placeholder: "mrzefv")
+                    Field(label: "Repo", text: config.cleaned(\.repo), placeholder: "my-repo")
+                    Field(label: "Branch", text: config.cleaned(\.branch), placeholder: "main")
+                    Field(label: "Subpath (optional)", text: config.cleaned(\.subpath), placeholder: "e.g. incoming")
                 }
             }
             Card {
@@ -403,7 +403,7 @@ private struct TokenScreen: View {
                     Text("Fine-grained or classic PAT with Contents: read & write on the target repo. Stored in the Keychain, never leaves the device except to api.github.com.")
                         .font(.caption).foregroundStyle(Theme.subtle)
                     HStack(spacing: 10) {
-                        Field(label: "Token", text: $config.token, placeholder: "github_pat_… / ghp_…", secure: !show)
+                        Field(label: "Token", text: config.cleaned(\.token), placeholder: "github_pat_… / ghp_…", secure: !show)
                         Button { show.toggle() } label: {
                             Image(systemName: show ? "eye.slash" : "eye")
                                 .font(.system(size: 17)).foregroundStyle(Theme.subtle)

@@ -194,10 +194,10 @@ private struct StatusFooter: View {
                     .overlay(Capsule().stroke((ready ? Color.green : Color.orange).opacity(0.5), lineWidth: 1))
                     .clipShape(Capsule())
             }
-            Text("TARGET: ")
-                .font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Theme.subtle)
+            (Text("TARGET: ")
+                .font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
             + Text(config.repo.isEmpty ? "—" : "\(config.owner)/\(config.repo)")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundStyle(Theme.accent)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent))
             Text(Theme.owner).font(.footnote).foregroundStyle(Theme.subtle).padding(.top, 2)
         }
         .frame(maxWidth: .infinity)

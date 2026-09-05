@@ -5,6 +5,7 @@
 import SwiftUI
 
 struct RootView: View {
+    @EnvironmentObject var session: Session
     @State private var tab = 0
 
     init() {
@@ -31,5 +32,8 @@ struct RootView: View {
             .tint(Theme.accent)
         }
         .background(Theme.bg.ignoresSafeArea())
+        // Jump to Import whenever a new file comes in (e.g. via Open With), so the
+        // progress/result/error is visible.
+        .onChange(of: session.lastEventID) { _ in tab = 0 }
     }
 }

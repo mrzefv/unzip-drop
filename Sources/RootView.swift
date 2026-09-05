@@ -1,5 +1,8 @@
 //
 //  RootView.swift
+//  Custom shell — no SwiftUI TabView (its iOS 26 default is a floating glass bar
+//  that also pushes content down). A plain VStack: pinned wordmark header on top,
+//  the active screen in the middle, a docked custom tab bar flush at the bottom.
 //
 
 import SwiftUI
@@ -8,32 +11,58 @@ struct RootView: View {
     @EnvironmentObject var session: Session
     @State private var tab = 0
 
-    init() {
-        let a = UITabBarAppearance()
-        a.configureWithOpaqueBackground()
-        a.backgroundColor = UIColor(Theme.bg)
-        UITabBar.appearance().standardAppearance = a
-        UITabBar.appearance().scrollEdgeAppearance = a
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             TopBar()
-            TabView(selection: $tab) {
-                ImportView()
-                    .tabItem { Label("Import", systemImage: "tray.and.arrow.down.fill") }.tag(0)
-                ContentsView()
-                    .tabItem { Label("Contents", systemImage: "folder.fill") }.tag(1)
-                PushView()
-                    .tabItem { Label("Push", systemImage: "arrow.up.circle.fill") }.tag(2)
-                SettingsView()
-                    .tabItem { Label("Settings", systemImage: "gearshape.fill") }.tag(3)
+
+            ZStack {
+                switch tab {
+                case 0: ImportView()
+                case 1: ContentsView()
+                case 2: PushView()
+                default: SettingsView()
+                }
             }
-            .tint(Theme.accent)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            TabBar(selection: $tab)
         }
         .background(Theme.bg.ignoresSafeArea())
-        // Jump to Import whenever a new file comes in (e.g. via Open With), so the
-        // progress/result/error is visible.
         .onChange(of: session.lastEventID) { _ in tab = 0 }
+    }
+}
+
+private struct TabBar: View {
+    @Binding var selection: Int
+
+    private let tabs: [(label: String, icon: String)] = [
+        ("Import",   "tray.and.arrow.down.fill"),
+        ("Contents", "folder.fill"),
+        ("Push",     "arrow.up.circle.fill"),
+        ("Settings", "gearshape.fill"),
+    ]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(tabs.enumerated()), id: \.offset) { i, t in
+                Button { selection = i } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: t.icon).font(.system(size: 20))
+                        Text(t.label).font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(selection == i ? Theme.accent : Theme.subtle)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(height: 50)
+        .padding(.top, 8)
+        .background(alignment: .top) {
+            Theme.bg
+                .overlay(Rectangle().fill(Theme.stroke).frame(height: 0.5), alignment: .top)
+                .ignoresSafeArea(edges: .bottom)
+        }
     }
 }

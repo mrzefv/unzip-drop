@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import ZIPFoundation
 
 // MARK: - Status glyph (mirrors GitHub's job page)
 
@@ -453,7 +454,7 @@ private struct RunDetailScreen: View {
                     .buttonStyle(.plain)
                     .disabled(a.expired || downloading != nil)
                 }
-                Text("Artifacts come down as a zip. Share it into Unzip Drop to extract, or straight into mSign to sign the IPA.")
+                Text("Tap an IPA artifact and it goes straight to the Sign tab — sign with your cert and install over the air. Other artifacts open the share sheet.")
                     .font(.caption2).foregroundStyle(Theme.subtle)
             }
             .padding(16)
@@ -466,9 +467,26 @@ private struct RunDetailScreen: View {
         do {
             try await client.downloadArtifact(id: a.id, to: dest) { _ in }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            share = URLItem(url: dest)
+            // Artifact zips wrap the real file. If there's an IPA inside, hand it to the Sign tab.
+            if let ipa = try? Self.extractIPA(from: dest) {
+                dismiss()
+                SignQueue.shared.enqueue(ipa)
+            } else {
+                share = URLItem(url: dest)
+            }
         } catch { self.error = error.localizedDescription }
         downloading = nil
+    }
+
+    /// Unzip an artifact and return the first .ipa found (or nil).
+    nonisolated private static func extractIPA(from zip: URL) throws -> URL? {
+        let fm = FileManager.default
+        let out = fm.temporaryDirectory.appendingPathComponent("art-" + UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: out, withIntermediateDirectories: true)
+        try fm.unzipItem(at: zip, to: out)
+        guard let en = fm.enumerator(at: out, includingPropertiesForKeys: nil) else { return nil }
+        for case let u as URL in en where u.pathExtension.lowercased() == "ipa" { return u }
+        return nil
     }
 
     // MARK: Refresh

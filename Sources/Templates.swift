@@ -38,12 +38,12 @@ enum ProjectTemplate {
 
         let tweak = """
         //
-        //  Tweak.xm â \(name)
+        //  Tweak.xm — \(name)
         //  Target: \(target)
         //
         //  Pattern: pure ObjC-runtime swizzle (no Substrate), so the same dylib
-        //  works jailbroken AND sideloaded. Class names come from FLEX â see the
-        //  "Capture class names with FLEX" tutorial in Unzip Drop âº Settings.
+        //  works jailbroken AND sideloaded. Class names come from FLEX — see the
+        //  "Capture class names with FLEX" tutorial in Unzip Drop › Settings.
         //
 
         #import <UIKit/UIKit.h>
@@ -71,7 +71,7 @@ enum ProjectTemplate {
         // ---------------------------------------------------------------------
         static UIView *\(lower)_badge(void) {
             UILabel *l = [[UILabel alloc] init];
-            l.text = @"  \(name) Â· by \(author)  ";
+            l.text = @"  \(name) · by \(author)  ";
             l.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightBold];
             l.textColor = [UIColor colorWithRed:0.18 green:0.85 blue:0.76 alpha:1];
             l.backgroundColor = [UIColor colorWithWhite:0 alpha:0.75];
@@ -83,7 +83,7 @@ enum ProjectTemplate {
         }
 
         // ---------------------------------------------------------------------
-        // MARK: Hooks â replace UIViewController with the class FLEX showed you
+        // MARK: Hooks — replace UIViewController with the class FLEX showed you
         // (e.g. "AMSettingsViewController") and viewDidAppear: with the method.
         // ---------------------------------------------------------------------
         @interface UIViewController (\(name))
@@ -139,7 +139,7 @@ enum ProjectTemplate {
         Name: \(name)
         Version: 1.0.0
         Architecture: iphoneos-arm64
-        Description: \(name) â runtime overlay for \(target)
+        Description: \(name) — runtime overlay for \(target)
         Maintainer: \(author)
         Author: \(author)
         Section: Tweaks
@@ -200,25 +200,25 @@ enum ProjectTemplate {
         # \(name)
 
         Runtime overlay dylib for `\(target)`. Built by GitHub Actions (Theos, arm64,
-        no Substrate) â download `\(name)-dylib` from the workflow run, then inject it
+        no Substrate) — download `\(name)-dylib` from the workflow run, then inject it
         with mSign / DELvEK as an extra dylib, or drop it into a jailbroken device.
 
         ## Files
-        - `Tweak.xm` â swizzle helper + hooks. Replace the example class/selector with
+        - `Tweak.xm` — swizzle helper + hooks. Replace the example class/selector with
           the ones you captured in FLEX.
-        - `\(name).plist` â bundle filter (only loads inside `\(target)`).
-        - `Makefile` â Theos build, `generator=internal` so no libsubstrate dependency.
-        - `.github/workflows/build.yml` â builds on push and on manual dispatch.
+        - `\(name).plist` — bundle filter (only loads inside `\(target)`).
+        - `Makefile` — Theos build, `generator=internal` so no libsubstrate dependency.
+        - `.github/workflows/build.yml` — builds on push and on manual dispatch.
 
         ## Capture class names
-        1. Inject FLEX.dylib into the target IPA (mSign âº extra dylibs), sideload.
-        2. Shake â FLEX âº Select â tap the view â note the class in the breadcrumb.
-        3. Tap the class â Methods â find the selector you want to hook.
+        1. Inject FLEX.dylib into the target IPA (mSign › extra dylibs), sideload.
+        2. Shake → FLEX › Select → tap the view → note the class in the breadcrumb.
+        3. Tap the class → Methods → find the selector you want to hook.
         4. `objc_getClass("TheClass")` + `\(lower)_swizzle(...)` in `\(lower)_init`.
 
-        See the tutorials inside Unzip Drop âº Settings for the full walkthrough.
+        See the tutorials inside Unzip Drop › Settings for the full walkthrough.
 
-        â \(author)
+        — \(author)
         """
 
         return [
@@ -329,7 +329,7 @@ enum ProjectTemplate {
 
         let root = """
         //
-        //  RootView.swift â custom shell: pinned header, content, docked tab bar.
+        //  RootView.swift — custom shell: pinned header, content, docked tab bar.
         //
 
         import SwiftUI
@@ -498,9 +498,9 @@ enum ProjectTemplate {
         runner with XcodeGen from `project.yml`, built unsigned, and uploaded as
         `\(name)-ipa`. Download from the Build tab, sign with mSign, install.
 
-        Add Swift files under `Sources/` â they're picked up automatically.
+        Add Swift files under `Sources/` — they're picked up automatically.
 
-        â \(author)
+        — \(author)
         """
 
         return [

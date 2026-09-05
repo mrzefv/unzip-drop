@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		03865B4A66EB71AAB92A0450 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E09A20DE3775398EFC274454 /* ZIPFoundation */; };
+		424653534C00000000000001 /* OpenSSL in Frameworks */ = {isa = PBXBuildFile; productRef = 50524F4453534C0000000001 /* OpenSSL */; };
+		5641504F520000000000001 /* Vapor in Frameworks */ = {isa = PBXBuildFile; productRef = 5641504F52500000000001 /* Vapor */; };
 		A403726B2E112543E3434DCA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7682B969F8DF974AA9306D80 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -28,6 +30,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				03865B4A66EB71AAB92A0450 /* ZIPFoundation in Frameworks */,
+				424653534C00000000000001 /* OpenSSL in Frameworks */,
+				5641504F520000000000001 /* Vapor in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -74,6 +78,8 @@
 			name = "unzip-drop";
 			packageProductDependencies = (
 				E09A20DE3775398EFC274454 /* ZIPFoundation */,
+				50524F4453534C0000000001 /* OpenSSL */,
+				5641504F52500000000001 /* Vapor */,
 			);
 			productName = "unzip-drop";
 			productReference = 2456595988ACDF120DEEB9B4 /* unzip-drop.app */;
@@ -105,6 +111,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				61EDEC30A5F63ED366D136AF /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+				504B4753534C000000000001 /* XCRemoteSwiftPackageReference "OpenSSL-Swift-Package" */,
+				5641504F52504B4700000001 /* XCRemoteSwiftPackageReference "vapor" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CFC214850958184838F815CE /* Products */;
@@ -207,7 +215,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_CXX_LIBRARY = "libc++";
 				CODE_SIGN_ENTITLEMENTS = "unzip-drop.entitlements";
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Sources/zsign",
+					"$(SRCROOT)/Sources/zsign/common",
+				);
+				SWIFT_OBJC_BRIDGING_HEADER = "Sources/unzip-drop-Bridging-Header.h";
+				SWIFT_OBJC_INTEROP_MODE = objc;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
@@ -242,7 +259,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_CXX_LIBRARY = "libc++";
 				CODE_SIGN_ENTITLEMENTS = "unzip-drop.entitlements";
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Sources/zsign",
+					"$(SRCROOT)/Sources/zsign/common",
+				);
+				SWIFT_OBJC_BRIDGING_HEADER = "Sources/unzip-drop-Bridging-Header.h";
+				SWIFT_OBJC_INTEROP_MODE = objc;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
@@ -304,6 +330,22 @@
 				minimumVersion = 0.9.20;
 			};
 		};
+		504B4753534C000000000001 /* XCRemoteSwiftPackageReference "OpenSSL-Swift-Package" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/HAHALOSAH/OpenSSL-Swift-Package";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+		5641504F52504B4700000001 /* XCRemoteSwiftPackageReference "vapor" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/vapor/vapor";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.104.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -311,6 +353,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 61EDEC30A5F63ED366D136AF /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
+		};
+		50524F4453534C0000000001 /* OpenSSL */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 504B4753534C000000000001 /* XCRemoteSwiftPackageReference "OpenSSL-Swift-Package" */;
+			productName = OpenSSL;
+		};
+		5641504F52500000000001 /* Vapor */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5641504F52504B4700000001 /* XCRemoteSwiftPackageReference "vapor" */;
+			productName = Vapor;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

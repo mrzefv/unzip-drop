@@ -124,10 +124,10 @@ enum TutorialLibrary {
                 body: "Build tab › the run appears within seconds. Steps: Install Theos › Build › Upload dylib. Tap a run to follow the steps live. Red step = tap Open on GitHub for the log, fix Tweak.xm in Contents, Push again."),
             TutorialStep(
                 title: "Download the artifact",
-                body: "When the run completes, the artifacts list shows <name>-dylib. Tap it → share sheet → Save to Files (or straight into mSign)."),
+                body: "When the run completes, the artifacts list shows the build output. IPA artifacts jump straight into the Sign tab; a dylib artifact opens the share sheet — Save to Files, then add it as an extra dylib when signing."),
             TutorialStep(
-                title: "Inject with mSign",
-                body: "mSign › IPA › Sign › Extra dylibs › add your dylib (keep FLEX too while iterating). Sign, install, open the app. Console (or NSLog via FLEX › System Log) shows your [Tweak] loaded line first.",
+                title: "Sign & install",
+                body: "Sign tab › pick the target IPA › Sign with your cert › Install. The install runs over the on-device loopback OTA server, same as mSign. For dylib injection keep using mSign's extra-dylibs step (keep FLEX in while iterating). Console / FLEX › System Log shows your [Tweak] loaded line first.",
                 tip: "Iterate: edit Tweak.xm in Contents → Push → Build → re-sign. Whole loop runs from the phone."),
             TutorialStep(
                 title: "Ship",

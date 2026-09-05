@@ -29,7 +29,7 @@ final class Session: ObservableObject {
 
     private func ingest(_ url: URL) async {
         busy = true
-        status = "Readingâ¦"
+        status = "Reading…"
         errorMessage = nil
 
         // 1. Copy the source into our sandbox (handles iCloud / in-place / Inbox).
@@ -42,7 +42,7 @@ final class Session: ObservableObject {
         }
 
         // 2. Extract off the main thread.
-        status = "Extractingâ¦"
+        status = "Extracting…"
         let prev = root
         let result = await Self.extract(copied)
 
@@ -116,7 +116,7 @@ final class Session: ObservableObject {
     /// Contents / Push / Build tabs treat it exactly like an extracted zip.
     func loadGenerated(name: String, files: [(path: String, content: String)]) {
         lastEventID = UUID()
-        busy = true; status = "Generatingâ¦"; errorMessage = nil
+        busy = true; status = "Generating…"; errorMessage = nil
         let prev = root
         let wrapper = FileManager.default.temporaryDirectory
             .appendingPathComponent("gen-" + UUID().uuidString, isDirectory: true)
@@ -136,7 +136,7 @@ final class Session: ObservableObject {
         }
         if let prev { try? FileManager.default.removeItem(at: prev.deletingLastPathComponent()) }
         root = dir; archiveName = name; fileCount = count; totalBytes = bytes
-        busy = false; status = "Generated \(count) files â review in Contents, then Push"
+        busy = false; status = "Generated \(count) files — review in Contents, then Push"
     }
 
     func reset() {

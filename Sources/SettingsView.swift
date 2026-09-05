@@ -12,11 +12,13 @@ import SwiftUI
 private enum Screen: Identifiable, Hashable {
     case about, repo, token
     case dylibTemplate, ipaTemplate
+    case certificates, otaDomain
     case tutorial(String)
     var id: String {
         switch self {
         case .about: return "about"; case .repo: return "repo"; case .token: return "token"
         case .dylibTemplate: return "tpl-dylib"; case .ipaTemplate: return "tpl-ipa"
+        case .certificates: return "certs"; case .otaDomain: return "ota"
         case .tutorial(let t): return "tut-" + t
         }
     }
@@ -25,6 +27,7 @@ private enum Screen: Identifiable, Hashable {
 struct SettingsView: View {
     @EnvironmentObject var config: Config
     @EnvironmentObject var session: Session
+    @ObservedObject private var certs = CertificateStore.shared
     @State private var screen: Screen?
 
     var body: some View {
@@ -47,6 +50,13 @@ struct SettingsView: View {
                             SettingsRow(icon: "key.fill",
                                         title: "Access token",
                                         subtitle: config.hasToken ? "GitHub PAT stored in Keychain" : "No token set") { screen = .token }
+                        }
+
+                        SettingsSection("Signing") {
+                            SettingsRow(icon: "checkmark.seal.fill", title: "Certificates",
+                                        subtitle: certs.active?.name ?? "No signing certificate") { screen = .certificates }
+                            SettingsRow(icon: "network", title: "On-Device OTA Domain",
+                                        subtitle: "\(ServerConfig.installHost) · backloop.dev") { screen = .otaDomain }
                         }
 
                         SettingsSection("Templates") {
@@ -84,6 +94,8 @@ struct SettingsView: View {
                 case .about: AboutScreen()
                 case .repo:  RepoScreen()
                 case .token: TokenScreen()
+                case .certificates:  CertificatesScreen()
+                case .otaDomain:     OTADomainScreen()
                 case .dylibTemplate: DylibTemplateScreen()
                 case .ipaTemplate:   IPATemplateScreen()
                 case .tutorial(let id):
@@ -558,5 +570,127 @@ private struct IPATemplateScreen: View {
             Text("Then: Push → Build tab → download <name>-ipa → sign in mSign.")
                 .font(.caption2).foregroundStyle(Theme.subtle)
         }
+    }
+}
+
+
+// MARK: - OTA domain (backloop.dev)
+
+private struct OTADomainScreen: View {
+    @State private var host = ServerConfig.installHost
+    @State private var saved = false
+    @State private var refreshing = false
+    @State private var meta = BackloopCert.meta
+    @State private var cached = BackloopCert.hasCached
+    @State private var error: String?
+
+    private var clean: String {
+        host.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+    private var hostOK: Bool { clean.lowercased().hasSuffix(".backloop.dev") }
+
+    var body: some View {
+        DetailScreen(title: "On-Device OTA Domain") {
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Install host", systemImage: "network").font(.headline).foregroundStyle(Theme.text)
+                    Text("Installs run over an on-device Vapor HTTPS server. Any *.backloop.dev name resolves to 127.0.0.1, and backloop.dev publishes the matching wildcard cert + key. iOS trusts it, connects to loopback, installs.")
+                        .font(.caption).foregroundStyle(Theme.subtle)
+                    Field(label: "Host", text: $host, placeholder: "DELvEK.backloop.dev", keyboard: .URL)
+                    if !hostOK {
+                        Text("Host must end in .backloop.dev to match the cert.").font(.caption).foregroundStyle(.orange)
+                    }
+                    Button {
+                        ServerConfig.setInstallHost(clean.isEmpty ? "DELvEK.backloop.dev" : clean)
+                        host = ServerConfig.installHost; saved = true
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    } label: {
+                        HStack { Image(systemName: saved ? "checkmark.circle.fill" : "network"); Text(saved ? "Saved" : "Save host").fontWeight(.semibold); Spacer() }
+                            .padding(.vertical, 12).padding(.horizontal, 14)
+                            .background(hostOK ? Theme.accent : Theme.subtle).foregroundStyle(.black)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .disabled(!hostOK)
+                }
+            }
+            Card {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label("Certificate", systemImage: "lock.shield.fill").font(.headline).foregroundStyle(Theme.text)
+                        Spacer()
+                        statusPill
+                    }
+                    kv("Source", "https://backloop.dev/pack.json")
+                    kv("Common name", meta?.commonName ?? (cached ? "*.backloop.dev" : "—"))
+                    kv("Expires", meta?.notAfter.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
+                    kv("Fetched", meta?.fetchedAt.formatted(date: .abbreviated, time: .shortened) ?? "never")
+                    if let error { Text(error).font(.caption).foregroundStyle(.orange) }
+                    HStack(spacing: 10) {
+                        Button { Task { await refresh() } } label: {
+                            HStack {
+                                if refreshing { ProgressView().tint(.black) } else { Image(systemName: "arrow.triangle.2.circlepath") }
+                                Text(refreshing ? "Fetching…" : (cached ? "Refresh certificate" : "Fetch certificate")).fontWeight(.semibold)
+                                Spacer()
+                            }
+                            .padding(.vertical, 12).padding(.horizontal, 14)
+                            .background(Theme.accent).foregroundStyle(.black)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .disabled(refreshing)
+                        if cached {
+                            Button {
+                                BackloopCert.clearCache(); meta = nil; cached = false
+                            } label: {
+                                Image(systemName: "trash").frame(width: 46, height: 46)
+                                    .background(Theme.card).foregroundStyle(.orange)
+                                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                        }
+                    }
+                    Text("Auto-refreshes before it's \(ServerConfig.refreshBufferDays) days from expiry whenever you install. Works offline once cached.")
+                        .font(.caption2).foregroundStyle(Theme.subtle)
+                }
+            }
+            Card {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Manifest URL shape").font(.headline).foregroundStyle(Theme.text)
+                    Text("https://\(ServerConfig.installHost):<port>/<id>.plist")
+                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.accent)
+                    Text("Same pipeline as mSign: Vapor + NIOSSL on-device, backloop.dev wildcard, itms-services hand-off.")
+                        .font(.caption).foregroundStyle(Theme.subtle)
+                }
+            }
+        }
+        .onChange(of: host) { _ in saved = false }
+        .onAppear { meta = BackloopCert.meta; cached = BackloopCert.hasCached }
+    }
+
+    private var statusPill: some View {
+        let expired = (meta?.notAfter ?? .distantFuture) < Date()
+        let color: Color = !cached ? .orange : (expired ? .red : .green)
+        let text = !cached ? "NOT FETCHED" : (expired ? "EXPIRED" : "READY")
+        return Text(text).font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(1)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(color.opacity(0.18)).foregroundStyle(color).clipShape(Capsule())
+    }
+
+    private func kv(_ k: String, _ v: String) -> some View {
+        HStack {
+            Text(k).font(.caption).foregroundStyle(Theme.subtle)
+            Spacer()
+            Text(v).font(.caption.monospaced()).foregroundStyle(Theme.text).lineLimit(1)
+        }
+    }
+
+    private func refresh() async {
+        refreshing = true; error = nil
+        do {
+            meta = try await BackloopCert.fetch(); cached = true
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch { self.error = error.localizedDescription }
+        refreshing = false
     }
 }

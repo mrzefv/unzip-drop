@@ -9,6 +9,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject var session: Session
+    @ObservedObject private var signQueue = SignQueue.shared
     @State private var tab = 0
 
     var body: some View {
@@ -21,6 +22,7 @@ struct RootView: View {
                 case 1: ContentsView()
                 case 2: PushView()
                 case 3: BuildView()
+                case 4: SignView()
                 default: SettingsView()
                 }
             }
@@ -30,6 +32,9 @@ struct RootView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .onChange(of: session.lastEventID) { _ in tab = 0 }
+        .onChange(of: signQueue.requestedTab) { t in
+            if let t { tab = t; signQueue.requestedTab = nil }
+        }
     }
 }
 
@@ -41,6 +46,7 @@ private struct TabBar: View {
         ("Contents", "folder.fill"),
         ("Push",     "arrow.up.circle.fill"),
         ("Build",    "hammer.fill"),
+        ("Sign",     "signature"),
         ("Settings", "gearshape.fill"),
     ]
 
@@ -49,8 +55,8 @@ private struct TabBar: View {
             ForEach(Array(tabs.enumerated()), id: \.offset) { i, t in
                 Button { selection = i } label: {
                     VStack(spacing: 4) {
-                        Image(systemName: t.icon).font(.system(size: 20))
-                        Text(t.label).font(.system(size: 11, weight: .medium))
+                        Image(systemName: t.icon).font(.system(size: 19))
+                        Text(t.label).font(.system(size: 10, weight: .medium))
                     }
                     .foregroundStyle(selection == i ? Theme.accent : Theme.subtle)
                     .frame(maxWidth: .infinity)

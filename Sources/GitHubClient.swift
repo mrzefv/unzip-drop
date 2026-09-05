@@ -49,6 +49,22 @@ struct GitHubClient {
         return obj
     }
 
+    /// Verify the token can see the repo + branch. Returns a short summary.
+    func verify() async throws -> (fullName: String, branch: String, permission: String) {
+        guard !owner.isEmpty, !repo.isEmpty else { throw GitHubError.badConfig("Set owner and repo first.") }
+        guard !token.isEmpty else { throw GitHubError.badConfig("Add a GitHub token first.") }
+        let repoPath = "/repos/\(owner)/\(repo)"
+        let r = try await call(repoPath)
+        let fullName = r["full_name"] as? String ?? "\(owner)/\(repo)"
+        let perms = r["permissions"] as? [String: Any] ?? [:]
+        let canPush = (perms["push"] as? Bool) ?? false
+        do { _ = try await call("\(repoPath)/git/ref/heads/\(branch)") }
+        catch let GitHubError.http(code, _) where code == 404 {
+            throw GitHubError.badConfig("Repo reachable, but branch '\(branch)' doesn't exist.")
+        }
+        return (fullName, branch, canPush ? "write access" : "read-only (pushes will fail)")
+    }
+
     /// Push files, returning the new commit's html URL.
     func push(files: [(path: String, data: Data)],
               subpath: String,

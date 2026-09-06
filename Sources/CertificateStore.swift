@@ -54,6 +54,26 @@ nonisolated enum AppPaths {
     }
 }
 
+/// Parsed provisioning-profile facts. `expires` is the canonical field;
+/// `expirationDate` and the status helpers exist for the analytics / widget / search code.
+nonisolated struct ProfileInfo: Sendable {
+    var name: String? = nil
+    var team: String? = nil
+    var expires: Date? = nil
+    var udids: [String] = []
+
+    var expirationDate: Date? { expires }
+    var daysUntilExpiry: Int? {
+        guard let e = expires else { return nil }
+        return Calendar.current.dateComponents([.day], from: Date(), to: e).day
+    }
+    var isExpired: Bool { (expires ?? .distantFuture) < Date() }
+    var isExpiringSoon: Bool {
+        guard let d = daysUntilExpiry else { return false }
+        return d >= 0 && d <= 14
+    }
+}
+
 // MARK: - Certificate store
 
 @MainActor
@@ -122,16 +142,17 @@ final class CertificateStore: ObservableObject {
         return CertMaterial(p12: p12, provision: mp, password: Keychain.get("cert-" + c.id) ?? "", name: c.name)
     }
 
-    /// Read expiry + team from the provisioning profile (best effort).
-    nonisolated static func profileInfo(_ provision: Data) -> (name: String?, team: String?, expires: Date?) {
-        // .mobileprovision is a CMS envelope around a plist; the plist is readable in the clear.
+    /// Read name / team / expiry from the provisioning profile (best effort).
+    /// The .mobileprovision is a CMS envelope around a plist; the plist is readable in the clear.
+    nonisolated static func profileInfo(_ provision: Data) -> ProfileInfo {
         guard let s = String(data: provision, encoding: .isoLatin1),
-              let a = s.range(of: "<?xml"), let b = s.range(of: "</plist>") else { return (nil, nil, nil) }
+              let a = s.range(of: "<?xml"), let b = s.range(of: "</plist>") else { return ProfileInfo() }
         let xml = String(s[a.lowerBound..<b.upperBound])
         guard let d = xml.data(using: .isoLatin1),
-              let plist = try? PropertyListSerialization.propertyList(from: d, format: nil) as? [String: Any] else { return (nil, nil, nil) }
+              let plist = try? PropertyListSerialization.propertyList(from: d, format: nil) as? [String: Any] else { return ProfileInfo() }
         let team = (plist["TeamName"] as? String) ?? (plist["TeamIdentifier"] as? [String])?.first
-        return (plist["Name"] as? String, team, plist["ExpirationDate"] as? Date)
+        return ProfileInfo(name: plist["Name"] as? String, team: team, expires: plist["ExpirationDate"] as? Date,
+                           udids: plist["ProvisionedDevices"] as? [String] ?? [])
     }
 
     nonisolated static func p12IsValid(_ data: Data, password: String) -> Bool {

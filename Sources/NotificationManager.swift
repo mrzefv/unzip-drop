@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import UIKit
 import UserNotifications
 
 @MainActor
@@ -80,7 +81,7 @@ final class NotificationManager: ObservableObject {
         content.title = "Monthly Backup Reminder"
         content.body = "Back up your certificates to prevent data loss"
         content.sound = .default
-        content.badge = NSNumber(value: UIApplication.shared.applicationIconBadgeNumber + 1)
+        content.badge = 1
         
         let request = UNNotificationRequest(identifier: "backup-reminder", content: content, trigger: trigger)
         UNUserNotificationCenter.current().add(request) { _ in }
@@ -113,7 +114,7 @@ final class NotificationManager: ObservableObject {
         content.title = title
         content.body = body
         content.sound = .default
-        content.badge = NSNumber(value: UIApplication.shared.applicationIconBadgeNumber + 1)
+        content.badge = 1
         content.userInfo = ["certID": id]
         
         let trigger = UNCalendarNotificationTrigger(

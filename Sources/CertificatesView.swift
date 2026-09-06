@@ -159,7 +159,7 @@ struct CertificatesScreen: View {
 
     private func certRow(_ c: Certificate) -> some View {
         let active = store.activeID == c.id
-        let info = (try? Data(contentsOf: c.provisionURL)).map(CertificateStore.profileInfo) ?? (nil, nil, nil)
+        let info = (try? Data(contentsOf: c.provisionURL)).map(CertificateStore.profileInfo) ?? ProfileInfo()
         return HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous).fill(active ? Theme.accent.opacity(0.18) : Theme.bg)

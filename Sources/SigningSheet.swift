@@ -153,10 +153,10 @@ struct SigningSheet: View {
     }
 
     private func certSubtitle(_ c: Certificate) -> String {
-        let info = (try? Data(contentsOf: c.provisionURL)).map(CertificateStore.profileInfo)
+        let info = (try? Data(contentsOf: c.provisionURL)).map(CertificateStore.profileInfo) ?? ProfileInfo()
         var parts: [String] = []
-        if let t = info??.team { parts.append("Team \(t)") }
-        if let e = info??.expires { parts.append("Expires " + e.formatted(date: .abbreviated, time: .omitted)) }
+        if let t = info.team { parts.append("Team \(t)") }
+        if let e = info.expires { parts.append("Expires " + e.formatted(date: .abbreviated, time: .omitted)) }
         return parts.isEmpty ? "On-device certificate" : parts.joined(separator: " · ")
     }
 

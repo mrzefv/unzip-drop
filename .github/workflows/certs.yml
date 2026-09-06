@@ -101,11 +101,10 @@ jobs:
           echo "need=$NEED" >> "$GITHUB_OUTPUT"
           echo "Renew: $NEED"
 
-      - name: Install certbot + dig
+      - name: Install certbot
         if: steps.decide.outputs.need == 'yes'
         run: |
           set -euo pipefail
-          sudo apt-get update -qq && sudo apt-get install -y -qq bind9-dnsutils >/dev/null
           python3 -m pip install --quiet --upgrade pip
           if [ "$DNS_MODE" = "cloudflare" ]; then python3 -m pip install --quiet certbot certbot-dns-cloudflare
           else python3 -m pip install --quiet certbot; fi
@@ -136,8 +135,12 @@ jobs:
             --key-type ecdsa --elliptic-curve secp256r1 \
             --cert-name "$CERT_DOMAIN" \
             -d "*.${CERT_DOMAIN}" -d "${CERT_DOMAIN}"
-          cp "le/live/${CERT_DOMAIN}/fullchain.pem" "$CERTS_WT/server.crt"
-          cp "le/live/${CERT_DOMAIN}/privkey.pem"   "$CERTS_WT/server.pem"
+          LIVE=$(ls -d le/live/*/ 2>/dev/null | grep -vi README | head -1)
+          [ -n "$LIVE" ] || { echo "::error::certbot produced no le/live/* directory"; exit 1; }
+          echo "cert dir: $LIVE"
+          cp "${LIVE}fullchain.pem" "$CERTS_WT/server.crt"
+          cp "${LIVE}privkey.pem"   "$CERTS_WT/server.pem"
+          openssl x509 -in "$CERTS_WT/server.crt" -noout -subject -enddate
           rm -rf le
 
       - name: Issue certificate — Cloudflare DNS-01 (automated)
@@ -154,8 +157,10 @@ jobs:
             --dns-cloudflare --dns-cloudflare-credentials ./dns.ini --dns-cloudflare-propagation-seconds 60 \
             --key-type ecdsa --elliptic-curve secp256r1 --cert-name "$CERT_DOMAIN" \
             -d "*.${CERT_DOMAIN}" -d "${CERT_DOMAIN}"
-          cp "le/live/${CERT_DOMAIN}/fullchain.pem" "$CERTS_WT/server.crt"
-          cp "le/live/${CERT_DOMAIN}/privkey.pem"   "$CERTS_WT/server.pem"
+          LIVE=$(ls -d le/live/*/ 2>/dev/null | grep -vi README | head -1)
+          [ -n "$LIVE" ] || { echo "::error::certbot produced no le/live/* directory"; exit 1; }
+          cp "${LIVE}fullchain.pem" "$CERTS_WT/server.crt"
+          cp "${LIVE}privkey.pem"   "$CERTS_WT/server.pem"
           rm -f dns.ini; rm -rf le
 
       - name: Write pack.json & publish
@@ -163,6 +168,8 @@ jobs:
         run: |
           set -euo pipefail
           cd "$CERTS_WT"
+          [ -s server.crt ] && [ -s server.pem ] || { echo "::error::server.crt/server.pem missing — issuance failed before publish"; exit 1; }
+          openssl x509 -in server.crt -noout >/dev/null || { echo "::error::server.crt is not a valid certificate"; exit 1; }
           END=$(openssl x509 -in server.crt -noout -enddate | cut -d= -f2)
           START=$(openssl x509 -in server.crt -noout -startdate | cut -d= -f2)
           EXP_ISO=$(date -u -d "$END"   +%Y-%m-%dT%H:%M:%SZ)
@@ -186,7 +193,17 @@ jobs:
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > challenge.json
           git add server.crt server.pem pack.json challenge.json
           git commit -qm "renew *.${CERT_DOMAIN} — expires $EXP_ISO"
-          git push -q origin "$CERTS_BRANCH"
+          # The auth hook pushed challenge.json commits during the run, so our
+          # local branch is behind origin. Rebase and retry so the push lands.
+          for attempt in 1 2 3; do
+            if git push origin "$CERTS_BRANCH"; then echo "pushed (attempt $attempt)"; break; fi
+            echo "push rejected — rebasing onto origin/$CERTS_BRANCH (attempt $attempt)"
+            git fetch -q origin "$CERTS_BRANCH"
+            git rebase -X ours "origin/$CERTS_BRANCH" || git rebase --abort
+            [ "$attempt" = 3 ] && { echo "::error::could not push cert to $CERTS_BRANCH after 3 tries"; exit 1; }
+          done
+          echo "verify on origin:"
+          git ls-tree --name-only "origin/$CERTS_BRANCH" | grep -E "server.crt|server.pem|pack.json" || echo "::warning::files not visible on origin listing yet"
           openssl x509 -in server.crt -noout -subject -issuer -enddate
 
       - name: Summary

@@ -170,7 +170,7 @@ nonisolated enum ZefvCert {
             let (d, resp) = try await URLSession.shared.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             guard code < 400, !d.isEmpty else {
-                throw CertError.badPack("\(o)/\(r)@\(b)/\(path) → HTTP \(code). Run the 'OTA certs' workflow once, and make sure the token can read the repo.")
+                throw CertError.badPack("\(o)/\(r)@\(b)/\(path) → HTTP \(code). The cert files aren't on the certs branch yet. If the last run showed VALIDATED, its publish step failed — open the run's 'Write pack.json & publish' step, or tap Renew now to re-issue. Also confirm the token can read this repo.")
             }
             return d
         }

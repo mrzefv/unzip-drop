@@ -182,7 +182,7 @@ struct SourcesView: View {
 
     private var sourcesBody: some View {
         ZStack {
-            Theme.bg.ignoresSafeArea()
+            Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
                 HStack {
                     Text("Sources").font(.title2.bold()).foregroundStyle(Theme.text)
@@ -200,7 +200,7 @@ struct SourcesView: View {
                     ForEach(store.sources) { s in
                         NavigationLink(value: s) { sourceRow(s) }
                             .disabled(editing)
-                            .listRowBackground(Theme.bg)
+                            .listRowBackground(Color.black)
                             .listRowSeparatorTint(Theme.stroke)
                             .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                             .swipeActions { Button(role: .destructive) { store.remove(s) } label: { Label("Remove", systemImage: "trash") } }
@@ -278,36 +278,41 @@ private struct SourceDetailScreen: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            countBar
-            if showSearch {
-                TextField("Search \(current.name)", text: $search)
-                    .autocorrectionDisabled().textInputAutocapitalization(.never)
-                    .padding(10).background(Theme.card).foregroundStyle(Theme.text)
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding(.horizontal, 16).padding(.vertical, 8)
-            }
+        List {
             if let error {
-                Card { Text(error).font(.caption).foregroundStyle(.orange) }.padding(16)
+                Card { Text(error).font(.caption).foregroundStyle(.orange) }
+                    .listRowBackground(Color.black).listRowSeparator(.hidden)
             }
-            List {
                 if loading {
-                    HStack { Spacer(); ProgressView().tint(Theme.accent); Spacer() }.listRowBackground(Theme.bg).listRowSeparator(.hidden)
+                    HStack { Spacer(); ProgressView().tint(Theme.accent); Spacer() }.listRowBackground(Color.black).listRowSeparator(.hidden)
                 }
                 ForEach(apps) { app in
                     appRow(app)
-                        .listRowBackground(Theme.bg)
+                        .listRowBackground(Color.black)
                         .listRowSeparatorTint(Theme.stroke)
                         .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
                 }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .refreshable { await load() }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .refreshable { await load() }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                header
+                countBar
+                if showSearch {
+                    TextField("Search \(current.name)", text: $search)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                        .padding(10).background(Theme.card.opacity(0.8)).foregroundStyle(Theme.text)
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                }
+            }
+            .background(BarBlur())
+            .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
         }
-        .background(Theme.bg.ignoresSafeArea())
+        .background(Color.black.ignoresSafeArea())
         .task { await load() }
         .sheet(item: $openApp) { app in
             AppDetailSheet(source: current, app: app)
@@ -324,8 +329,8 @@ private struct SourceDetailScreen: View {
             }
             Spacer()
             HStack(spacing: 10) {
-                SourceIcon(url: current.iconURL, side: 44, fallback: current.name)
-                Text(current.name.uppercased()).font(.system(size: 26, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                SourceIcon(url: current.iconURL, side: 34, fallback: current.name)
+                Text(current.name.uppercased()).font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
             }
             Spacer()
             Button { withAnimation { showSearch.toggle() } } label: {
@@ -341,32 +346,30 @@ private struct SourceDetailScreen: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(Theme.bg)
     }
 
     private var countBar: some View {
         HStack {
-            Text("\(apps.count.formatted()) Apps").font(.system(size: 26, weight: .semibold)).foregroundStyle(Theme.text)
+            Text("\(apps.count.formatted()) Apps").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.text)
             Spacer()
-            Text((current.author ?? parsed?.author ?? current.url.host ?? "").uppercased())
-                .font(.system(size: 22, weight: .bold)).foregroundStyle(Color(red: 0.95, green: 0.25, blue: 0.25)).kerning(0.5).lineLimit(1)
+            Text("signature.zh by MrZEfv")
+                .font(.system(size: 16, weight: .bold)).foregroundStyle(Color(red: 0.95, green: 0.25, blue: 0.25)).kerning(0.3).lineLimit(1)
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
-        .background(Theme.card.opacity(0.5))
-        .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(Color.white.opacity(0.04))
     }
 
     private func appRow(_ app: SourceApp) -> some View {
         let have = signed.entries.contains { $0.bundleID == app.bundle } || IPAInbox.has(app)
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 14) {
-                SourceIcon(url: app.iconURL, side: 96, fallback: app.name)
+                SourceIcon(url: app.iconURL, side: 72, fallback: app.name)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(app.name).font(.system(size: 30, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                    Text(app.name).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
                     Text("\(app.sizeMB) | \(app.version) | \(app.subtitle)")
-                        .font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                        .font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
                     if !app.description.isEmpty {
-                        Text(app.description).font(.system(size: 17)).foregroundStyle(Theme.subtle).lineLimit(1)
+                        Text(app.description).font(.system(size: 14)).foregroundStyle(Theme.subtle).lineLimit(1)
                     }
                 }
                 .contentShape(Rectangle())
@@ -381,15 +384,15 @@ private struct SourceDetailScreen: View {
                                     Circle().trim(from: 0, to: max(0.05, progress)).stroke(Theme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round)).rotationEffect(.degrees(-90))
                                 }
                             } else if have {
-                                Image(systemName: "checkmark").font(.system(size: 28, weight: .bold))
+                                Image(systemName: "checkmark").font(.system(size: 22, weight: .bold))
                             } else {
-                                Image(systemName: "arrow.down").font(.system(size: 28, weight: .bold))
+                                Image(systemName: "arrow.down").font(.system(size: 22, weight: .bold))
                             }
                         }
-                        .frame(width: 44, height: 44).foregroundStyle(Theme.accent)
+                        .frame(width: 36, height: 36).foregroundStyle(Theme.accent)
                     }
                     .disabled(downloading != nil || app.downloadURL == nil)
-                    Text("Views: \(app.downloads)").font(.system(size: 15)).foregroundStyle(Theme.subtle)
+                    Text("Views: \(app.downloads)").font(.system(size: 12)).foregroundStyle(Theme.subtle)
                 }
             }
             .contentShape(Rectangle())
@@ -402,9 +405,9 @@ private struct SourceDetailScreen: View {
                                 if let img = phase.image { img.resizable().scaledToFill() }
                                 else { Theme.card.overlay(ProgressView().tint(Theme.accent)) }
                             }
-                            .frame(width: 262, height: 566)
-                            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+                            .frame(width: 190, height: 410)
+                            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
                             .onTapGesture { openApp = app }
                         }
                     }
@@ -530,24 +533,25 @@ struct AppDetailSheet: View {
             // Title bar
             ZStack {
                 HStack(spacing: 8) {
-                    SourceIcon(url: source.iconURL, side: 34, fallback: source.name)
-                    Text(source.name.uppercased()).font(.system(size: 20, weight: .bold)).kerning(1).foregroundStyle(Theme.text)
+                    SourceIcon(url: source.iconURL, side: 26, fallback: source.name)
+                    Text(source.name.uppercased()).font(.system(size: 16, weight: .bold)).kerning(1).foregroundStyle(Theme.text)
                 }
                 HStack {
                     Spacer()
                     Button { dismiss() } label: {
                         Image(systemName: "xmark").font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.text)
-                            .frame(width: 44, height: 44).background(Theme.card).clipShape(Circle())
+                            .frame(width: 36, height: 36).background(Theme.card).clipShape(Circle())
                     }
                 }
             }
             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 10)
+            .background(BarBlur())
             .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
                     infoCard
-                    Text("SCREENSHOTS").font(.system(size: 20, weight: .bold)).kerning(1.5).foregroundStyle(Theme.subtle)
+                    Text("SCREENSHOTS").font(.system(size: 14, weight: .bold)).kerning(1.5).foregroundStyle(Theme.subtle)
                     if app.screenshots.isEmpty {
                         Text("No screenshots.").font(.caption).foregroundStyle(Theme.subtle)
                     } else {
@@ -558,14 +562,14 @@ struct AppDetailSheet: View {
                                         if let img = phase.image { img.resizable().scaledToFill() }
                                         else { Theme.card.overlay(ProgressView().tint(blue)) }
                                     }
-                                    .frame(width: 262, height: 566)
-                                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                                    .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+                                    .frame(width: 190, height: 410)
+                                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
                                 }
                             }
                         }
                     }
-                    Text("1 Versions Available").font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.subtle)
+                    Text("1 Versions Available").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.subtle)
                     versionRow
                     if downloading || onDevice { serverDownloadCard }
                     if let error { Text(error).font(.caption).foregroundStyle(.orange) }
@@ -573,8 +577,9 @@ struct AppDetailSheet: View {
                 }
                 .padding(16)
             }
-
-            bottomBar
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                bottomBar.background(BarBlur())
+            }
         }
         .background(Color.black.ignoresSafeArea())
         .onAppear { onDevice = IPAInbox.has(app); if onDevice { progress = 1 } }
@@ -584,44 +589,44 @@ struct AppDetailSheet: View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .top, spacing: 16) {
-                    SourceIcon(url: app.iconURL, side: 110, fallback: app.name)
-                        .shadow(color: blue.opacity(0.55), radius: 18)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(app.name).font(.system(size: 28, weight: .bold)).foregroundStyle(Theme.text).lineLimit(2)
+                    SourceIcon(url: app.iconURL, side: 76, fallback: app.name)
+                        .shadow(color: blue.opacity(0.55), radius: 14)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(app.name).font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text).lineLimit(2).minimumScaleFactor(0.8)
                         Text(app.subtitle.isEmpty ? (source.url.host ?? "") : app.subtitle)
-                            .font(.system(size: 17, design: .monospaced)).foregroundStyle(blue).lineLimit(1)
-                        Text("BUNDLE: \(app.bundle)").font(.system(size: 14, design: .monospaced)).foregroundStyle(blue.opacity(0.8)).lineLimit(1)
+                            .font(.system(size: 13, design: .monospaced)).foregroundStyle(blue).lineLimit(1)
+                        Text(app.bundle).font(.system(size: 11, design: .monospaced)).foregroundStyle(blue.opacity(0.8)).lineLimit(1).truncationMode(.middle)
                     }
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    Text((source.author ?? "MRzefv").uppercased() + " EDITION").font(.system(size: 20, weight: .bold)).kerning(1).foregroundStyle(blue)
-                    HStack(alignment: .top, spacing: 8) {
+                    Text((source.author ?? "MRzefv").uppercased() + " EDITION").font(.system(size: 14, weight: .bold)).kerning(1).foregroundStyle(blue)
+                    HStack(alignment: .top, spacing: 6) {
                         Text("•").foregroundStyle(blue)
-                        Text(app.description.isEmpty ? "No description." : app.description).font(.system(size: 20)).foregroundStyle(Theme.text)
+                        Text(app.description.isEmpty ? "No description." : app.description).font(.system(size: 14)).foregroundStyle(Theme.text)
                     }
                 }
-                .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.white.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 18))
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.white.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 14))
             }
-            VStack(spacing: 12) {
+            VStack(spacing: 8) {
                 stat("v\(app.version)", "VERSION")
                 stat(app.sizeMB, "SIZE")
                 stat(updatedText, "UPDATED")
                 stat(app.downloads, "DOWNLOADS")
                 stat(signed.entries.filter { $0.bundleID == app.bundle }.count.description, "SIGNED")
             }
-            .frame(width: 118)
+            .frame(width: 92)
         }
-        .padding(16)
-        .background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(12)
+        .background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func stat(_ v: String, _ k: String) -> some View {
         VStack(spacing: 4) {
-            Text(v).font(.system(size: 22, weight: .bold)).foregroundStyle(blue).lineLimit(1).minimumScaleFactor(0.6)
-            Text(k).font(.system(size: 12, weight: .semibold)).kerning(1.2).foregroundStyle(Theme.subtle)
+            Text(v).font(.system(size: 15, weight: .bold)).foregroundStyle(blue).lineLimit(1).minimumScaleFactor(0.6)
+            Text(k).font(.system(size: 9, weight: .semibold)).kerning(1).foregroundStyle(Theme.subtle)
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 14)
+        .frame(maxWidth: .infinity).padding(.vertical, 10)
         .background(Color.white.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -637,77 +642,77 @@ struct AppDetailSheet: View {
 
     private var versionRow: some View {
         HStack(spacing: 14) {
-            Circle().fill(blue).frame(width: 12, height: 12)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("v\(app.version)").font(.system(size: 26, weight: .bold)).foregroundStyle(Theme.text)
-                Text("\(app.sizeMB)  \(updatedText)").font(.system(size: 20)).foregroundStyle(Theme.subtle)
+            Circle().fill(blue).frame(width: 10, height: 10)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("v\(app.version)").font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text)
+                Text("\(app.sizeMB)  \(updatedText)").font(.system(size: 15)).foregroundStyle(Theme.subtle)
             }
             Spacer()
-            Image(systemName: "checkmark").font(.system(size: 22, weight: .bold)).foregroundStyle(blue)
+            Image(systemName: "checkmark").font(.system(size: 18, weight: .bold)).foregroundStyle(blue)
         }
-        .padding(18)
+        .padding(14)
         .background(Color(red: 0.06, green: 0.09, blue: 0.16))
-        .overlay(RoundedRectangle(cornerRadius: 22).stroke(blue.opacity(0.25), lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(blue.opacity(0.25), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private var serverDownloadCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Server Download").font(.system(size: 24, weight: .bold)).foregroundStyle(Theme.subtle)
+                Text("Server Download").font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.subtle)
                 Spacer()
-                if !onDevice { Text("\(Int(progress * 100))%").font(.system(size: 20, weight: .bold)).foregroundStyle(blue) }
+                if !onDevice { Text("\(Int(progress * 100))%").font(.system(size: 15, weight: .bold)).foregroundStyle(blue) }
             }
             GeometryReader { g in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.08)).frame(height: 12)
-                    Capsule().fill(onDevice ? Color.green : blue).frame(width: max(12, g.size.width * progress), height: 12)
+                    Capsule().fill(Color.white.opacity(0.08)).frame(height: 8)
+                    Capsule().fill(onDevice ? Color.green : blue).frame(width: max(8, g.size.width * progress), height: 8)
                 }
             }
-            .frame(height: 12)
+            .frame(height: 8)
             VStack(alignment: .leading, spacing: 8) {
-                Label("Downloading to device…", systemImage: "arrow.down.square.fill").font(.system(size: 19, design: .monospaced)).foregroundStyle(Theme.subtle)
-                Label(source.url.host ?? source.name, systemImage: "globe").font(.system(size: 19, design: .monospaced)).foregroundStyle(blue)
+                Label("Downloading to device…", systemImage: "arrow.down.square.fill").font(.system(size: 14, design: .monospaced)).foregroundStyle(Theme.subtle)
+                Label(source.url.host ?? source.name, systemImage: "globe").font(.system(size: 14, design: .monospaced)).foregroundStyle(blue)
                 if onDevice {
                     Label("\(ByteCountFormatter.string(fromByteCount: IPAInbox.size(app), countStyle: .file)) on device — no re-download at sign", systemImage: "checkmark.square.fill")
-                        .font(.system(size: 19, design: .monospaced)).foregroundStyle(blue)
+                        .font(.system(size: 13, design: .monospaced)).foregroundStyle(blue)
                 }
             }
         }
-        .padding(18).background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 22))
+        .padding(14).background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private var bottomBar: some View {
         HStack {
             Button { Task { await download() } } label: {
-                VStack(spacing: 6) {
-                    if downloading { ProgressView().tint(blue).scaleEffect(1.4).frame(height: 44) }
-                    else if onDevice { Image(systemName: "checkmark.circle.fill").font(.system(size: 40)) }
-                    else { Image(systemName: "arrow.down.circle").font(.system(size: 40)) }
-                    Text(downloading ? "Downloading" : (onDevice ? "Downloaded" : "Download")).font(.system(size: 20, weight: .semibold))
+                VStack(spacing: 4) {
+                    if downloading { ProgressView().tint(blue).frame(height: 30) }
+                    else if onDevice { Image(systemName: "checkmark.circle.fill").font(.system(size: 28)) }
+                    else { Image(systemName: "arrow.down.circle").font(.system(size: 28)) }
+                    Text(downloading ? "Downloading" : (onDevice ? "Downloaded" : "Download")).font(.system(size: 14, weight: .semibold))
                 }
-                .foregroundStyle(blue).frame(width: 150)
+                .foregroundStyle(blue).frame(width: 110)
             }
             .disabled(downloading || app.downloadURL == nil)
             Spacer()
-            VStack(spacing: 4) {
-                Text("MRZefv").font(.system(size: 20, weight: .bold)).foregroundStyle(.orange)
-                Text("Powered by \((source.url.host ?? source.name).uppercased())").font(.system(size: 14, weight: .semibold)).foregroundStyle(blue)
+            VStack(spacing: 2) {
+                Text("MRZefv").font(.system(size: 15, weight: .bold)).foregroundStyle(.orange).lineLimit(1)
+                Text("Powered by \((source.url.host ?? source.name).uppercased())").font(.system(size: 10, weight: .semibold)).foregroundStyle(blue).lineLimit(1).minimumScaleFactor(0.7)
             }
+            .frame(maxWidth: .infinity)
             Spacer()
             Button {
                 dismiss(); SignQueue.shared.enqueue(IPAInbox.url(for: app))
             } label: {
-                VStack(spacing: 6) {
-                    Image(systemName: "signature").font(.system(size: 40))
-                    Text("Sign IPA").font(.system(size: 20, weight: .semibold))
+                VStack(spacing: 4) {
+                    Image(systemName: "signature").font(.system(size: 28))
+                    Text("Sign IPA").font(.system(size: 14, weight: .semibold))
                 }
-                .foregroundStyle(onDevice ? blue : Theme.subtle).frame(width: 150)
+                .foregroundStyle(onDevice ? blue : Theme.subtle).frame(width: 110)
             }
             .disabled(!onDevice)
         }
-        .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 6)
-        .background(Color.black)
+        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
         .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .top)
     }
 
@@ -719,5 +724,18 @@ struct AppDetailSheet: View {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch { self.error = error.localizedDescription }
         downloading = false
+    }
+}
+
+
+// MARK: - Bar blur: system blur tinted blackish-grey so bars blend with the black background
+
+struct BarBlur: View {
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial)
+            Color(white: 0.06).opacity(0.72)
+        }
+        .ignoresSafeArea()
     }
 }

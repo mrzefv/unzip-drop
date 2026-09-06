@@ -11,7 +11,7 @@ import UIKit
 
 // MARK: - Models
 
-struct RepoSource: Codable, Identifiable, Equatable, Hashable {
+nonisolated struct RepoSource: Codable, Identifiable, Equatable, Hashable, Sendable {
     var id: String
     var name: String
     var url: URL
@@ -22,7 +22,7 @@ struct RepoSource: Codable, Identifiable, Equatable, Hashable {
     var lastFetched: Date?
 }
 
-struct SourceApp: Identifiable, Equatable {
+nonisolated struct SourceApp: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let bundle: String
@@ -47,7 +47,7 @@ struct SourceApp: Identifiable, Equatable {
 }
 
 /// One app = one bundle id; a source can list many versions of it.
-struct AppGroup: Identifiable, Equatable {
+nonisolated struct AppGroup: Identifiable, Equatable, Sendable {
     let bundle: String
     let versions: [SourceApp]          // newest first
     var id: String { bundle }
@@ -70,7 +70,7 @@ struct AppGroup: Identifiable, Equatable {
     }
 }
 
-struct SourceNews: Identifiable, Equatable {
+nonisolated struct SourceNews: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     let caption: String
@@ -256,6 +256,7 @@ struct SourcesView: View {
                     ForEach(store.sources) { s in
                         NavigationLink(value: s) { sourceRow(s) }
                             .disabled(editing)
+                            .opacity(1)
                             .listRowBackground(Color.black)
                             .listRowSeparatorTint(Theme.stroke)
                             .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
@@ -278,15 +279,15 @@ struct SourcesView: View {
 
     private func sourceRow(_ s: RepoSource) -> some View {
         HStack(spacing: 14) {
-            SourceIcon(url: s.iconURL, side: 64, fallback: s.name)
+            SourceIcon(url: s.iconURL, side: 54, fallback: s.name)
             VStack(alignment: .leading, spacing: 4) {
-                Text(s.name).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                Text(s.name).font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
                 Text(s.description.isEmpty ? s.url.host ?? s.url.absoluteString : s.description)
-                    .font(.system(size: 15)).foregroundStyle(Theme.subtle).lineLimit(1)
+                    .font(.system(size: 13)).foregroundStyle(Theme.subtle).lineLimit(1)
                 if let n = s.appCount { Text("\(n) apps").font(.caption2.monospaced()).foregroundStyle(Theme.accent) }
             }
             Spacer()
-            Image(systemName: "arrow.up.forward.square").font(.system(size: 26, weight: .medium)).foregroundStyle(Theme.accent)
+            Image(systemName: "arrow.up.forward.square").font(.system(size: 22, weight: .medium)).foregroundStyle(Theme.accent)
         }
         .contentShape(Rectangle())
     }
@@ -350,16 +351,22 @@ private struct SourceDetailScreen: View {
                 Card { Text(error).font(.caption).foregroundStyle(.orange) }
                     .listRowBackground(Color.black).listRowSeparator(.hidden)
             }
-                if loading {
-                    HStack { Spacer(); ProgressView().tint(Theme.accent); Spacer() }.listRowBackground(Color.black).listRowSeparator(.hidden)
-                }
-                ForEach(apps) { app in
-                    appRow(app)
-                        .listRowBackground(Color.black)
-                        .listRowSeparatorTint(Theme.stroke)
-                        .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
-                }
+            if loading {
+                HStack { Spacer(); ProgressView().tint(Theme.accent); Spacer() }
+                    .listRowBackground(Color.black).listRowSeparator(.hidden)
             }
+            if !news.isEmpty {
+                newsSection
+                    .listRowBackground(Color.black).listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 4, trailing: 0))
+            }
+            ForEach(groups) { g in
+                appRow(g)
+                    .listRowBackground(Color.black)
+                    .listRowSeparatorTint(Theme.stroke)
+                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+            }
+        }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .refreshable { await load() }
@@ -392,16 +399,16 @@ private struct SourceDetailScreen: View {
     private var header: some View {
         HStack(spacing: 12) {
             Button { dismiss() } label: {
-                Image(systemName: "chevron.left").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 34, height: 34)
+                Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
             }
             Spacer()
             HStack(spacing: 10) {
-                SourceIcon(url: current.iconURL, side: 34, fallback: current.name)
-                Text(current.name.uppercased()).font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                SourceIcon(url: current.iconURL, side: 24, fallback: current.name)
+                Text(current.name.uppercased()).font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
             }
             Spacer()
             Button { withAnimation { showSearch.toggle() } } label: {
-                Image(systemName: "magnifyingglass").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 34, height: 34)
+                Image(systemName: "magnifyingglass").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
             }
             Menu {
                 ForEach(Sort.allCases, id: \.self) { s in Button(s.rawValue) { sort = s } }
@@ -409,23 +416,23 @@ private struct SourceDetailScreen: View {
                 Button { Task { await load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                 Link(destination: current.url) { Label("Open repo.json", systemImage: "safari") }
             } label: {
-                Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 22, weight: .medium)).foregroundStyle(Theme.accent).frame(width: 34, height: 34)
+                Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 20, weight: .medium)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
+        .padding(.horizontal, 12).padding(.vertical, 6)
     }
 
     private var countBar: some View {
         HStack {
-            Text("\(groups.count.formatted()) Apps").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.text)
+            Text("\(groups.count.formatted()) Apps").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
             Spacer()
             HStack(spacing: 6) {
-                Image(systemName: "signature.zh").font(.system(size: 18, weight: .bold))
-                Text("by MrZEfv").font(.system(size: 16, weight: .bold)).kerning(0.3)
+                Image(systemName: "signature.zh").font(.system(size: 15, weight: .bold))
+                Text("by MrZEfv").font(.system(size: 14, weight: .bold)).kerning(0.3)
             }
             .foregroundStyle(Color(red: 0.95, green: 0.25, blue: 0.25)).lineLimit(1)
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
+        .padding(.horizontal, 16).padding(.vertical, 6)
         .background(Color.white.opacity(0.04))
     }
 
@@ -450,15 +457,15 @@ private struct SourceDetailScreen: View {
                     if let img = phase.image { img.resizable().scaledToFill() }
                     else { tint.opacity(0.25) }
                 }
-                .frame(width: 300, height: 150).clipped()
+                .frame(width: 250, height: 118).clipped()
                 LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(n.title).font(.system(size: 17, weight: .bold)).foregroundStyle(.white).lineLimit(1)
-                    if !n.caption.isEmpty { Text(n.caption).font(.system(size: 12)).foregroundStyle(.white.opacity(0.85)).lineLimit(2) }
+                    Text(n.title).font(.system(size: 15, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                    if !n.caption.isEmpty { Text(n.caption).font(.system(size: 11)).foregroundStyle(.white.opacity(0.85)).lineLimit(2) }
                 }
                 .padding(12)
             }
-            .frame(width: 300, height: 150)
+            .frame(width: 250, height: 118)
             .background(tint.opacity(0.2))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(tint.opacity(0.5), lineWidth: 1))
@@ -476,10 +483,10 @@ private struct SourceDetailScreen: View {
         let have = signed.entries.contains { $0.bundleID == app.bundle } || IPAInbox.has(app)
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 14) {
-                SourceIcon(url: app.iconURL, side: 72, fallback: app.name)
+                SourceIcon(url: app.iconURL, side: 56, fallback: app.name)
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 8) {
-                        Text(app.name).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                        Text(app.name).font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
                         if g.versions.count > 1 {
                             Text("\(g.versions.count) versions").font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(0.5)
                                 .padding(.horizontal, 6).padding(.vertical, 3)
@@ -487,9 +494,9 @@ private struct SourceDetailScreen: View {
                         }
                     }
                     Text("\(app.sizeMB) | \(app.version) | \(app.subtitle)")
-                        .font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                        .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
                     if !app.description.isEmpty {
-                        Text(app.description).font(.system(size: 14)).foregroundStyle(Theme.subtle).lineLimit(1)
+                        Text(app.description).font(.system(size: 13)).foregroundStyle(Theme.subtle).lineLimit(1)
                     }
                 }
                 .contentShape(Rectangle())
@@ -504,15 +511,15 @@ private struct SourceDetailScreen: View {
                                     Circle().trim(from: 0, to: max(0.05, progress)).stroke(Theme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round)).rotationEffect(.degrees(-90))
                                 }
                             } else if have {
-                                Image(systemName: "checkmark").font(.system(size: 22, weight: .bold))
+                                Image(systemName: "checkmark").font(.system(size: 20, weight: .bold))
                             } else {
-                                Image(systemName: "arrow.down").font(.system(size: 22, weight: .bold))
+                                Image(systemName: "arrow.down").font(.system(size: 20, weight: .bold))
                             }
                         }
-                        .frame(width: 36, height: 36).foregroundStyle(Theme.accent)
+                        .frame(width: 30, height: 30).foregroundStyle(Theme.accent)
                     }
                     .disabled(downloading != nil || app.downloadURL == nil)
-                    Text("Views: \(app.downloads)").font(.system(size: 12)).foregroundStyle(Theme.subtle)
+                    Text("Views: \(app.downloads)").font(.system(size: 11)).foregroundStyle(Theme.subtle)
                 }
             }
             .contentShape(Rectangle())
@@ -525,9 +532,9 @@ private struct SourceDetailScreen: View {
                                 if let img = phase.image { img.resizable().scaledToFill() }
                                 else { Theme.card.overlay(ProgressView().tint(Theme.accent)) }
                             }
-                            .frame(width: 190, height: 410)
-                            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+                            .frame(width: 126, height: 270)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
                             .onTapGesture { openGroup = g }
                         }
                     }
@@ -574,7 +581,6 @@ struct SourceIcon: View {
     }
 }
 
-
 // MARK: - Inbox + downloader (progress-reporting)
 
 nonisolated enum IPAInbox {
@@ -588,14 +594,14 @@ nonisolated enum IPAInbox {
     }
 }
 
-final class IPADownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+nonisolated final class IPADownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     static let shared = IPADownloader()
     private lazy var session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
-    private var handlers: [Int: (progress: (Double) -> Void, done: (Result<URL, Error>) -> Void, dest: URL)] = [:]
+    private var handlers: [Int: (progress: @Sendable (Double) -> Void, done: @Sendable (Result<URL, Error>) -> Void, dest: URL)] = [:]
     private let lock = NSLock()
 
     /// Downloads to the inbox; returns immediately if it's already on device.
-    func download(_ app: SourceApp, progress: @escaping (Double) -> Void) async throws -> URL {
+    func download(_ app: SourceApp, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         guard let src = app.downloadURL else { throw GitHubError.badConfig("This app has no download URL in the source.") }
         let dest = IPAInbox.url(for: app)
         if FileManager.default.fileExists(atPath: dest.path) { progress(1); return dest }
@@ -656,14 +662,14 @@ struct AppDetailSheet: View {
             // Title bar
             ZStack {
                 HStack(spacing: 8) {
-                    SourceIcon(url: source.iconURL, side: 26, fallback: source.name)
-                    Text(source.name.uppercased()).font(.system(size: 16, weight: .bold)).kerning(1).foregroundStyle(Theme.text)
+                    SourceIcon(url: source.iconURL, side: 22, fallback: source.name)
+                    Text(source.name.uppercased()).font(.system(size: 15, weight: .bold)).kerning(1).foregroundStyle(Theme.text)
                 }
                 HStack {
                     Spacer()
                     Button { dismiss() } label: {
-                        Image(systemName: "xmark").font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.text)
-                            .frame(width: 36, height: 36).background(Theme.card).clipShape(Circle())
+                        Image(systemName: "xmark").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.text)
+                            .frame(width: 32, height: 32).background(Theme.card).clipShape(Circle())
                     }
                 }
             }
@@ -674,7 +680,7 @@ struct AppDetailSheet: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
                     infoCard
-                    Text("SCREENSHOTS").font(.system(size: 14, weight: .bold)).kerning(1.5).foregroundStyle(Theme.subtle)
+                    Text("SCREENSHOTS").font(.system(size: 13, weight: .bold)).kerning(1.5).foregroundStyle(Theme.subtle)
                     if app.screenshots.isEmpty {
                         Text("No screenshots.").font(.caption).foregroundStyle(Theme.subtle)
                     } else {
@@ -685,14 +691,14 @@ struct AppDetailSheet: View {
                                         if let img = phase.image { img.resizable().scaledToFill() }
                                         else { Theme.card.overlay(ProgressView().tint(blue)) }
                                     }
-                                    .frame(width: 190, height: 410)
-                                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+                                    .frame(width: 150, height: 325)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
                                 }
                             }
                         }
                     }
-                    Text("\(group.versions.count) Versions Available").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.subtle)
+                    Text("\(group.versions.count) Versions Available").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.subtle)
                     ForEach(group.versions) { v in versionRow(v) }
                     if downloading || onDevice { serverDownloadCard }
                     if let error { Text(error).font(.caption).foregroundStyle(.orange) }
@@ -717,44 +723,44 @@ struct AppDetailSheet: View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .top, spacing: 16) {
-                    SourceIcon(url: app.iconURL, side: 76, fallback: app.name)
-                        .shadow(color: blue.opacity(0.55), radius: 14)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(app.name).font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text).lineLimit(2).minimumScaleFactor(0.8)
+                    SourceIcon(url: app.iconURL, side: 64, fallback: app.name)
+                        .shadow(color: blue.opacity(0.55), radius: 12)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(app.name).font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text).lineLimit(2).minimumScaleFactor(0.8)
                         Text(app.subtitle.isEmpty ? (source.url.host ?? "") : app.subtitle)
-                            .font(.system(size: 13, design: .monospaced)).foregroundStyle(blue).lineLimit(1)
-                        Text(app.bundle).font(.system(size: 11, design: .monospaced)).foregroundStyle(blue.opacity(0.8)).lineLimit(1).truncationMode(.middle)
+                            .font(.system(size: 12, design: .monospaced)).foregroundStyle(blue).lineLimit(1)
+                        Text(app.bundle).font(.system(size: 10, design: .monospaced)).foregroundStyle(blue.opacity(0.8)).lineLimit(1).truncationMode(.middle)
                     }
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    Text((source.author ?? "MRzefv").uppercased() + " EDITION").font(.system(size: 14, weight: .bold)).kerning(1).foregroundStyle(blue)
+                    Text((source.author ?? "MRzefv").uppercased() + " EDITION").font(.system(size: 12, weight: .bold)).kerning(1).foregroundStyle(blue)
                     HStack(alignment: .top, spacing: 6) {
-                        Text("•").foregroundStyle(blue)
-                        Text(app.description.isEmpty ? "No description." : app.description).font(.system(size: 14)).foregroundStyle(Theme.text)
+                        Text("•").font(.system(size: 13)).foregroundStyle(blue)
+                        Text(app.description.isEmpty ? "No description." : app.description).font(.system(size: 13)).foregroundStyle(Theme.text)
                     }
                 }
-                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.white.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 14))
             }
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 stat("v\(app.version)", "VERSION")
                 stat(app.sizeMB, "SIZE")
                 stat(updatedText, "UPDATED")
                 stat(app.downloads, "DOWNLOADS")
                 stat(signed.entries.filter { $0.bundleID == app.bundle }.count.description, "SIGNED")
             }
-            .frame(width: 92)
+            .frame(width: 74)
         }
-        .padding(12)
+        .padding(10)
         .background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func stat(_ v: String, _ k: String) -> some View {
         VStack(spacing: 4) {
-            Text(v).font(.system(size: 15, weight: .bold)).foregroundStyle(blue).lineLimit(1).minimumScaleFactor(0.6)
-            Text(k).font(.system(size: 9, weight: .semibold)).kerning(1).foregroundStyle(Theme.subtle)
+            Text(v).font(.system(size: 13, weight: .bold)).foregroundStyle(blue).lineLimit(1).minimumScaleFactor(0.6)
+            Text(k).font(.system(size: 8, weight: .semibold)).kerning(0.8).foregroundStyle(Theme.subtle)
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 10)
+        .frame(maxWidth: .infinity).padding(.vertical, 8)
         .background(Color.white.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -776,14 +782,14 @@ struct AppDetailSheet: View {
             HStack(spacing: 14) {
                 Circle().fill(sel ? blue : Theme.subtle.opacity(0.4)).frame(width: 10, height: 10)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("v\(v.version)").font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text)
-                    Text("\(v.sizeMB)  \(ageText(v.updated))").font(.system(size: 15)).foregroundStyle(Theme.subtle)
+                    Text("v\(v.version)").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
+                    Text("\(v.sizeMB)  \(ageText(v.updated))").font(.system(size: 13)).foregroundStyle(Theme.subtle)
                 }
                 Spacer()
                 if IPAInbox.has(v) { Image(systemName: "internaldrive.fill").font(.system(size: 14)).foregroundStyle(.green) }
-                if sel { Image(systemName: "checkmark").font(.system(size: 18, weight: .bold)).foregroundStyle(blue) }
+                if sel { Image(systemName: "checkmark").font(.system(size: 16, weight: .bold)).foregroundStyle(blue) }
             }
-            .padding(14)
+            .padding(12)
             .background(sel ? Color(red: 0.06, green: 0.09, blue: 0.16) : Color(white: 0.09))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(sel ? blue.opacity(0.35) : Theme.stroke, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -794,9 +800,9 @@ struct AppDetailSheet: View {
     private var serverDownloadCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Server Download").font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.subtle)
+                Text("Server Download").font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.subtle)
                 Spacer()
-                if !onDevice { Text("\(Int(progress * 100))%").font(.system(size: 15, weight: .bold)).foregroundStyle(blue) }
+                if !onDevice { Text("\(Int(progress * 100))%").font(.system(size: 14, weight: .bold)).foregroundStyle(blue) }
             }
             GeometryReader { g in
                 ZStack(alignment: .leading) {
@@ -806,33 +812,33 @@ struct AppDetailSheet: View {
             }
             .frame(height: 8)
             VStack(alignment: .leading, spacing: 8) {
-                Label("Downloading to device…", systemImage: "arrow.down.square.fill").font(.system(size: 14, design: .monospaced)).foregroundStyle(Theme.subtle)
-                Label(source.url.host ?? source.name, systemImage: "globe").font(.system(size: 14, design: .monospaced)).foregroundStyle(blue)
+                Label("Downloading to device…", systemImage: "arrow.down.square.fill").font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.subtle)
+                Label(source.url.host ?? source.name, systemImage: "globe").font(.system(size: 13, design: .monospaced)).foregroundStyle(blue)
                 if onDevice {
                     Label("\(ByteCountFormatter.string(fromByteCount: IPAInbox.size(app), countStyle: .file)) on device — no re-download at sign", systemImage: "checkmark.square.fill")
                         .font(.system(size: 13, design: .monospaced)).foregroundStyle(blue)
                 }
             }
         }
-        .padding(14).background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(12).background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private var bottomBar: some View {
         HStack {
             Button { Task { await download() } } label: {
                 VStack(spacing: 4) {
-                    if downloading { ProgressView().tint(blue).frame(height: 30) }
-                    else if onDevice { Image(systemName: "checkmark.circle.fill").font(.system(size: 28)) }
-                    else { Image(systemName: "arrow.down.circle").font(.system(size: 28)) }
-                    Text(downloading ? "Downloading" : (onDevice ? "Downloaded" : "Download")).font(.system(size: 14, weight: .semibold))
+                    if downloading { ProgressView().tint(blue).frame(height: 26) }
+                    else if onDevice { Image(systemName: "checkmark.circle.fill").font(.system(size: 26)) }
+                    else { Image(systemName: "arrow.down.circle").font(.system(size: 26)) }
+                    Text(downloading ? "Downloading" : (onDevice ? "Downloaded" : "Download")).font(.system(size: 13, weight: .semibold))
                 }
-                .foregroundStyle(blue).frame(width: 110)
+                .foregroundStyle(blue).frame(width: 100)
             }
             .disabled(downloading || app.downloadURL == nil)
             Spacer()
             VStack(spacing: 2) {
-                Text("MRZefv").font(.system(size: 15, weight: .bold)).foregroundStyle(.orange).lineLimit(1)
-                Text("Powered by \((source.url.host ?? source.name).uppercased())").font(.system(size: 10, weight: .semibold)).foregroundStyle(blue).lineLimit(1).minimumScaleFactor(0.7)
+                Text("MRZefv").font(.system(size: 14, weight: .bold)).foregroundStyle(.orange).lineLimit(1)
+                Text("Powered by \((source.url.host ?? source.name).uppercased())").font(.system(size: 9, weight: .semibold)).foregroundStyle(blue).lineLimit(1).minimumScaleFactor(0.7)
             }
             .frame(maxWidth: .infinity)
             Spacer()
@@ -840,10 +846,10 @@ struct AppDetailSheet: View {
                 dismiss(); SignQueue.shared.enqueue(IPAInbox.url(for: app))
             } label: {
                 VStack(spacing: 4) {
-                    Image(systemName: "signature").font(.system(size: 28))
-                    Text("Sign IPA").font(.system(size: 14, weight: .semibold))
+                    Image(systemName: "signature").font(.system(size: 26))
+                    Text("Sign IPA").font(.system(size: 13, weight: .semibold))
                 }
-                .foregroundStyle(onDevice ? blue : Theme.subtle).frame(width: 110)
+                .foregroundStyle(onDevice ? blue : Theme.subtle).frame(width: 100)
             }
             .disabled(!onDevice)
         }

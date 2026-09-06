@@ -12,7 +12,19 @@
       "force": true,
       "updatedAt": "2026-09-06T19:00:41Z",
       "lastCheck": {}
+    },
+    {
+      "domain": "zefv.dev",
+      "name": "_acme-challenge.zefv.dev",
+      "type": "TXT",
+      "value": "hTUYk7Du6dUPC1noH4dey2LHnkUMaACkW4I8AJBPfXw",
+      "step": 2,
+      "of": 2,
+      "status": "pending",
+      "force": false,
+      "updatedAt": "2026-09-06T19:01:10Z",
+      "lastCheck": {}
     }
   ],
-  "updatedAt": "2026-09-06T19:00:41Z"
+  "updatedAt": "2026-09-06T19:01:10Z"
 }

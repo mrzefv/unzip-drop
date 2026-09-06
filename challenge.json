@@ -1,16 +1,1 @@
-{
-  "records": [
-    {
-      "domain": "zefv.dev",
-      "name": "_acme-challenge.zefv.dev",
-      "type": "TXT",
-      "value": "NlbqIEXFTvDfYzlafCd8cQLe5v_JqeiyxrA2WfRY5oM",
-      "step": 1,
-      "of": 2,
-      "status": "pending",
-      "updatedAt": "2026-09-06T18:11:35Z"
-    }
-  ],
-  "updatedAt": "2026-09-06T18:11:35Z",
-  "instructions": "Add a TXT record at _acme-challenge.zefv.dev with each pending value (keep both). The workflow polls DNS and continues by itself once it sees them."
-}
+{"records":[],"updatedAt":"2026-09-06T18:27:12Z","instructions":"Waiting for certbot to hand out the TXT values…"}

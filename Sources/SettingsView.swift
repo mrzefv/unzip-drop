@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import CryptoKit
 
 // MARK: - Root list
 
@@ -590,6 +591,7 @@ private struct OTADomainScreen: View {
     @State private var domain = ServerConfig.certDomain
     @State private var host = ServerConfig.installHost
     @State private var saved = false
+    @State private var mode = ServerConfig.certMode
     @State private var dnsLoopback: Bool?
     @State private var dnsChecking = false
     @State private var sans = ZefvCert.effectiveSANs
@@ -599,8 +601,12 @@ private struct OTADomainScreen: View {
     @State private var certBranch = ServerConfig.certBranch
     @State private var sourceSaved = false
     @State private var leEmail = UserDefaults.standard.string(forKey: "uzd_le_email") ?? ""
+    @State private var certCA = ServerConfig.certCA
+    @State private var eabKID = ServerConfig.eabKID
+    @State private var eabHMAC = ServerConfig.eabHMAC
     @State private var linking = false
     @State private var linkReport: String?
+    @State private var showLocalCA = false
 
     @State private var refreshing = false
     @State private var renewing = false
@@ -634,10 +640,14 @@ private struct OTADomainScreen: View {
 
     var body: some View {
         DetailScreen(title: "On-Device OTA Domain") {
-            hostCard
+            modeCard
+            if mode == "public" { hostCard
             if let board, !board.records.isEmpty || renewing { challengeCard(board) }
             certCard
             sourceCard
+            } else {
+                localModeCard
+            }
             Card {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("How the cert is made").font(.headline).foregroundStyle(Theme.text)
@@ -648,6 +658,7 @@ private struct OTADomainScreen: View {
                 }
             }
         }
+        .fullScreenCover(isPresented: $showLocalCA) { LocalCAScreen().environmentObject(config).preferredColorScheme(.dark) }
         .onChange(of: host) { _ in saved = false }
         .onChange(of: domain) { _ in saved = false; dnsLoopback = nil }
         .onChange(of: certOwner) { _ in sourceSaved = false }
@@ -823,6 +834,50 @@ private struct OTADomainScreen: View {
         }
     }
 
+    private var modeCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Certificate mode", systemImage: "lock.rotation").font(.headline).foregroundStyle(Theme.text)
+                HStack(spacing: 8) {
+                    ForEach(["public": "Public (ACME)", "local": "Fully local"].sorted(by: { $0.key > $1.key }), id: \.key) { k, name in
+                        Button {
+                            mode = k; ServerConfig.setCertMode(k)
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        } label: {
+                            VStack(spacing: 3) {
+                                Image(systemName: k == "public" ? "globe" : "iphone").font(.system(size: 16))
+                                Text(name).font(.system(size: 12, weight: .semibold))
+                            }
+                            .padding(.vertical, 12).frame(maxWidth: .infinity)
+                            .background(mode == k ? Theme.accent.opacity(0.18) : Theme.card)
+                            .foregroundStyle(mode == k ? Theme.accent : Theme.subtle)
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(mode == k ? Theme.accent : Theme.stroke, lineWidth: 1))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                Text(mode == "public"
+                     ? "Real ACME cert (Let's Encrypt/ZeroSSL), trusted by iOS out of the box. Needs the DNS TXT step, no profile."
+                     : "Your own root CA — no DNS, no external CA, instant and offline. iOS trusts it only after you install the root profile once (you can inspect it first).")
+                    .font(.caption).foregroundStyle(Theme.subtle)
+            }
+        }
+    }
+
+    private var localModeCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Fully local CA", systemImage: "iphone").font(.headline).foregroundStyle(Theme.text)
+                Text(LocalCAManager.hasRoot
+                     ? "Root CA ready. Leaf for \(LocalCAManager.meta?.host ?? ServerConfig.installHost): \(LocalCAManager.hasLeaf ? "issued" : "not issued")."
+                     : "No local root yet.")
+                    .font(.caption).foregroundStyle(Theme.subtle)
+                accentButton("Open local CA settings", "chevron.right") { showLocalCA = true }
+            }
+        }
+    }
+
     private var hostCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
@@ -933,7 +988,29 @@ private struct OTADomainScreen: View {
                 Field(label: "Owner", text: $certOwner, placeholder: "your-github-user")
                 Field(label: "Repo", text: $certRepo, placeholder: "unzip-drop")
                 Field(label: "Branch (certs folder)", text: $certBranch, placeholder: "certs")
-                Field(label: "Let's Encrypt email", text: $leEmail, placeholder: "you@example.com", keyboard: .emailAddress)
+                Field(label: "ACME email", text: $leEmail, placeholder: "you@example.com", keyboard: .emailAddress)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Certificate authority").font(.caption).foregroundStyle(Theme.subtle)
+                    HStack(spacing: 8) {
+                        ForEach(["letsencrypt": "Let's Encrypt", "zerossl": "ZeroSSL"].sorted(by: { $0.key < $1.key }), id: \.key) { k, name in
+                            Button { certCA = k } label: {
+                                Text(name).font(.system(size: 13, weight: .semibold))
+                                    .padding(.vertical, 9).frame(maxWidth: .infinity)
+                                    .background(certCA == k ? Theme.accent.opacity(0.18) : Theme.card)
+                                    .foregroundStyle(certCA == k ? Theme.accent : Theme.subtle)
+                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(certCA == k ? Theme.accent : Theme.stroke, lineWidth: 1))
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                if certCA == "zerossl" {
+                    Field(label: "ZeroSSL EAB KID (optional)", text: $eabKID, placeholder: "auto from email if blank")
+                    Field(label: "ZeroSSL EAB HMAC (optional)", text: $eabHMAC, placeholder: "auto from email if blank")
+                    Text("Leave EAB blank to auto-request it from ZeroSSL using your email. Or paste from ZeroSSL → Developer → EAB.")
+                        .font(.caption2).foregroundStyle(Theme.subtle)
+                }
                 if let linkReport { Text(linkReport).font(.caption).foregroundStyle(.green) }
                 HStack(spacing: 10) {
                     accentButton(linking ? "Linking…" : "Link repo", "link", enabled: config.hasToken && !certOwner.isEmpty && !certRepo.isEmpty, busy: linking) {
@@ -958,6 +1035,8 @@ private struct OTADomainScreen: View {
                                    repo: Config.clean(certRepo).isEmpty ? "unzip-drop" : Config.clean(certRepo),
                                    branch: Config.clean(certBranch).isEmpty ? "certs" : Config.clean(certBranch))
         UserDefaults.standard.set(Config.clean(leEmail), forKey: "uzd_le_email")
+        ServerConfig.setCertCA(certCA)
+        ServerConfig.setEAB(kid: Config.clean(eabKID), hmac: eabHMAC.trimmingCharacters(in: .whitespacesAndNewlines))
         certOwner = ServerConfig.certRepoOwner; certRepo = ServerConfig.certRepoName; certBranch = ServerConfig.certBranch
         sourceSaved = true
     }
@@ -1033,15 +1112,178 @@ private struct OTADomainScreen: View {
             guard let wf = wfs.first(where: { $0.path == ServerConfig.certWorkflowPath }) else {
                 throw GitHubError.badConfig("certs.yml not found in \(ServerConfig.certRepoOwner)/\(ServerConfig.certRepoName). Tap Link repo below first — it installs the workflow for you.")
             }
-            let email = Config.clean(UserDefaults.standard.string(forKey: "uzd_le_email") ?? "")
-            guard email.contains("@") else { throw GitHubError.badConfig("Enter a valid Let's Encrypt email in the Cert repo card and tap Save first.") }
-            // Confirm the fixed workflow (with the `email` input) is on main — an old
-            // certs.yml ignores the input and fails with 'No email'.
-            try await client.dispatch(workflowID: wf.id, ref: "main",
-                                      inputs: ["domain": ServerConfig.certDomain, "email": email, "force": "true"])
-            note = "Dispatched for *.\(ServerConfig.certDomain) with \(email). If the run fails with 'No email', the old certs.yml is still on main — push the latest workflow, or set repo variable LE_EMAIL. TXT values appear above in ~1 min."
+            let email = UserDefaults.standard.string(forKey: "uzd_le_email") ?? ""
+            guard !email.isEmpty else { throw GitHubError.badConfig("Enter a Let's Encrypt email in the Cert repo card and save.") }
+            var inputs = ["domain": ServerConfig.certDomain, "email": email, "ca": ServerConfig.certCA, "force": "true"]
+            if ServerConfig.certCA == "zerossl" {
+                if !ServerConfig.eabKID.isEmpty { inputs["eab_kid"] = ServerConfig.eabKID }
+                if !ServerConfig.eabHMAC.isEmpty { inputs["eab_hmac"] = ServerConfig.eabHMAC }
+            }
+            try await client.dispatch(workflowID: wf.id, ref: "main", inputs: inputs)
+            note = "certbot run dispatched for *.\(ServerConfig.certDomain) — TXT values appear above within ~1 min. Add them at your DNS host; the run finishes on its own. Then Pull latest."
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch { self.error = error.localizedDescription }
         renewing = false
+    }
+}
+
+// MARK: - Local CA (fully offline OTA cert, inspect before installing)
+
+private struct LocalCAScreen: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var host = ServerConfig.installHost
+    @State private var working = false
+    @State private var error: String?
+    @State private var note: String?
+    @State private var showProfileText = false
+    @State private var share: URLItem?
+    @State private var refresh = 0            // bump to re-read files
+
+    private var hasRoot: Bool { _ = refresh; return LocalCAManager.hasRoot }
+    private var hasLeaf: Bool { _ = refresh; return LocalCAManager.hasLeaf }
+    private var meta: LocalCAManager.Meta? { _ = refresh; return LocalCAManager.meta }
+
+    var body: some View {
+        DetailScreen(title: "Local CA") {
+            Card {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Fully local OTA certificate", systemImage: "iphone.and.arrow.forward").font(.headline).foregroundStyle(Theme.text)
+                    Text("Generates a root CA on this device (OpenSSL), signs a leaf for your OTA host, and serves installs with it. No DNS, no external CA, works offline. iOS trusts it only after you install the root profile below — inspect it first; nothing is signed by anyone but your device.")
+                        .font(.caption).foregroundStyle(Theme.subtle)
+                }
+            }
+
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Host", systemImage: "network").font(.headline).foregroundStyle(Theme.text)
+                    Field(label: "OTA host", text: $host, placeholder: "mr.zefv.dev")
+                    Text("The leaf covers this host and *.<host>. Any name that resolves to 127.0.0.1 works (e.g. an A record, or a *.nip.io name).")
+                        .font(.caption2).foregroundStyle(Theme.subtle)
+                    accentButton(working ? "Working…" : (hasLeaf ? "Re-issue leaf for host" : "Create CA & issue leaf"), "checkmark.seal.fill", busy: working) {
+                        Task { await issue() }
+                    }
+                }
+            }
+
+            if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) } }
+            if let note { Card { Text(note).font(.caption).foregroundStyle(.green) } }
+
+            if hasRoot { rootCard }
+            if hasRoot { profileCard }
+
+            if hasRoot {
+                Card {
+                    Button(role: .destructive) { LocalCAManager.reset(); bump(); note = "Local CA deleted." } label: {
+                        Label("Delete local CA", systemImage: "trash").font(.subheadline.weight(.semibold))
+                    }
+                }
+            }
+        }
+        .sheet(item: $share) { ShareSheet(items: [$0.url]) }
+        .sheet(isPresented: $showProfileText) { ProfileInspector(text: profileXML) }
+    }
+
+    // MARK: Root details
+
+    private var rootCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Root CA", systemImage: "checkmark.shield.fill").font(.headline).foregroundStyle(Theme.text)
+                kv("Subject", "MRvEK Local Root CA")
+                kv("Fingerprint", fingerprint)
+                if let m = meta {
+                    kv("Created", m.rootCreated.formatted(date: .abbreviated, time: .shortened))
+                    kv("Leaf host", m.host)
+                    kv("Leaf issued", m.leafIssued.formatted(date: .abbreviated, time: .shortened))
+                }
+                kv("Key usage", "CA · certificate signing only")
+            }
+        }
+    }
+
+    // MARK: Profile (inspect + install)
+
+    private var profileCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Trust profile", systemImage: "doc.badge.gearshape").font(.headline).foregroundStyle(Theme.text)
+                Text("This .mobileconfig contains one payload: the root cert above, as a com.apple.security.root (trusted root) payload. It is NOT signed by Apple or anyone else — it's plain text you can read in full. After installing, enable it in Settings › General › About › Certificate Trust Settings.")
+                    .font(.caption).foregroundStyle(Theme.subtle)
+                HStack(spacing: 10) {
+                    accentButton("View profile contents", "doc.text.magnifyingglass") { showProfileText = true }
+                }
+                Button {
+                    if let u = LocalCAManager.writeMobileConfig() { share = URLItem(url: u) }
+                    else { error = "Couldn't build the profile." }
+                } label: {
+                    HStack { Image(systemName: "square.and.arrow.down"); Text("Install profile").fontWeight(.semibold); Spacer() }
+                        .padding(.vertical, 12).padding(.horizontal, 14)
+                        .background(Theme.accent).foregroundStyle(.black).clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                Text("Opening the profile takes you to Settings to review and install it. You confirm every step; iOS shows a red 'Unmanaged Root Certificate' warning because it grants trust — that's expected for a root you made.")
+                    .font(.caption2).foregroundStyle(Theme.subtle)
+            }
+        }
+    }
+
+    // MARK: helpers
+
+    private var profileXML: String {
+        (LocalCAManager.mobileConfig()).flatMap { String(data: $0, encoding: .utf8) } ?? "(no profile — create the CA first)"
+    }
+
+    private var fingerprint: String {
+        guard let der = LocalCAManager.rootDER() else { return "—" }
+        return SHA256.hash(data: der).map { String(format: "%02X", $0) }.joined(separator: ":")
+    }
+
+    private func kv(_ k: String, _ v: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(k).font(.caption).foregroundStyle(Theme.subtle)
+            Text(v).font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.text)
+                .lineLimit(3).textSelection(.enabled)
+        }
+    }
+
+    private func accentButton(_ title: String, _ icon: String, busy: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack { if busy { ProgressView().tint(.black) } else { Image(systemName: icon) }; Text(title).fontWeight(.semibold); Spacer() }
+                .padding(.vertical, 12).padding(.horizontal, 14)
+                .background(Theme.accent).foregroundStyle(.black).clipShape(RoundedRectangle(cornerRadius: 12))
+        }.disabled(busy)
+    }
+
+    private func bump() { refresh += 1 }
+
+    private func issue() async {
+        working = true; error = nil; note = nil
+        let h = Config.clean(host).replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "*.", with: "")
+        guard h.contains(".") else { error = "Enter a host like mr.zefv.dev"; working = false; return }
+        do {
+            try LocalCAManager.issueLeaf(host: h)
+            ServerConfig.setInstallHost(h)
+            ServerConfig.setCertMode("local")
+            bump()
+            note = "Root + leaf ready for \(h). Cert mode set to local. Install the profile, then Sign & Install."
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch { self.error = error.localizedDescription }
+        working = false
+    }
+}
+
+// Plain-text profile viewer.
+private struct ProfileInspector: View {
+    let text: String
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(text).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.text)
+                    .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled).padding(16)
+            }
+            .background(Theme.bg.ignoresSafeArea())
+            .navigationTitle(".mobileconfig").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+        }
     }
 }

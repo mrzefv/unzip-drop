@@ -40,6 +40,17 @@ struct SettingsView: View {
                             SettingsRow(icon: "info.circle.fill", title: "About", subtitle: "App information and version") { screen = .about }
                         }
 
+                        SettingsSection("GitHub") {
+                            SettingsRow(icon: "tray.and.arrow.down.fill", title: "Import zip",
+                                        subtitle: "Extract a zip into the workspace") { GitHubHub.shared.open(0) }
+                            SettingsRow(icon: "folder.fill", title: "Contents",
+                                        subtitle: session.root == nil ? "Workspace is empty" : "\(session.fileCount) files · \(session.archiveName ?? "")") { GitHubHub.shared.open(1) }
+                            SettingsRow(icon: "arrow.up.circle.fill", title: "Push",
+                                        subtitle: "Commit the workspace to \(config.owner.isEmpty ? "a repo" : "\(config.owner)/\(config.repo)")") { GitHubHub.shared.open(2) }
+                            SettingsRow(icon: "hammer.fill", title: "Build",
+                                        subtitle: "Actions runs, steps, artifacts") { GitHubHub.shared.open(3) }
+                        }
+
                         SettingsSection("Target") {
                             SettingsRow(icon: "point.3.connected.trianglepath.dotted",
                                         title: "Repository",

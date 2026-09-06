@@ -35,7 +35,7 @@ struct SignView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack {
-                        Text("Sign").font(.title2.bold()).foregroundStyle(Theme.text)
+                        Text("Library").font(.title2.bold()).foregroundStyle(Theme.text)
                         Spacer()
                         certPill
                     }
@@ -43,7 +43,6 @@ struct SignView: View {
                     if meta != nil { overridesCard; actionCard }
                     if !log.isEmpty { logCard }
                     if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) } }
-                    historySection
                 }
                 .padding(16)
             }
@@ -83,7 +82,7 @@ struct SignView: View {
                         Button { clear() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.subtle) }
                     }
                 } else {
-                    Text("Pick an .ipa from Files, or download a build artifact in the Build tab and it lands here. Installs go over the on-device Vapor server at \(ServerConfig.installHost).")
+                    Text("Pick an .ipa from Files, or grab one in Browse (releases, Actions artifacts, repo files) and it lands here. Installs go over the on-device Vapor server at \(ServerConfig.installHost).")
                         .font(.caption).foregroundStyle(Theme.subtle)
                 }
                 Button { pick() } label: {
@@ -232,42 +231,6 @@ struct SignView: View {
                     .background(Theme.bg)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .onChange(of: log.count) { _ in if let l = log.indices.last { proxy.scrollTo(l, anchor: .bottom) } }
-                }
-            }
-        }
-    }
-
-    // MARK: History
-
-    @ViewBuilder
-    private var historySection: some View {
-        if !signed.entries.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("SIGNED").font(.system(size: 12, weight: .semibold)).kerning(1.1).foregroundStyle(Theme.subtle)
-                ForEach(signed.entries) { e in
-                    HStack(spacing: 12) {
-                        iconView(e.iconURL.flatMap { try? Data(contentsOf: $0) }, side: 40)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(e.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
-                            Text("\(e.bundleID) · v\(e.version)").font(.caption.monospaced()).foregroundStyle(Theme.subtle).lineLimit(1)
-                            Text("\(e.certName) · \(e.signedAt.formatted(date: .abbreviated, time: .shortened))").font(.caption2).foregroundStyle(Theme.subtle)
-                        }
-                        Spacer()
-                        Button { Task { await install(e) } } label: {
-                            if installing == e.id { ProgressView().tint(Theme.accent) }
-                            else { Image(systemName: "arrow.down.app.fill").font(.system(size: 20)).foregroundStyle(.green) }
-                        }
-                        .disabled(installing != nil)
-                        Menu {
-                            Button { share = URLItem(url: e.ipaURL) } label: { Label("Share IPA", systemImage: "square.and.arrow.up") }
-                            Button(role: .destructive) { signed.delete(e) } label: { Label("Delete", systemImage: "trash") }
-                        } label: {
-                            Image(systemName: "ellipsis.circle").foregroundStyle(Theme.subtle)
-                        }
-                    }
-                    .padding(12).background(Theme.card)
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             }
         }

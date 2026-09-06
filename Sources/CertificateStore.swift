@@ -226,6 +226,6 @@ final class SignQueue: ObservableObject {
 
     func enqueue(_ url: URL, switchToSign: Bool = true) {
         pending = url
-        if switchToSign { requestedTab = 4 }
+        if switchToSign { requestedTab = 0 }
     }
 }

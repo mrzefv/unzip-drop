@@ -1,1 +1,18 @@
-{"records":[],"updatedAt":"2026-09-06T19:03:13Z","instructions":"Waiting for certbot to hand out the TXT values…"}
+{
+  "records": [
+    {
+      "domain": "zefv.dev",
+      "name": "_acme-challenge.zefv.dev",
+      "type": "TXT",
+      "value": "kQpI1kDkl1yMGDWkmZ37lLk9zYSBU5ZGjFNHAEINcQo",
+      "step": 1,
+      "of": 2,
+      "status": "pending",
+      "force": false,
+      "updatedAt": "2026-09-06T19:03:23Z",
+      "lastCheck": {}
+    }
+  ],
+  "updatedAt": "2026-09-06T19:03:23Z",
+  "instructions": "Add a TXT record at _acme-challenge.zefv.dev with each pending value (keep both). Gate = the zone's authoritative nameservers; public resolvers may lag. Use Force continue in the app if you're sure the record is saved."
+}

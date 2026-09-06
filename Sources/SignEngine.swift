@@ -155,6 +155,46 @@ nonisolated struct SignOutcome: Sendable {
     let version: String
 }
 
+nonisolated struct SignOptions: Sendable {
+    // identity
+    var name: String?
+    var bundleID: String?
+    var version: String?
+    var iconPNG: Data?                 // replaces AppIcon (all sizes) if set
+
+    // dylib injection: (localFileURL, weak)
+    var injectDylibs: [(url: URL, weak: Bool)] = []
+    var injectPath = "@executable_path"        // or @rpath
+    var injectFolder = "/"                       // "/" (next to binary) or "Frameworks/"
+    var removeDylibs: [String] = []              // load-command paths to strip
+
+    // Info.plist tweaks
+    var plistSet: [String: String] = [:]         // key → string value (bool as "true"/"false")
+    var forceMinIOS: String?                     // e.g. "12.0"
+    var disableFileSharing = false
+    var forcePortrait = false
+    var skipIPad = false
+    var disableATS = false
+
+    // strip content (bundle mutations before signing)
+    var stripSCInfo = false
+    var stripPrivacyManifests = false
+    var stripWatchApps = false
+    var stripExtensions = false
+    var removeURLSchemes = false
+
+    var skipEmbeddedProvision = false
+
+    static let none = SignOptions()
+
+    var isEmpty: Bool {
+        name == nil && bundleID == nil && version == nil && iconPNG == nil
+        && injectDylibs.isEmpty && removeDylibs.isEmpty && plistSet.isEmpty
+        && forceMinIOS == nil && !disableFileSharing && !forcePortrait && !skipIPad && !disableATS
+        && !stripSCInfo && !stripPrivacyManifests && !stripWatchApps && !stripExtensions && !removeURLSchemes
+    }
+}
+
 nonisolated enum Signer {
 
     nonisolated static func signDetached(
@@ -163,6 +203,17 @@ nonisolated enum Signer {
         nameOverride: String?,
         bundleIDOverride: String?,
         versionOverride: String?,
+        onLog: (@Sendable (String) -> Void)? = nil
+    ) async throws -> SignOutcome {
+        var o = SignOptions()
+        o.name = nameOverride; o.bundleID = bundleIDOverride; o.version = versionOverride
+        return try await signDetached(ipaURL: ipaURL, material: material, options: o, onLog: onLog)
+    }
+
+    nonisolated static func signDetached(
+        ipaURL: URL,
+        material: CertMaterial,
+        options o: SignOptions,
         onLog: (@Sendable (String) -> Void)? = nil
     ) async throws -> SignOutcome {
         let fm = FileManager.default
@@ -187,6 +238,9 @@ nonisolated enum Signer {
             throw ZsignError.appBundleNotFound(inIPA: ipaURL.lastPathComponent)
         }
 
+        // 2b. Pre-sign mutations (strip content, plist tweaks, icon, dylibs).
+        try applyPreSign(appURL: appURL, options: o, onLog: onLog)
+
         // 3. Sign in place — capture the engine's real stdout.
         let capture = onLog.map { ConsoleCapture($0) }
         capture?.start()
@@ -196,9 +250,10 @@ nonisolated enum Signer {
                 provisionPath: provURL.path,
                 p12Path:       p12URL.path,
                 p12Password:   material.password,
-                bundleID:      bundleIDOverride,
-                displayName:   nameOverride,
-                version:       versionOverride
+                bundleID:      o.bundleID,
+                displayName:   o.name,
+                version:       o.version,
+                skipEmbeddedProvision: o.skipEmbeddedProvision
             )
             capture?.stop()
         } catch {
@@ -210,9 +265,9 @@ nonisolated enum Signer {
         let info = NSDictionary(contentsOf: appURL.appendingPathComponent("Info.plist"))
         let name = (info?["CFBundleDisplayName"] as? String)
             ?? (info?["CFBundleName"] as? String)
-            ?? nameOverride ?? appURL.deletingPathExtension().lastPathComponent
-        let bundleID = (info?["CFBundleIdentifier"] as? String) ?? bundleIDOverride ?? "unknown.bundle.id"
-        let version  = (info?["CFBundleShortVersionString"] as? String) ?? versionOverride ?? "1.0"
+            ?? o.name ?? appURL.deletingPathExtension().lastPathComponent
+        let bundleID = (info?["CFBundleIdentifier"] as? String) ?? o.bundleID ?? "unknown.bundle.id"
+        let version  = (info?["CFBundleShortVersionString"] as? String) ?? o.version ?? "1.0"
 
         // 5. Repack (stored) → signed .ipa in temp.
         let signed = fm.temporaryDirectory
@@ -225,6 +280,83 @@ nonisolated enum Signer {
 
         return SignOutcome(ipaURL: signed, name: name, bundleID: bundleID, version: version)
     }
+
+    // MARK: - Pre-sign mutations
+
+    private nonisolated static func applyPreSign(appURL: URL, options o: SignOptions, onLog: (@Sendable (String) -> Void)?) throws {
+        let fm = FileManager.default
+        let infoURL = appURL.appendingPathComponent("Info.plist")
+        let binName = (NSDictionary(contentsOf: infoURL)?["CFBundleExecutable"] as? String)
+            ?? appURL.deletingPathExtension().lastPathComponent
+        let binURL = appURL.appendingPathComponent(binName)
+
+        // Strip content
+        if o.stripSCInfo {
+            let sc = appURL.appendingPathComponent("SC_Info", isDirectory: true)
+            if fm.fileExists(atPath: sc.path) { try? fm.removeItem(at: sc); onLog?(">>> stripped SC_Info") }
+        }
+        if o.stripPrivacyManifests, let e = fm.enumerator(at: appURL, includingPropertiesForKeys: nil) {
+            for case let u as URL in e where u.lastPathComponent == "PrivacyInfo.xcprivacy" || u.pathExtension == "xcprivacy" { try? fm.removeItem(at: u) }
+            onLog?(">>> stripped privacy manifests")
+        }
+        if o.stripWatchApps {
+            let w = appURL.appendingPathComponent("Watch", isDirectory: true)
+            if fm.fileExists(atPath: w.path) { try? fm.removeItem(at: w); onLog?(">>> removed Watch app") }
+        }
+        if o.stripExtensions {
+            let px = appURL.appendingPathComponent("PlugIns", isDirectory: true)
+            if fm.fileExists(atPath: px.path) { try? fm.removeItem(at: px); onLog?(">>> removed app extensions") }
+        }
+
+        // Info.plist tweaks
+        if let dict = NSMutableDictionary(contentsOf: infoURL) {
+            var changed = false
+            for (k, v) in o.plistSet {
+                if v == "true" || v == "false" { dict[k] = (v == "true") } else if let n = Int(v) { dict[k] = n } else { dict[k] = v }
+                changed = true
+            }
+            if let m = o.forceMinIOS { dict["MinimumOSVersion"] = m; changed = true }
+            if o.disableFileSharing { dict["UIFileSharingEnabled"] = false; changed = true }
+            if o.forcePortrait { dict["UISupportedInterfaceOrientations"] = ["UIInterfaceOrientationPortrait"]; changed = true }
+            if o.skipIPad { dict["UIDeviceFamily"] = [1]; changed = true }
+            if o.removeURLSchemes { dict.removeObject(forKey: "CFBundleURLTypes"); changed = true }
+            if o.disableATS {
+                dict["NSAppTransportSecurity"] = ["NSAllowsArbitraryLoads": true]; changed = true
+            }
+            if changed { dict.write(to: infoURL, atomically: true); onLog?(">>> applied Info.plist tweaks") }
+        }
+
+        // Icon replacement (write one PNG at the standard names; zsign re-signs the bundle after).
+        if let png = o.iconPNG {
+            for name in ["AppIcon60x60@2x.png", "AppIcon60x60@3x.png", "AppIcon76x76@2x~ipad.png", "AppIcon.png"] {
+                try? png.write(to: appURL.appendingPathComponent(name))
+            }
+            // point Info.plist at a flat icon file too
+            if let dict = NSMutableDictionary(contentsOf: infoURL) {
+                dict["CFBundleIconFile"] = "AppIcon"
+                dict["CFBundleIcons"] = ["CFBundlePrimaryIcon": ["CFBundleIconFiles": ["AppIcon60x60"]]]
+                dict.write(to: infoURL, atomically: true)
+            }
+            onLog?(">>> replaced app icon")
+        }
+
+        // Dylibs: remove first, then inject.
+        if !o.removeDylibs.isEmpty, fm.fileExists(atPath: binURL.path) {
+            _ = ZsignSigner.removeDylibs(inMachO: binURL.path, o.removeDylibs)
+            onLog?(">>> removed \(o.removeDylibs.count) dylib load command(s)")
+        }
+        for d in o.injectDylibs {
+            let folder = o.injectFolder == "Frameworks/" ? appURL.appendingPathComponent("Frameworks", isDirectory: true) : appURL
+            try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            let dest = folder.appendingPathComponent(d.url.lastPathComponent)
+            try? fm.removeItem(at: dest)
+            try fm.copyItem(at: d.url, to: dest)
+            let loadPath = (o.injectFolder == "Frameworks/" ? "\(o.injectPath)/Frameworks/" : "\(o.injectPath)/") + d.url.lastPathComponent
+            try ZsignSigner.injectDylib(intoMachO: binURL.path, dylibPath: loadPath, weak: d.weak, createIfMissing: true)
+            onLog?(">>> injected \(d.url.lastPathComponent) (\(d.weak ? "weak" : "normal"))")
+        }
+    }
+
 }
 
 nonisolated struct IPAMeta: Sendable {

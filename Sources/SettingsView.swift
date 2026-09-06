@@ -1033,11 +1033,13 @@ private struct OTADomainScreen: View {
             guard let wf = wfs.first(where: { $0.path == ServerConfig.certWorkflowPath }) else {
                 throw GitHubError.badConfig("certs.yml not found in \(ServerConfig.certRepoOwner)/\(ServerConfig.certRepoName). Tap Link repo below first — it installs the workflow for you.")
             }
-            let email = UserDefaults.standard.string(forKey: "uzd_le_email") ?? ""
-            guard !email.isEmpty else { throw GitHubError.badConfig("Enter a Let's Encrypt email in the Cert repo card and save.") }
+            let email = Config.clean(UserDefaults.standard.string(forKey: "uzd_le_email") ?? "")
+            guard email.contains("@") else { throw GitHubError.badConfig("Enter a valid Let's Encrypt email in the Cert repo card and tap Save first.") }
+            // Confirm the fixed workflow (with the `email` input) is on main — an old
+            // certs.yml ignores the input and fails with 'No email'.
             try await client.dispatch(workflowID: wf.id, ref: "main",
                                       inputs: ["domain": ServerConfig.certDomain, "email": email, "force": "true"])
-            note = "certbot run dispatched for *.\(ServerConfig.certDomain) — TXT values appear above within ~1 min. Add them at your DNS host; the run finishes on its own. Then Pull latest."
+            note = "Dispatched for *.\(ServerConfig.certDomain) with \(email). If the run fails with 'No email', the old certs.yml is still on main — push the latest workflow, or set repo variable LE_EMAIL. TXT values appear above in ~1 min."
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch { self.error = error.localizedDescription }
         renewing = false

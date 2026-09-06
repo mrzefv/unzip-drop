@@ -28,6 +28,7 @@ struct SignView: View {
     @State private var lastSigned: SignedEntry?
     @State private var installing: String?
     @State private var share: URLItem?
+    @State private var showSheet = false
 
     var body: some View {
         ZStack {
@@ -48,6 +49,12 @@ struct SignView: View {
             }
         }
         .sheet(item: $share) { ShareSheet(items: [$0.url]) }
+        .fullScreenCover(isPresented: $showSheet) {
+            if let u = ipaURL, let m = meta {
+                SigningSheet(ipaURL: u, meta: m) { entry in lastSigned = entry }
+                    .preferredColorScheme(.dark)
+            }
+        }
         .onAppear { consumeQueue() }
         .onChange(of: queue.pending) { _ in consumeQueue() }
     }
@@ -153,18 +160,19 @@ struct SignView: View {
                     Text("Import a .p12 + .mobileprovision in Settings › Certificates first.")
                         .font(.caption).foregroundStyle(.orange)
                 }
-                Button { Task { await sign() } } label: {
+                Button { showSheet = true } label: {
                     HStack {
-                        if signing { ProgressView().tint(.black) } else { Image(systemName: "signature") }
-                        Text(signing ? "Signing…" : "Sign").fontWeight(.bold)
+                        Image(systemName: "signature")
+                        Text("Configure & Sign").fontWeight(.bold)
                         Spacer()
+                        Image(systemName: "chevron.right")
                     }
                     .padding(.vertical, 14).padding(.horizontal, 14)
                     .background(certs.active == nil ? Theme.subtle : Theme.accent)
                     .foregroundStyle(.black)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .disabled(signing || certs.active == nil)
+                .disabled(certs.active == nil)
 
                 if let e = lastSigned {
                     Divider().overlay(Theme.stroke)

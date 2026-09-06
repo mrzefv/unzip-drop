@@ -20,11 +20,11 @@
       "value": "2MWf7l7D4eVQWZM3hY0oLqTTZdh8loECF0qb2SYqaAE",
       "step": 2,
       "of": 2,
-      "status": "forced",
+      "status": "validated",
       "force": true,
-      "updatedAt": "2026-09-06T22:43:51Z",
+      "updatedAt": "2026-09-06T22:44:15Z",
       "lastCheck": {}
     }
   ],
-  "updatedAt": "2026-09-06T22:44:14Z"
+  "updatedAt": "2026-09-06T22:44:15Z"
 }

@@ -7,10 +7,10 @@
       "lastCheck": {},
       "name": "_acme-challenge.zefv.dev",
       "of": 2,
-      "status": "forced",
+      "status": "validated",
       "step": 1,
       "type": "TXT",
-      "updatedAt": "2026-09-06T19:00:41Z",
+      "updatedAt": "2026-09-06T19:02:52Z",
       "value": "n6fXJDC9-JQGhEoJ90MohV17IyCJRKkO0Yudd-9qaOE"
     },
     {
@@ -26,5 +26,5 @@
       "lastCheck": {}
     }
   ],
-  "updatedAt": "2026-09-06T19:02:29Z"
+  "updatedAt": "2026-09-06T19:02:52Z"
 }

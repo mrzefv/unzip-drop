@@ -54,11 +54,11 @@ final class CertificateSearchManager: ObservableObject {
         // Apply text search
         if !searchText.isEmpty {
             filtered = filtered.filter { cert in
-                cert.name.localizedCaseInsensitiveContains(searchText) ||
-                (try? Data(contentsOf: cert.provisionURL))
-                    .map { CertificateStore.profileInfo($0) }
-                    .flatMap { [$0.team, $0.name].compactMap { $0 } }
-                    .contains { $0.localizedCaseInsensitiveContains(searchText) } ?? false
+                if cert.name.localizedCaseInsensitiveContains(searchText) { return true }
+                guard let data = try? Data(contentsOf: cert.provisionURL) else { return false }
+                let info = CertificateStore.profileInfo(data)
+                return [info.team, info.name].compactMap { $0 }
+                    .contains { $0.localizedCaseInsensitiveContains(searchText) }
             }
         }
         

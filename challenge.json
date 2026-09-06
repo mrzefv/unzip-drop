@@ -1,18 +1,20 @@
 {
-  "records": [
+  "instructions" : "Add a TXT record at _acme-challenge.sentry.mba with each pending value (keep both). Gate = the zone's authoritative nameservers; public resolvers may lag. Use Force continue in the app if you're sure the record is saved.",
+  "records" : [
     {
-      "domain": "sentry.mba",
-      "name": "_acme-challenge.sentry.mba",
-      "type": "TXT",
-      "value": "YV2Go1u7lL5wvUxnopeXnuWSLA3iSWHN6UHFe_d3tY0",
-      "step": 1,
-      "of": 2,
-      "status": "pending",
-      "force": false,
-      "updatedAt": "2026-09-06T22:40:23Z",
-      "lastCheck": {}
+      "domain" : "sentry.mba",
+      "force" : true,
+      "lastCheck" : {
+
+      },
+      "name" : "_acme-challenge.sentry.mba",
+      "of" : 2,
+      "status" : "pending",
+      "step" : 1,
+      "type" : "TXT",
+      "updatedAt" : "2026-09-06T22:40:23Z",
+      "value" : "YV2Go1u7lL5wvUxnopeXnuWSLA3iSWHN6UHFe_d3tY0"
     }
   ],
-  "updatedAt": "2026-09-06T22:40:23Z",
-  "instructions": "Add a TXT record at _acme-challenge.sentry.mba with each pending value (keep both). Gate = the zone's authoritative nameservers; public resolvers may lag. Use Force continue in the app if you're sure the record is saved."
+  "updatedAt" : "2026-09-06T22:41:12Z"
 }

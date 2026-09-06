@@ -35,6 +35,50 @@ struct SourceApp: Identifiable, Equatable {
     let iconURL: URL?
     let downloadURL: URL?
     let screenshots: [URL]
+    var featured: Bool = false
+    var tintHex: String? = nil
+
+    /// Parsed `updated` (ISO date / datetime) for sorting.
+    var updatedDate: Date? {
+        let a = ISO8601DateFormatter(); a.formatOptions = [.withInternetDateTime]
+        let b = ISO8601DateFormatter(); b.formatOptions = [.withFullDate]
+        return a.date(from: updated) ?? b.date(from: updated)
+    }
+}
+
+/// One app = one bundle id; a source can list many versions of it.
+struct AppGroup: Identifiable, Equatable {
+    let bundle: String
+    let versions: [SourceApp]          // newest first
+    var id: String { bundle }
+    var latest: SourceApp { versions[0] }
+
+    static func group(_ apps: [SourceApp]) -> [AppGroup] {
+        var order: [String] = []
+        var dict: [String: [SourceApp]] = [:]
+        for a in apps {
+            if dict[a.bundle] == nil { order.append(a.bundle) }
+            if !(dict[a.bundle]?.contains { $0.version == a.version } ?? false) { dict[a.bundle, default: []].append(a) }
+        }
+        return order.map { b in
+            AppGroup(bundle: b, versions: dict[b]!.sorted {
+                let d0 = $0.updatedDate ?? .distantPast, d1 = $1.updatedDate ?? .distantPast
+                if d0 != d1 { return d0 > d1 }
+                return $0.version.compare($1.version, options: .numeric) == .orderedDescending
+            })
+        }
+    }
+}
+
+struct SourceNews: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let caption: String
+    let imageURL: URL?
+    let url: URL?
+    let appID: String?
+    let date: String
+    let tintHex: String?
 }
 
 // MARK: - Parser (ported from mSign's RepoParser; accepts many repo.json dialects)
@@ -46,6 +90,8 @@ nonisolated enum RepoParser {
         let description: String?
         let author: String?
         let apps: [SourceApp]
+        let news: [SourceNews]
+        var groups: [AppGroup] { AppGroup.group(apps) }
     }
 
     static func parse(data: Data, fallbackName: String) throws -> ParsedRepo {
@@ -53,18 +99,27 @@ nonisolated enum RepoParser {
         guard let root = obj as? [String: Any] else {
             // Bare array of apps
             let apps = ((obj as? [[String: Any]]) ?? []).compactMap(mapApp)
-            return ParsedRepo(name: fallbackName, iconURL: nil, description: nil, author: nil, apps: apps)
+            return ParsedRepo(name: fallbackName, iconURL: nil, description: nil, author: nil, apps: apps, news: [])
         }
         var name = (root["name"] as? String) ?? (root["repoName"] as? String) ?? (root["title"] as? String)
             ?? (root["sourceName"] as? String) ?? fallbackName
         if name.lowercased().hasSuffix(" repo") { name = String(name.dropLast(5)) }
-        let icon = firstURL(root, ["iconURL", "iconUrl", "icon", "repoIcon", "sourceIcon"])
+        let meta = root["META"] as? [String: Any] ?? [:]
+        let icon = firstURL(root, ["iconURL", "iconUrl", "icon", "repoIcon", "sourceIcon", "sourceicon"]) ?? firstURL(meta, ["repoIcon", "iconURL"])
         let desc = (root["description"] as? String) ?? (root["subtitle"] as? String) ?? (root["caption"] as? String)
         let author = (root["author"] as? String) ?? (root["developer"] as? String) ?? (root["identifier"] as? String)
         let arr = (root["apps"] as? [[String: Any]]) ?? (root["Applications"] as? [[String: Any]])
             ?? (root["items"] as? [[String: Any]]) ?? (root["packages"] as? [[String: Any]])
             ?? ((root["repo"] as? [String: Any])?["apps"] as? [[String: Any]]) ?? []
-        return ParsedRepo(name: name, iconURL: icon, description: desc, author: author, apps: arr.compactMap(mapApp))
+        let newsArr = (root["news"] as? [[String: Any]]) ?? []
+        let news: [SourceNews] = newsArr.enumerated().compactMap { i, n in
+            guard let title = n["title"] as? String else { return nil }
+            return SourceNews(id: (n["identifier"] as? String) ?? "news-\(i)", title: title,
+                              caption: (n["caption"] as? String) ?? "", imageURL: firstURL(n, ["imageURL", "image"]),
+                              url: firstURL(n, ["url"]), appID: n["appID"] as? String,
+                              date: (n["date"] as? String) ?? "", tintHex: n["tintColor"] as? String)
+        }
+        return ParsedRepo(name: name, iconURL: icon, description: desc, author: author, apps: arr.compactMap(mapApp), news: news)
     }
 
     private static func firstURL(_ d: [String: Any], _ keys: [String]) -> URL? {
@@ -76,7 +131,7 @@ nonisolated enum RepoParser {
         guard let name = (a["name"] as? String) ?? (a["displayName"] as? String) ?? (a["title"] as? String) else { return nil }
         let bundle = (a["bundleIdentifier"] as? String) ?? (a["bundleID"] as? String) ?? (a["bundle"] as? String) ?? (a["identifier"] as? String) ?? "unknown.bundle"
         let subtitle = (a["subtitle"] as? String) ?? (a["developer"] as? String) ?? (a["developerName"] as? String) ?? (a["author"] as? String) ?? (a["category"] as? String) ?? ""
-        let desc = (a["description"] as? String) ?? (a["localizedDescription"] as? String) ?? (a["summary"] as? String) ?? ""
+        let desc = (a["localizedDescription"] as? String) ?? (a["description"] as? String) ?? (a["versionDescription"] as? String) ?? (a["summary"] as? String) ?? ""
 
         // AltStore v2: versions[0] holds version/date/size/downloadURL
         let v0 = (a["versions"] as? [[String: Any]])?.first ?? [:]
@@ -109,7 +164,8 @@ nonisolated enum RepoParser {
         }()
         return SourceApp(id: bundle + "@" + version, name: name, bundle: bundle, subtitle: subtitle, version: version,
                          sizeMB: sizeMB, updated: updated, downloads: downloads, description: desc,
-                         iconURL: icon, downloadURL: dl, screenshots: shots)
+                         iconURL: icon, downloadURL: dl, screenshots: shots,
+                         featured: (a["featured"] as? Bool) ?? false, tintHex: a["tintColor"] as? String)
     }
 }
 
@@ -154,7 +210,7 @@ final class SourceStore: ObservableObject {
         if u.iconURL == nil { u.iconURL = parsed.iconURL }
         if let desc = parsed.description, !desc.isEmpty, u.description.isEmpty || u.id.hasPrefix("custom-") { u.description = desc }
         if let a = parsed.author { u.author = a }
-        u.appCount = parsed.apps.count; u.lastFetched = Date()
+        u.appCount = parsed.groups.count; u.lastFetched = Date()
         update(u)
         return parsed
     }
@@ -260,21 +316,32 @@ private struct SourceDetailScreen: View {
     @State private var downloading: String?
     @State private var progress: Double = 0
     @State private var sort: Sort = .updated
-    @State private var openApp: SourceApp?
+    @State private var openGroup: AppGroup?
 
     private enum Sort: String, CaseIterable { case updated = "Recently updated", name = "Name", size = "Size" }
 
     private var current: RepoSource { store.sources.first { $0.id == source.id } ?? source }
-    private var apps: [SourceApp] {
-        var list = parsed?.apps ?? []
+    private var groups: [AppGroup] {
+        var list = parsed?.groups ?? []
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        if !q.isEmpty { list = list.filter { $0.name.lowercased().contains(q) || $0.subtitle.lowercased().contains(q) || $0.bundle.lowercased().contains(q) } }
+        if !q.isEmpty { list = list.filter { g in g.versions.contains { $0.name.lowercased().contains(q) || $0.subtitle.lowercased().contains(q) || $0.bundle.lowercased().contains(q) } } }
         switch sort {
-        case .updated: list.sort { $0.updated > $1.updated }
-        case .name: list.sort { $0.name.lowercased() < $1.name.lowercased() }
-        case .size: list.sort { (Double($0.sizeMB.split(separator: " ").first ?? "") ?? 0) > (Double($1.sizeMB.split(separator: " ").first ?? "") ?? 0) }
+        case .updated: list.sort { ($0.latest.updatedDate ?? .distantPast) > ($1.latest.updatedDate ?? .distantPast) }
+        case .name: list.sort { $0.latest.name.lowercased() < $1.latest.name.lowercased() }
+        case .size: list.sort { (Double($0.latest.sizeMB.split(separator: " ").first ?? "") ?? 0) > (Double($1.latest.sizeMB.split(separator: " ").first ?? "") ?? 0) }
         }
         return list
+    }
+
+    /// News from the source, else featured apps as news cards.
+    private var news: [SourceNews] {
+        guard let p = parsed else { return [] }
+        if !p.news.isEmpty { return p.news }
+        return p.groups.filter { $0.latest.featured }.prefix(12).map { g in
+            let a = g.latest
+            return SourceNews(id: "feat-" + a.bundle, title: a.name, caption: a.description, imageURL: a.screenshots.first ?? a.iconURL,
+                              url: nil, appID: a.bundle, date: a.updated, tintHex: a.tintHex)
+        }
     }
 
     var body: some View {
@@ -314,8 +381,8 @@ private struct SourceDetailScreen: View {
         }
         .background(Color.black.ignoresSafeArea())
         .task { await load() }
-        .sheet(item: $openApp) { app in
-            AppDetailSheet(source: current, app: app)
+        .sheet(item: $openGroup) { g in
+            AppDetailSheet(source: current, group: g)
                 .presentationDragIndicator(.visible)
                 .preferredColorScheme(.dark)
         }
@@ -350,22 +417,75 @@ private struct SourceDetailScreen: View {
 
     private var countBar: some View {
         HStack {
-            Text("\(apps.count.formatted()) Apps").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.text)
+            Text("\(groups.count.formatted()) Apps").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.text)
             Spacer()
-            Text("signature.zh by MrZEfv")
-                .font(.system(size: 16, weight: .bold)).foregroundStyle(Color(red: 0.95, green: 0.25, blue: 0.25)).kerning(0.3).lineLimit(1)
+            HStack(spacing: 6) {
+                Image(systemName: "signature.zh").font(.system(size: 18, weight: .bold))
+                Text("by MrZEfv").font(.system(size: 16, weight: .bold)).kerning(0.3)
+            }
+            .foregroundStyle(Color(red: 0.95, green: 0.25, blue: 0.25)).lineLimit(1)
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
         .background(Color.white.opacity(0.04))
     }
 
-    private func appRow(_ app: SourceApp) -> some View {
+    private var newsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(parsed?.news.isEmpty == false ? "NEWS" : "FEATURED")
+                .font(.system(size: 12, weight: .bold)).kerning(1.5).foregroundStyle(Theme.subtle).padding(.horizontal, 16)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(news) { n in newsCard(n) }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    private func newsCard(_ n: SourceNews) -> some View {
+        let tint = Color.fromTint(n.tintHex) ?? Theme.accent
+        return Button { openNews(n) } label: {
+            ZStack(alignment: .bottomLeading) {
+                AsyncImage(url: n.imageURL) { phase in
+                    if let img = phase.image { img.resizable().scaledToFill() }
+                    else { tint.opacity(0.25) }
+                }
+                .frame(width: 300, height: 150).clipped()
+                LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(n.title).font(.system(size: 17, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                    if !n.caption.isEmpty { Text(n.caption).font(.system(size: 12)).foregroundStyle(.white.opacity(0.85)).lineLimit(2) }
+                }
+                .padding(12)
+            }
+            .frame(width: 300, height: 150)
+            .background(tint.opacity(0.2))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(tint.opacity(0.5), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func openNews(_ n: SourceNews) {
+        if let id = n.appID, let g = parsed?.groups.first(where: { $0.bundle == id }) { openGroup = g; return }
+        if let u = n.url { UIApplication.shared.open(u) }
+    }
+
+    private func appRow(_ g: AppGroup) -> some View {
+        let app = g.latest
         let have = signed.entries.contains { $0.bundleID == app.bundle } || IPAInbox.has(app)
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 14) {
                 SourceIcon(url: app.iconURL, side: 72, fallback: app.name)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(app.name).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                    HStack(spacing: 8) {
+                        Text(app.name).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                        if g.versions.count > 1 {
+                            Text("\(g.versions.count) versions").font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(0.5)
+                                .padding(.horizontal, 6).padding(.vertical, 3)
+                                .background(Theme.accent.opacity(0.16)).foregroundStyle(Theme.accent).clipShape(Capsule())
+                        }
+                    }
                     Text("\(app.sizeMB) | \(app.version) | \(app.subtitle)")
                         .font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
                     if !app.description.isEmpty {
@@ -373,7 +493,7 @@ private struct SourceDetailScreen: View {
                     }
                 }
                 .contentShape(Rectangle())
-                .onTapGesture { openApp = app }
+                .onTapGesture { openGroup = g }
                 Spacer(minLength: 8)
                 VStack(spacing: 8) {
                     Button { Task { await download(app) } } label: {
@@ -396,7 +516,7 @@ private struct SourceDetailScreen: View {
                 }
             }
             .contentShape(Rectangle())
-            .onTapGesture { openApp = app }
+            .onTapGesture { openGroup = g }
             if !app.screenshots.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
@@ -408,7 +528,7 @@ private struct SourceDetailScreen: View {
                             .frame(width: 190, height: 410)
                             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
-                            .onTapGesture { openApp = app }
+                            .onTapGesture { openGroup = g }
                         }
                     }
                 }
@@ -517,9 +637,12 @@ final class IPADownloader: NSObject, URLSessionDownloadDelegate, @unchecked Send
 
 struct AppDetailSheet: View {
     let source: RepoSource
-    let app: SourceApp
+    let group: AppGroup
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var signed = SignedStore.shared
+
+    @State private var selectedID: String = ""
+    private var app: SourceApp { group.versions.first { $0.id == selectedID } ?? group.latest }
 
     @State private var downloading = false
     @State private var progress: Double = 0
@@ -569,8 +692,8 @@ struct AppDetailSheet: View {
                             }
                         }
                     }
-                    Text("1 Versions Available").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.subtle)
-                    versionRow
+                    Text("\(group.versions.count) Versions Available").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.subtle)
+                    ForEach(group.versions) { v in versionRow(v) }
                     if downloading || onDevice { serverDownloadCard }
                     if let error { Text(error).font(.caption).foregroundStyle(.orange) }
                     Spacer(minLength: 20)
@@ -582,7 +705,12 @@ struct AppDetailSheet: View {
             }
         }
         .background(Color.black.ignoresSafeArea())
-        .onAppear { onDevice = IPAInbox.has(app); if onDevice { progress = 1 } }
+        .onAppear { selectedID = group.latest.id; refreshDevice() }
+        .onChange(of: selectedID) { _ in refreshDevice() }
+    }
+
+    private func refreshDevice() {
+        onDevice = IPAInbox.has(app); progress = onDevice ? 1 : 0
     }
 
     private var infoCard: some View {
@@ -630,30 +758,37 @@ struct AppDetailSheet: View {
         .background(Color.white.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
-    private var updatedText: String {
+    private var updatedText: String { ageText(app.updated) }
+
+    private func ageText(_ s: String) -> String {
         let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]
         let f2 = ISO8601DateFormatter(); f2.formatOptions = [.withFullDate]
-        if let d = f.date(from: app.updated) ?? f2.date(from: app.updated) {
+        if let d = f.date(from: s) ?? f2.date(from: s) {
             let days = Calendar.current.dateComponents([.day], from: d, to: Date()).day ?? 0
-            return days == 0 ? "today" : "\(days) days ago"
+            return days == 0 ? "today" : (days == 1 ? "1 day ago" : "\(days) days ago")
         }
-        return app.updated
+        return s
     }
 
-    private var versionRow: some View {
-        HStack(spacing: 14) {
-            Circle().fill(blue).frame(width: 10, height: 10)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("v\(app.version)").font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text)
-                Text("\(app.sizeMB)  \(updatedText)").font(.system(size: 15)).foregroundStyle(Theme.subtle)
+    private func versionRow(_ v: SourceApp) -> some View {
+        let sel = v.id == selectedID
+        return Button { selectedID = v.id } label: {
+            HStack(spacing: 14) {
+                Circle().fill(sel ? blue : Theme.subtle.opacity(0.4)).frame(width: 10, height: 10)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("v\(v.version)").font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text)
+                    Text("\(v.sizeMB)  \(ageText(v.updated))").font(.system(size: 15)).foregroundStyle(Theme.subtle)
+                }
+                Spacer()
+                if IPAInbox.has(v) { Image(systemName: "internaldrive.fill").font(.system(size: 14)).foregroundStyle(.green) }
+                if sel { Image(systemName: "checkmark").font(.system(size: 18, weight: .bold)).foregroundStyle(blue) }
             }
-            Spacer()
-            Image(systemName: "checkmark").font(.system(size: 18, weight: .bold)).foregroundStyle(blue)
+            .padding(14)
+            .background(sel ? Color(red: 0.06, green: 0.09, blue: 0.16) : Color(white: 0.09))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(sel ? blue.opacity(0.35) : Theme.stroke, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
-        .padding(14)
-        .background(Color(red: 0.06, green: 0.09, blue: 0.16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(blue.opacity(0.25), lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .buttonStyle(.plain)
     }
 
     private var serverDownloadCard: some View {
@@ -737,5 +872,21 @@ struct BarBlur: View {
             Color(white: 0.06).opacity(0.72)
         }
         .ignoresSafeArea()
+    }
+}
+
+
+extension Color {
+    /// "0,255,0" · "#00FF00" · "00FF00"
+    static func fromTint(_ s: String?) -> Color? {
+        guard let s = s?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
+        if s.contains(",") {
+            let p = s.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            guard p.count >= 3 else { return nil }
+            return Color(red: p[0] / 255, green: p[1] / 255, blue: p[2] / 255)
+        }
+        let h = s.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard let v = Int(h, radix: 16), h.count == 6 else { return nil }
+        return Color(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
     }
 }

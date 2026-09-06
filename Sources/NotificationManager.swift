@@ -51,7 +51,7 @@ final class NotificationManager: ObservableObject {
             if daysRemaining == 1 {
                 scheduleNotification(
                     title: "Certificate Expires Tomorrow",
-                    body: "\(cert.name) expires tomorrow at \(expiryDate.formatted(time: .shortened))",
+                    body: "\(cert.name) expires tomorrow at \(expiryDate.formatted(date: .omitted, time: .shortened))",
                     date: expiryDate.addingTimeInterval(-24 * 3600),
                     id: "cert-1day-\(cert.id)"
                 )

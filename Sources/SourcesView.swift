@@ -11,7 +11,7 @@ import UIKit
 
 // MARK: - Models
 
-struct RepoSource: Codable, Identifiable, Equatable {
+struct RepoSource: Codable, Identifiable, Equatable, Hashable {
     var id: String
     var name: String
     var url: URL
@@ -168,9 +168,19 @@ struct SourcesView: View {
     @State private var adding = false
     @State private var newURL = ""
     @State private var addError: String?
-    @State private var selected: RepoSource?
 
     var body: some View {
+        NavigationStack {
+            sourcesBody
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(for: RepoSource.self) { s in
+                    SourceDetailScreen(source: s).toolbar(.hidden, for: .navigationBar)
+                }
+        }
+        .tint(Theme.accent)
+    }
+
+    private var sourcesBody: some View {
         ZStack {
             Theme.bg.ignoresSafeArea()
             VStack(spacing: 0) {
@@ -188,8 +198,8 @@ struct SourcesView: View {
 
                 List {
                     ForEach(store.sources) { s in
-                        Button { if !editing { selected = s } } label: { sourceRow(s) }
-                            .buttonStyle(.plain)
+                        NavigationLink(value: s) { sourceRow(s) }
+                            .disabled(editing)
                             .listRowBackground(Theme.bg)
                             .listRowSeparatorTint(Theme.stroke)
                             .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
@@ -203,7 +213,6 @@ struct SourcesView: View {
                 .environment(\.editMode, .constant(editing ? .active : .inactive))
             }
         }
-        .fullScreenCover(item: $selected) { s in SourceDetailScreen(source: s).preferredColorScheme(.dark) }
         .alert("Add source", isPresented: $adding) {
             TextField("https://example.com/repo.json", text: $newURL).textInputAutocapitalization(.never).autocorrectionDisabled()
             Button("Add") { add() }
@@ -221,9 +230,7 @@ struct SourcesView: View {
                 if let n = s.appCount { Text("\(n) apps").font(.caption2.monospaced()).foregroundStyle(Theme.accent) }
             }
             Spacer()
-            if !editing {
-                Image(systemName: "arrow.up.forward.square").font(.system(size: 26, weight: .medium)).foregroundStyle(Theme.accent)
-            }
+            Image(systemName: "arrow.up.forward.square").font(.system(size: 26, weight: .medium)).foregroundStyle(Theme.accent)
         }
         .contentShape(Rectangle())
     }
@@ -253,6 +260,7 @@ private struct SourceDetailScreen: View {
     @State private var downloading: String?
     @State private var progress: Double = 0
     @State private var sort: Sort = .updated
+    @State private var openApp: SourceApp?
 
     private enum Sort: String, CaseIterable { case updated = "Recently updated", name = "Name", size = "Size" }
 
@@ -301,6 +309,11 @@ private struct SourceDetailScreen: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .task { await load() }
+        .sheet(item: $openApp) { app in
+            AppDetailSheet(source: current, app: app)
+                .presentationDragIndicator(.visible)
+                .preferredColorScheme(.dark)
+        }
     }
 
     // Header: back · icon + NAME · search · sort
@@ -311,8 +324,8 @@ private struct SourceDetailScreen: View {
             }
             Spacer()
             HStack(spacing: 10) {
-                SourceIcon(url: current.iconURL, side: 34, fallback: current.name)
-                Text(current.name.uppercased()).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                SourceIcon(url: current.iconURL, side: 44, fallback: current.name)
+                Text(current.name.uppercased()).font(.system(size: 26, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
             }
             Spacer()
             Button { withAnimation { showSearch.toggle() } } label: {
@@ -328,35 +341,36 @@ private struct SourceDetailScreen: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(Theme.card.opacity(0.6))
+        .background(Theme.bg)
     }
 
     private var countBar: some View {
         HStack {
-            Text("\(apps.count.formatted()) Apps").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.text)
+            Text("\(apps.count.formatted()) Apps").font(.system(size: 26, weight: .semibold)).foregroundStyle(Theme.text)
             Spacer()
-            if let a = current.author ?? parsed?.author {
-                Text(a).font(.system(size: 18, weight: .bold)).foregroundStyle(.red).kerning(0.5)
-            }
+            Text((current.author ?? parsed?.author ?? current.url.host ?? "").uppercased())
+                .font(.system(size: 22, weight: .bold)).foregroundStyle(Color(red: 0.95, green: 0.25, blue: 0.25)).kerning(0.5).lineLimit(1)
         }
-        .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(Theme.card.opacity(0.35))
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(Theme.card.opacity(0.5))
         .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
     }
 
     private func appRow(_ app: SourceApp) -> some View {
-        let have = signed.entries.contains { $0.bundleID == app.bundle }
+        let have = signed.entries.contains { $0.bundleID == app.bundle } || IPAInbox.has(app)
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 14) {
-                SourceIcon(url: app.iconURL, side: 84, fallback: app.name)
+                SourceIcon(url: app.iconURL, side: 96, fallback: app.name)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(app.name).font(.system(size: 26, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                    Text(app.name).font(.system(size: 30, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
                     Text("\(app.sizeMB) | \(app.version) | \(app.subtitle)")
-                        .font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                        .font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
                     if !app.description.isEmpty {
-                        Text(app.description).font(.system(size: 15)).foregroundStyle(Theme.subtle).lineLimit(1)
+                        Text(app.description).font(.system(size: 17)).foregroundStyle(Theme.subtle).lineLimit(1)
                     }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { openApp = app }
                 Spacer(minLength: 8)
                 VStack(spacing: 8) {
                     Button { Task { await download(app) } } label: {
@@ -375,9 +389,11 @@ private struct SourceDetailScreen: View {
                         .frame(width: 44, height: 44).foregroundStyle(Theme.accent)
                     }
                     .disabled(downloading != nil || app.downloadURL == nil)
-                    Text("Views: \(app.downloads)").font(.system(size: 13)).foregroundStyle(Theme.subtle)
+                    Text("Views: \(app.downloads)").font(.system(size: 15)).foregroundStyle(Theme.subtle)
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture { openApp = app }
             if !app.screenshots.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
@@ -386,9 +402,10 @@ private struct SourceDetailScreen: View {
                                 if let img = phase.image { img.resizable().scaledToFill() }
                                 else { Theme.card.overlay(ProgressView().tint(Theme.accent)) }
                             }
-                            .frame(width: 176, height: 380)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+                            .frame(width: 262, height: 566)
+                            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+                            .onTapGesture { openApp = app }
                         }
                     }
                 }
@@ -403,18 +420,10 @@ private struct SourceDetailScreen: View {
     }
 
     private func download(_ app: SourceApp) async {
-        guard let u = app.downloadURL else { return }
         downloading = app.id; progress = 0; error = nil
-        let name = (app.name.replacingOccurrences(of: "/", with: "-")) + "-" + app.version + ".ipa"
-        let dest = AppPaths.dir("inbox").appendingPathComponent(name)
         do {
-            let (tmp, resp) = try await URLSession.shared.download(from: u, delegate: nil)
-            guard (resp as? HTTPURLResponse)?.statusCode ?? 0 < 400 else { throw GitHubError.badConfig("Download failed (HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0))") }
-            try? FileManager.default.removeItem(at: dest)
-            try FileManager.default.moveItem(at: tmp, to: dest)
-            progress = 1
+            let dest = try await IPADownloader.shared.download(app) { p in Task { @MainActor in progress = p } }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            dismiss()
             SignQueue.shared.enqueue(dest)
         } catch { self.error = error.localizedDescription }
         downloading = nil
@@ -439,5 +448,276 @@ struct SourceIcon: View {
         }
         .frame(width: side, height: side)
         .clipShape(RoundedRectangle(cornerRadius: side * 0.22, style: .continuous))
+    }
+}
+
+
+// MARK: - Inbox + downloader (progress-reporting)
+
+nonisolated enum IPAInbox {
+    static func url(for app: SourceApp) -> URL {
+        let safe = app.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        return AppPaths.dir("inbox").appendingPathComponent("\(safe)-\(app.version).ipa")
+    }
+    static func has(_ app: SourceApp) -> Bool { FileManager.default.fileExists(atPath: url(for: app).path) }
+    static func size(_ app: SourceApp) -> Int64 {
+        (try? FileManager.default.attributesOfItem(atPath: url(for: app).path)[.size] as? Int64) ?? 0
+    }
+}
+
+final class IPADownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    static let shared = IPADownloader()
+    private lazy var session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+    private var handlers: [Int: (progress: (Double) -> Void, done: (Result<URL, Error>) -> Void, dest: URL)] = [:]
+    private let lock = NSLock()
+
+    /// Downloads to the inbox; returns immediately if it's already on device.
+    func download(_ app: SourceApp, progress: @escaping (Double) -> Void) async throws -> URL {
+        guard let src = app.downloadURL else { throw GitHubError.badConfig("This app has no download URL in the source.") }
+        let dest = IPAInbox.url(for: app)
+        if FileManager.default.fileExists(atPath: dest.path) { progress(1); return dest }
+        return try await withCheckedThrowingContinuation { cont in
+            var req = URLRequest(url: src)
+            req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+            let task = session.downloadTask(with: req)
+            lock.lock(); handlers[task.taskIdentifier] = (progress, { cont.resume(with: $0) }, dest); lock.unlock()
+            task.resume()
+        }
+    }
+
+    func urlSession(_ s: URLSession, downloadTask: URLSessionDownloadTask, didWriteData: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        lock.lock(); let h = handlers[downloadTask.taskIdentifier]; lock.unlock()
+        guard let h, totalBytesExpectedToWrite > 0 else { return }
+        h.progress(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
+    }
+
+    func urlSession(_ s: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        lock.lock(); let h = handlers.removeValue(forKey: downloadTask.taskIdentifier); lock.unlock()
+        guard let h else { return }
+        let code = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code < 400 else { h.done(.failure(GitHubError.badConfig("Download failed (HTTP \(code))"))); return }
+        do {
+            try? FileManager.default.removeItem(at: h.dest)
+            try FileManager.default.moveItem(at: location, to: h.dest)
+            h.done(.success(h.dest))
+        } catch { h.done(.failure(error)) }
+    }
+
+    func urlSession(_ s: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let error else { return }
+        lock.lock(); let h = handlers.removeValue(forKey: task.taskIdentifier); lock.unlock()
+        h?.done(.failure(error))
+    }
+}
+
+// MARK: - App detail sheet (mSign layout)
+
+struct AppDetailSheet: View {
+    let source: RepoSource
+    let app: SourceApp
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var signed = SignedStore.shared
+
+    @State private var downloading = false
+    @State private var progress: Double = 0
+    @State private var onDevice = false
+    @State private var error: String?
+
+    private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Title bar
+            ZStack {
+                HStack(spacing: 8) {
+                    SourceIcon(url: source.iconURL, side: 34, fallback: source.name)
+                    Text(source.name.uppercased()).font(.system(size: 20, weight: .bold)).kerning(1).foregroundStyle(Theme.text)
+                }
+                HStack {
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark").font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.text)
+                            .frame(width: 44, height: 44).background(Theme.card).clipShape(Circle())
+                    }
+                }
+            }
+            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 10)
+            .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    infoCard
+                    Text("SCREENSHOTS").font(.system(size: 20, weight: .bold)).kerning(1.5).foregroundStyle(Theme.subtle)
+                    if app.screenshots.isEmpty {
+                        Text("No screenshots.").font(.caption).foregroundStyle(Theme.subtle)
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 14) {
+                                ForEach(Array(app.screenshots.enumerated()), id: \.offset) { _, u in
+                                    AsyncImage(url: u) { phase in
+                                        if let img = phase.image { img.resizable().scaledToFill() }
+                                        else { Theme.card.overlay(ProgressView().tint(blue)) }
+                                    }
+                                    .frame(width: 262, height: 566)
+                                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
+                                }
+                            }
+                        }
+                    }
+                    Text("1 Versions Available").font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.subtle)
+                    versionRow
+                    if downloading || onDevice { serverDownloadCard }
+                    if let error { Text(error).font(.caption).foregroundStyle(.orange) }
+                    Spacer(minLength: 20)
+                }
+                .padding(16)
+            }
+
+            bottomBar
+        }
+        .background(Color.black.ignoresSafeArea())
+        .onAppear { onDevice = IPAInbox.has(app); if onDevice { progress = 1 } }
+    }
+
+    private var infoCard: some View {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 16) {
+                    SourceIcon(url: app.iconURL, side: 110, fallback: app.name)
+                        .shadow(color: blue.opacity(0.55), radius: 18)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(app.name).font(.system(size: 28, weight: .bold)).foregroundStyle(Theme.text).lineLimit(2)
+                        Text(app.subtitle.isEmpty ? (source.url.host ?? "") : app.subtitle)
+                            .font(.system(size: 17, design: .monospaced)).foregroundStyle(blue).lineLimit(1)
+                        Text("BUNDLE: \(app.bundle)").font(.system(size: 14, design: .monospaced)).foregroundStyle(blue.opacity(0.8)).lineLimit(1)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text((source.author ?? "MRzefv").uppercased() + " EDITION").font(.system(size: 20, weight: .bold)).kerning(1).foregroundStyle(blue)
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("•").foregroundStyle(blue)
+                        Text(app.description.isEmpty ? "No description." : app.description).font(.system(size: 20)).foregroundStyle(Theme.text)
+                    }
+                }
+                .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.white.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 18))
+            }
+            VStack(spacing: 12) {
+                stat("v\(app.version)", "VERSION")
+                stat(app.sizeMB, "SIZE")
+                stat(updatedText, "UPDATED")
+                stat(app.downloads, "DOWNLOADS")
+                stat(signed.entries.filter { $0.bundleID == app.bundle }.count.description, "SIGNED")
+            }
+            .frame(width: 118)
+        }
+        .padding(16)
+        .background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private func stat(_ v: String, _ k: String) -> some View {
+        VStack(spacing: 4) {
+            Text(v).font(.system(size: 22, weight: .bold)).foregroundStyle(blue).lineLimit(1).minimumScaleFactor(0.6)
+            Text(k).font(.system(size: 12, weight: .semibold)).kerning(1.2).foregroundStyle(Theme.subtle)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 14)
+        .background(Color.white.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var updatedText: String {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]
+        let f2 = ISO8601DateFormatter(); f2.formatOptions = [.withFullDate]
+        if let d = f.date(from: app.updated) ?? f2.date(from: app.updated) {
+            let days = Calendar.current.dateComponents([.day], from: d, to: Date()).day ?? 0
+            return days == 0 ? "today" : "\(days) days ago"
+        }
+        return app.updated
+    }
+
+    private var versionRow: some View {
+        HStack(spacing: 14) {
+            Circle().fill(blue).frame(width: 12, height: 12)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("v\(app.version)").font(.system(size: 26, weight: .bold)).foregroundStyle(Theme.text)
+                Text("\(app.sizeMB)  \(updatedText)").font(.system(size: 20)).foregroundStyle(Theme.subtle)
+            }
+            Spacer()
+            Image(systemName: "checkmark").font(.system(size: 22, weight: .bold)).foregroundStyle(blue)
+        }
+        .padding(18)
+        .background(Color(red: 0.06, green: 0.09, blue: 0.16))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(blue.opacity(0.25), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+    }
+
+    private var serverDownloadCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Server Download").font(.system(size: 24, weight: .bold)).foregroundStyle(Theme.subtle)
+                Spacer()
+                if !onDevice { Text("\(Int(progress * 100))%").font(.system(size: 20, weight: .bold)).foregroundStyle(blue) }
+            }
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.08)).frame(height: 12)
+                    Capsule().fill(onDevice ? Color.green : blue).frame(width: max(12, g.size.width * progress), height: 12)
+                }
+            }
+            .frame(height: 12)
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Downloading to device…", systemImage: "arrow.down.square.fill").font(.system(size: 19, design: .monospaced)).foregroundStyle(Theme.subtle)
+                Label(source.url.host ?? source.name, systemImage: "globe").font(.system(size: 19, design: .monospaced)).foregroundStyle(blue)
+                if onDevice {
+                    Label("\(ByteCountFormatter.string(fromByteCount: IPAInbox.size(app), countStyle: .file)) on device — no re-download at sign", systemImage: "checkmark.square.fill")
+                        .font(.system(size: 19, design: .monospaced)).foregroundStyle(blue)
+                }
+            }
+        }
+        .padding(18).background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 22))
+    }
+
+    private var bottomBar: some View {
+        HStack {
+            Button { Task { await download() } } label: {
+                VStack(spacing: 6) {
+                    if downloading { ProgressView().tint(blue).scaleEffect(1.4).frame(height: 44) }
+                    else if onDevice { Image(systemName: "checkmark.circle.fill").font(.system(size: 40)) }
+                    else { Image(systemName: "arrow.down.circle").font(.system(size: 40)) }
+                    Text(downloading ? "Downloading" : (onDevice ? "Downloaded" : "Download")).font(.system(size: 20, weight: .semibold))
+                }
+                .foregroundStyle(blue).frame(width: 150)
+            }
+            .disabled(downloading || app.downloadURL == nil)
+            Spacer()
+            VStack(spacing: 4) {
+                Text("MRZefv").font(.system(size: 20, weight: .bold)).foregroundStyle(.orange)
+                Text("Powered by \((source.url.host ?? source.name).uppercased())").font(.system(size: 14, weight: .semibold)).foregroundStyle(blue)
+            }
+            Spacer()
+            Button {
+                dismiss(); SignQueue.shared.enqueue(IPAInbox.url(for: app))
+            } label: {
+                VStack(spacing: 6) {
+                    Image(systemName: "signature").font(.system(size: 40))
+                    Text("Sign IPA").font(.system(size: 20, weight: .semibold))
+                }
+                .foregroundStyle(onDevice ? blue : Theme.subtle).frame(width: 150)
+            }
+            .disabled(!onDevice)
+        }
+        .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 6)
+        .background(Color.black)
+        .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .top)
+    }
+
+    private func download() async {
+        downloading = true; error = nil; progress = 0
+        do {
+            _ = try await IPADownloader.shared.download(app) { p in Task { @MainActor in progress = p } }
+            onDevice = true; progress = 1
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch { self.error = error.localizedDescription }
+        downloading = false
     }
 }

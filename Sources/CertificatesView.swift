@@ -80,7 +80,7 @@ struct CertificatesScreen: View {
                         guard let u = urls.first, let d = try? Data(contentsOf: u) else { return }
                         provData = d; provName = u.lastPathComponent
                         let info = CertificateStore.profileInfo(d)
-                        if certName.isEmpty, let n = info.0 { certName = n }
+                        if certName.isEmpty, let n = info.name { certName = n }
                     }
                 }
 
@@ -167,8 +167,8 @@ struct CertificatesScreen: View {
             }.frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 2) {
                 Text(c.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
-                if let t = info.1 { Text(t).font(.caption).foregroundStyle(Theme.subtle).lineLimit(1) }
-                if let e = info.2 {
+                if let t = info.team { Text(t).font(.caption).foregroundStyle(Theme.subtle).lineLimit(1) }
+                if let e = info.expires {
                     let expired = e < Date()
                     Text((expired ? "Expired " : "Expires ") + e.formatted(date: .abbreviated, time: .omitted))
                         .font(.caption2).foregroundStyle(expired ? .orange : Theme.subtle)

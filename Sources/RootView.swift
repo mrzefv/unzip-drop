@@ -1,9 +1,9 @@
 //
 //  RootView.swift
 //  App shell. The app is a signer first: Library (sign + install), Browse
-//  (GitHub repos → releases / artifacts / files → IPA), Signed (history),
-//  Settings. The GitHub workspace tools (Import · Contents · Push · Build)
-//  live behind Settings › GitHub as a full-screen hub.
+//  (repo.json sources → apps → IPA), Signed (history), Settings. The GitHub
+//  tools (Import · Contents · Push · Build · Repos) live behind Settings ›
+//  GitHub as a full-screen hub.
 //
 
 import SwiftUI
@@ -20,7 +20,7 @@ struct RootView: View {
             ZStack {
                 switch tab {
                 case 0: SignView()
-                case 1: RepoBrowseView()
+                case 1: SourcesView()
                 case 2: SignedView()
                 default: SettingsView()
                 }
@@ -98,6 +98,7 @@ struct GitHubHubScreen: View {
         ("Contents", "folder.fill"),
         ("Push",     "arrow.up.circle.fill"),
         ("Build",    "hammer.fill"),
+        ("Repos",    "book.closed.fill"),
     ]
 
     var body: some View {
@@ -125,9 +126,9 @@ struct GitHubHubScreen: View {
             HStack(spacing: 6) {
                 ForEach(Array(pages.enumerated()), id: \.offset) { i, p in
                     Button { hub.page = i } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: p.icon).font(.system(size: 12, weight: .semibold))
-                            Text(p.label).font(.system(size: 12, weight: .semibold))
+                        HStack(spacing: 4) {
+                            Image(systemName: p.icon).font(.system(size: 11, weight: .semibold))
+                            Text(p.label).font(.system(size: 11, weight: .semibold))
                         }
                         .padding(.vertical, 8).frame(maxWidth: .infinity)
                         .background(hub.page == i ? Theme.accent.opacity(0.16) : Theme.card)
@@ -146,7 +147,8 @@ struct GitHubHubScreen: View {
                 case 0: ImportView()
                 case 1: ContentsView()
                 case 2: PushView()
-                default: BuildView()
+                case 3: BuildView()
+                default: RepoBrowseView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

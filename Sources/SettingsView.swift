@@ -49,6 +49,8 @@ struct SettingsView: View {
                                         subtitle: "Commit the workspace to \(config.owner.isEmpty ? "a repo" : "\(config.owner)/\(config.repo)")") { GitHubHub.shared.open(2) }
                             SettingsRow(icon: "hammer.fill", title: "Build",
                                         subtitle: "Actions runs, steps, artifacts") { GitHubHub.shared.open(3) }
+                            SettingsRow(icon: "book.closed.fill", title: "Repos",
+                                        subtitle: "Browse repos · releases · artifacts · files") { GitHubHub.shared.open(4) }
                         }
 
                         SettingsSection("Target") {

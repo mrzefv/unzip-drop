@@ -6,6 +6,8 @@
 import Foundation
 import CryptoKit
 import Compression
+import UIKit
+import CryptoKit
 
 struct BackupEntry: Codable {
     let id: String
@@ -186,38 +188,35 @@ final class BackupManager: ObservableObject {
     }
     
     private func compressData(_ data: Data) throws -> Data {
-        var compressed = Data()
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: data.count)
+        // zlib can expand tiny inputs; give it headroom.
+        let cap = data.count + 1024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: cap)
         defer { buffer.deallocate() }
-        
-        let compressedSize = compression_encode_buffer(
-            buffer, data.count,
-            (data as NSData).bytes.assumingMemoryBound(to: UInt8.self),
-            data.count,
-            nil,
-            COMPRESSION_ZLIB
-        )
-        
-        compressed = Data(bytes: buffer, count: compressedSize)
-        return compressed
+        let n = data.withUnsafeBytes { (src: UnsafeRawBufferPointer) -> Int in
+            guard let s = src.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return 0 }
+            return compression_encode_buffer(buffer, cap, s, data.count, nil, COMPRESSION_ZLIB)
+        }
+        guard n > 0 else { throw BackupError.compressionFailed }
+        return Data(bytes: buffer, count: n)
     }
     
     private func decompressData(_ data: Data) throws -> Data {
-        var decompressed = Data(count: data.count * 4)
-        let decompressedSize = decompressed.withUnsafeMutableBytes { destBuffer in
-            data.withUnsafeBytes { srcBuffer in
-                compression_decode_buffer(
-                    destBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) ?? UnsafeMutablePointer<UInt8>(bitPattern: 0)!,
-                    decompressed.count,
-                    srcBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) ?? UnsafeRawPointer(bitPattern: 0)!,
-                    data.count,
-                    nil,
-                    COMPRESSION_ZLIB
-                )
+        // Grow the output buffer until zlib no longer fills it completely.
+        var capacity = max(data.count * 4, 64 * 1024)
+        while true {
+            var decompressed = Data(count: capacity)
+            let cap = capacity
+            let n = decompressed.withUnsafeMutableBytes { (dst: UnsafeMutableRawBufferPointer) -> Int in
+                data.withUnsafeBytes { (src: UnsafeRawBufferPointer) -> Int in
+                    guard let d = dst.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                          let s = src.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return 0 }
+                    return compression_decode_buffer(d, cap, s, data.count, nil, COMPRESSION_ZLIB)
+                }
             }
+            if n == 0 { throw BackupError.corrupted }
+            if n < cap { decompressed.count = n; return decompressed }
+            capacity *= 2
         }
-        decompressed.count = decompressedSize
-        return decompressed
     }
     
     private func loadBackups() {
@@ -258,11 +257,6 @@ enum BackupError: LocalizedError {
 
 extension String {
     func sha256Hash() -> String {
-        let data = Data(self.utf8)
-        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-        data.withUnsafeBytes {
-            _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &digest)
-        }
-        return digest.map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: Data(self.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }

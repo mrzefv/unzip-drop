@@ -49,8 +49,6 @@ struct SettingsView: View {
                                         subtitle: "Commit the workspace to \(config.owner.isEmpty ? "a repo" : "\(config.owner)/\(config.repo)")") { GitHubHub.shared.open(2) }
                             SettingsRow(icon: "hammer.fill", title: "Build",
                                         subtitle: "Actions runs, steps, artifacts") { GitHubHub.shared.open(3) }
-                            SettingsRow(icon: "book.closed.fill", title: "Repos",
-                                        subtitle: "Browse repos · releases · artifacts · files") { GitHubHub.shared.open(4) }
                         }
 
                         SettingsSection("Target") {
@@ -611,6 +609,7 @@ private struct OTADomainScreen: View {
     @State private var fetchedAt = ZefvCert.meta?.fetchedAt
     @State private var error: String?
     @State private var note: String?
+    @State private var probe: ZefvCert.BranchProbe?
 
     @State private var board: AcmeBoard?
     @State private var dnsSeen: [String: Bool] = [:]
@@ -880,6 +879,13 @@ private struct OTADomainScreen: View {
                 kv("Covers", sans.isEmpty ? "—" : sans.joined(separator: ", "))
                 kv("Expires", expires.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
                 kv("Refreshed", fetchedAt?.formatted(date: .abbreviated, time: .shortened) ?? "never")
+                if let p = probe {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: p.hasPackJson && p.hasServerCrt && p.hasServerPem ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(p.hasPackJson && p.hasServerCrt && p.hasServerPem ? .green : .orange)
+                        Text(p.summary).font(.caption).foregroundStyle(Theme.subtle)
+                    }
+                }
                 if let error { Text(error).font(.caption).foregroundStyle(.orange) }
                 if let note { Text(note).font(.caption).foregroundStyle(.green) }
                 HStack(spacing: 10) {
@@ -905,6 +911,13 @@ private struct OTADomainScreen: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .disabled(renewing || !config.hasToken)
+                Button { Task { probe = await ZefvCert.probeCertBranch(token: config.token) } } label: {
+                    HStack { Image(systemName: "stethoscope"); Text("Check cert branch").fontWeight(.semibold); Spacer() }
+                        .padding(.vertical, 10).padding(.horizontal, 14)
+                        .background(Theme.card).foregroundStyle(Theme.accent)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
                 Text("Auto-pulls on install when within \(ServerConfig.refreshBufferDays) days of expiry. Renew forces a new issuance; watch it in the Build tab, then Pull latest.")
                     .font(.caption2).foregroundStyle(Theme.subtle)
             }

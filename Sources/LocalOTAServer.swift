@@ -477,6 +477,48 @@ extension ZefvCert {
         }
     }
 
+    /// What's actually on the certs branch — reports per-file presence so the
+    /// UI can distinguish "publish step failed" from "wrong repo/branch/token".
+    struct BranchProbe: Sendable {
+        var reachable = false
+        var httpCode = 0
+        var hasPackJson = false, hasServerCrt = false, hasServerPem = false
+        var files: [String] = []
+        var summary: String {
+            if httpCode == 404 && files.isEmpty { return "Branch/repo not found, or token can't read it (HTTP 404)." }
+            if !reachable { return "Couldn't reach the branch (HTTP \(httpCode))." }
+            if hasPackJson && hasServerCrt && hasServerPem { return "All cert files present — tap Pull latest." }
+            var missing: [String] = []
+            if !hasPackJson { missing.append("pack.json") }
+            if !hasServerCrt { missing.append("server.crt") }
+            if !hasServerPem { missing.append("server.pem") }
+            return "Branch exists but missing: \(missing.joined(separator: ", ")). The workflow's publish step didn't finish — re-run it (Renew now)."
+        }
+    }
+
+    static func probeCertBranch(token: String?) async -> BranchProbe {
+        var p = BranchProbe()
+        let o = ServerConfig.certRepoOwner, r = ServerConfig.certRepoName, b = ServerConfig.certBranch
+        var c = URLComponents(string: "https://api.github.com/repos/\(o)/\(r)/git/trees/\(b)")!
+        c.queryItems = [URLQueryItem(name: "recursive", value: "0")]
+        var req = URLRequest(url: c.url!)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+        if let token, !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        guard let (d, resp) = try? await URLSession.shared.data(for: req) else { return p }
+        p.httpCode = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard p.httpCode < 400, let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let tree = j["tree"] as? [[String: Any]] else { return p }
+        p.reachable = true
+        p.files = tree.compactMap { $0["path"] as? String }
+        p.hasPackJson = p.files.contains("pack.json")
+        p.hasServerCrt = p.files.contains("server.crt")
+        p.hasServerPem = p.files.contains("server.pem")
+        return p
+    }
+
     /// Live TXT lookup over DNS-over-HTTPS (same resolvers the hook polls).
     static func txtRecords(_ name: String) async -> [String] {
         var out = Set<String>()

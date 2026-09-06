@@ -1,18 +1,1 @@
-{
-  "records": [
-    {
-      "domain": "mrzefv.com",
-      "name": "_acme-challenge.mrzefv.com",
-      "type": "TXT",
-      "value": "KEO6Qh_PnOLIoYkRwgSEdhD8jOqTYCUHMjYE_cb11Ns",
-      "step": 1,
-      "of": 2,
-      "status": "pending",
-      "force": false,
-      "updatedAt": "2026-09-06T22:28:58Z",
-      "lastCheck": {}
-    }
-  ],
-  "updatedAt": "2026-09-06T22:28:58Z",
-  "instructions": "Add a TXT record at _acme-challenge.mrzefv.com with each pending value (keep both). Gate = the zone's authoritative nameservers; public resolvers may lag. Use Force continue in the app if you're sure the record is saved."
-}
+{"records":[],"updatedAt":"2026-09-06T22:29:29Z","instructions":"Waiting for certbot to hand out the TXT values…"}

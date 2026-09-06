@@ -9,10 +9,10 @@
       "of": 2,
       "status": "pending",
       "force": false,
-      "updatedAt": "2026-09-06T23:35:46Z",
+      "updatedAt": "2026-09-06T23:36:57Z",
       "lastCheck": {}
     }
   ],
-  "updatedAt": "2026-09-06T23:35:46Z",
+  "updatedAt": "2026-09-06T23:36:57Z",
   "instructions": "Add a TXT record at _acme-challenge.zefv.dev with each pending value (keep both). Gate = the zone's authoritative nameservers; public resolvers may lag. Use Force continue in the app if you're sure the record is saved."
 }

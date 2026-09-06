@@ -13,13 +13,13 @@ private enum Screen: Identifiable, Hashable {
     case about, repo, token
     case dylibTemplate, ipaTemplate
     case certificates, otaDomain
-    case tutorial(String)
+    case tutorials
     var id: String {
         switch self {
         case .about: return "about"; case .repo: return "repo"; case .token: return "token"
         case .dylibTemplate: return "tpl-dylib"; case .ipaTemplate: return "tpl-ipa"
         case .certificates: return "certs"; case .otaDomain: return "ota"
-        case .tutorial(let t): return "tut-" + t
+        case .tutorials: return "tutorials"
         }
     }
 }
@@ -56,7 +56,7 @@ struct SettingsView: View {
                             SettingsRow(icon: "checkmark.seal.fill", title: "Certificates",
                                         subtitle: certs.active?.name ?? "No signing certificate") { screen = .certificates }
                             SettingsRow(icon: "network", title: "On-Device OTA Domain",
-                                        subtitle: "\(ServerConfig.installHost) · zefv.dev cert") { screen = .otaDomain }
+                                        subtitle: "\(ServerConfig.installHost) · certbot via Actions") { screen = .otaDomain }
                         }
 
                         SettingsSection("Templates") {
@@ -66,10 +66,9 @@ struct SettingsView: View {
                                         subtitle: "SwiftUI · XcodeGen · unsigned Actions build") { screen = .ipaTemplate }
                         }
 
-                        SettingsSection("Tutorials") {
-                            ForEach(TutorialLibrary.all) { t in
-                                SettingsRow(icon: t.icon, title: t.title, subtitle: t.subtitle) { screen = .tutorial(t.id) }
-                            }
+                        SettingsSection("Learn") {
+                            SettingsRow(icon: "book.fill", title: "Tutorials",
+                                        subtitle: "\(TutorialLibrary.all.count) guides · phone-only workflow, FLEX, hooking, certs") { screen = .tutorials }
                         }
 
                         SettingsSection("Support") {
@@ -98,8 +97,7 @@ struct SettingsView: View {
                 case .otaDomain:     OTADomainScreen()
                 case .dylibTemplate: DylibTemplateScreen()
                 case .ipaTemplate:   IPATemplateScreen()
-                case .tutorial(let id):
-                    TutorialScreen(tutorial: TutorialLibrary.all.first { $0.id == id } ?? TutorialLibrary.flex)
+                case .tutorials: TutorialsListScreen()
                 }
             }
             .environmentObject(config)
@@ -574,100 +572,335 @@ private struct IPATemplateScreen: View {
 }
 
 
-// MARK: - OTA domain (zefv.dev)
+// MARK: - OTA domain (zefv.dev, hand-rolled certbot pipeline)
 
 private struct OTADomainScreen: View {
+    @EnvironmentObject var config: Config
+    @State private var domain = ServerConfig.certDomain
     @State private var host = ServerConfig.installHost
     @State private var saved = false
+    @State private var dnsLoopback: Bool?
+    @State private var dnsChecking = false
+    @State private var sans = ZefvCert.effectiveSANs
+
+    @State private var certOwner = ServerConfig.certRepoOwner
+    @State private var certRepo = ServerConfig.certRepoName
+    @State private var certBranch = ServerConfig.certBranch
+    @State private var sourceSaved = false
+    @State private var leEmail = UserDefaults.standard.string(forKey: "uzd_le_email") ?? ""
+    @State private var linking = false
+    @State private var linkReport: String?
+
     @State private var refreshing = false
+    @State private var renewing = false
     @State private var expires = ZefvCert.effectiveNotAfter
     @State private var cached = ZefvCert.hasCached
     @State private var fetchedAt = ZefvCert.meta?.fetchedAt
     @State private var error: String?
+    @State private var note: String?
+
+    @State private var board: AcmeBoard?
+    @State private var dnsSeen: [String: Bool] = [:]
+    @State private var checking = false
+    @State private var boardTimer: Timer?
+    @State private var copied: String?
 
     private var clean: String {
         host.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: "")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
-    private var hostOK: Bool { clean.lowercased().hasSuffix(".zefv.dev") || clean.lowercased() == "zefv.dev" }
+    private var cleanDomain: String {
+        domain.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            .replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "*.", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/."))
+    }
+    private var domainOK: Bool { cleanDomain.contains(".") && !cleanDomain.contains(" ") }
+    private var hostOK: Bool { domainOK && (clean.lowercased().hasSuffix("." + cleanDomain) || clean.lowercased() == cleanDomain) }
+    private var certCoversHost: Bool { ZefvCert.covers(clean.isEmpty ? "mr.\(cleanDomain)" : clean, sans: sans) }
 
     var body: some View {
         DetailScreen(title: "On-Device OTA Domain") {
-            Card {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("Install host", systemImage: "network").font(.headline).foregroundStyle(Theme.text)
-                    Text("Installs run over an on-device Vapor HTTPS server, same as mSign. *.zefv.dev resolves to 127.0.0.1 and is covered by the bundled Let's Encrypt wildcard cert. iOS trusts it, connects to loopback, installs.")
-                        .font(.caption).foregroundStyle(Theme.subtle)
-                    Field(label: "Host", text: $host, placeholder: "mr.zefv.dev", keyboard: .URL)
-                    if !hostOK {
-                        Text("Host must be under zefv.dev to match the cert.").font(.caption).foregroundStyle(.orange)
-                    }
-                    Button {
-                        ServerConfig.setInstallHost(clean.isEmpty ? "mr.zefv.dev" : clean)
-                        host = ServerConfig.installHost; saved = true
-                        UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    } label: {
-                        HStack { Image(systemName: saved ? "checkmark.circle.fill" : "network"); Text(saved ? "Saved" : "Save host").fontWeight(.semibold); Spacer() }
-                            .padding(.vertical, 12).padding(.horizontal, 14)
-                            .background(hostOK ? Theme.accent : Theme.subtle).foregroundStyle(.black)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                    .disabled(!hostOK)
-                }
-            }
-            Card {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Label("Certificate", systemImage: "lock.shield.fill").font(.headline).foregroundStyle(Theme.text)
-                        Spacer()
-                        statusPill
-                    }
-                    kv("In use", cached ? "Refreshed copy" : "Bundled (mSign server.crt)")
-                    kv("Covers", "*.zefv.dev, zefv.dev")
-                    kv("Expires", expires.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
-                    kv("Refreshed", fetchedAt?.formatted(date: .abbreviated, time: .shortened) ?? "never")
-                    kv("Source", ServerConfig.refreshURL.absoluteString)
-                    if let error { Text(error).font(.caption).foregroundStyle(.orange) }
-                    HStack(spacing: 10) {
-                        Button { Task { await refresh() } } label: {
-                            HStack {
-                                if refreshing { ProgressView().tint(.black) } else { Image(systemName: "arrow.triangle.2.circlepath") }
-                                Text(refreshing ? "Fetching…" : "Refresh certificate").fontWeight(.semibold)
-                                Spacer()
-                            }
-                            .padding(.vertical, 12).padding(.horizontal, 14)
-                            .background(Theme.accent).foregroundStyle(.black)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                        }
-                        .disabled(refreshing)
-                        if cached {
-                            Button { ZefvCert.clearCache(); reload() } label: {
-                                Image(systemName: "trash").frame(width: 46, height: 46)
-                                    .background(Theme.card).foregroundStyle(.orange)
-                                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                            }
-                        }
-                    }
-                    Text("Auto-refreshes on install when within \(ServerConfig.refreshBufferDays) days of expiry. certbot on mrzefv.com republishes pack.json; the bundled pair keeps working offline until then.")
-                        .font(.caption2).foregroundStyle(Theme.subtle)
-                }
-            }
+            hostCard
+            if let board, !board.records.isEmpty || renewing { challengeCard(board) }
+            certCard
+            sourceCard
             Card {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Manifest URL shape").font(.headline).foregroundStyle(Theme.text)
-                    Text("https://\(ServerConfig.installHost):<port>/<id>.plist")
-                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.accent)
+                    Text("How the cert is made").font(.headline).foregroundStyle(Theme.text)
+                    Text("`.github/workflows/certs.yml` runs certbot with a manual DNS-01 challenge for *.<your domain>. It publishes each TXT value here, then polls DNS until your record is live before letting Let's Encrypt validate — so no burned attempts or rate limits. Result goes to the `certs` branch; Build.yml bakes it into every IPA.")
+                        .font(.caption).foregroundStyle(Theme.subtle)
+                    Text("No secrets, no computer: Link repo installs everything; Renew now sends your email and domain to the workflow. Weekly cron renews when < 30 days remain if you also set repo variable LE_EMAIL (optional).")
+                        .font(.caption2).foregroundStyle(Theme.subtle)
                 }
             }
         }
         .onChange(of: host) { _ in saved = false }
-        .onAppear(perform: reload)
+        .onChange(of: domain) { _ in saved = false; dnsLoopback = nil }
+        .onChange(of: certOwner) { _ in sourceSaved = false }
+        .onChange(of: certRepo) { _ in sourceSaved = false }
+        .onChange(of: certBranch) { _ in sourceSaved = false }
+        .onAppear { reload(); Task { await loadBoard(); await checkLoopback() }; startBoardPolling() }
+        .onDisappear { boardTimer?.invalidate(); boardTimer = nil }
+    }
+
+    // MARK: Challenge board (manual DNS-01)
+
+    private func challengeCard(_ b: AcmeBoard) -> some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("DNS challenge", systemImage: "list.bullet.clipboard").font(.headline).foregroundStyle(Theme.text)
+                    Spacer()
+                    if checking { ProgressView().tint(Theme.accent) }
+                    Button { Task { await loadBoard(); await checkDNS() } } label: {
+                        Image(systemName: "arrow.clockwise").foregroundStyle(Theme.accent)
+                    }
+                }
+                if let i = b.instructions { Text(i).font(.caption).foregroundStyle(Theme.subtle) }
+                ForEach(b.records) { r in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Step \(r.step)/\(r.of) · \(r.domain)").font(.caption.weight(.semibold)).foregroundStyle(Theme.text)
+                            Spacer()
+                            statusTag(r)
+                        }
+                        copyRow("Name", r.name)
+                        copyRow("TXT value", r.value)
+                    }
+                    .padding(10).background(Theme.bg)
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(r.status == "pending" ? Theme.accent.opacity(0.5) : Theme.stroke, lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                if !b.pending.isEmpty {
+                    Text("Add each pending value as a TXT record on \(b.pending.first!.name) at your DNS host (keep both). The workflow polls DNS itself and continues once it sees them; nothing to click here.")
+                        .font(.caption2).foregroundStyle(Theme.subtle)
+                }
+            }
+        }
+    }
+
+    private func statusTag(_ r: AcmeChallenge) -> some View {
+        let live = dnsSeen[r.value] == true
+        let (text, color): (String, Color) = {
+            switch r.status {
+            case "validated": return ("VALIDATED", .green)
+            case "seen":      return ("SEEN · VALIDATING", .green)
+            case "timeout":   return ("TIMED OUT", .red)
+            default:          return (live ? "LIVE IN DNS" : "WAITING FOR TXT", live ? .green : .orange)
+            }
+        }()
+        return Text(text).font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(1)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(color.opacity(0.18)).foregroundStyle(color).clipShape(Capsule())
+    }
+
+    private func copyRow(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).font(.caption2).foregroundStyle(Theme.subtle)
+                Text(value).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.text).lineLimit(2).textSelection(.enabled)
+            }
+            Spacer()
+            Button {
+                UIPasteboard.general.string = value; copied = value
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { if copied == value { copied = nil } }
+            } label: {
+                Image(systemName: copied == value ? "checkmark" : "doc.on.doc").font(.caption).foregroundStyle(Theme.accent)
+                    .frame(width: 30, height: 30).background(Theme.accent.opacity(0.12)).clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    private func loadBoard() async {
+        board = await ZefvCert.challengeBoard(token: config.token)
+    }
+
+    private func checkDNS() async {
+        guard let b = board else { return }
+        checking = true
+        let names = Set(b.records.map(\.name))
+        var seen: [String: Bool] = [:]
+        for n in names {
+            let txts = await ZefvCert.txtRecords(n)
+            for r in b.records where r.name == n { seen[r.value] = txts.contains(r.value) }
+        }
+        dnsSeen = seen
+        checking = false
+    }
+
+    private func startBoardPolling() {
+        boardTimer?.invalidate()
+        boardTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
+            Task { @MainActor in
+                await loadBoard()
+                if board?.pending.isEmpty == false { await checkDNS() }
+                // Cert landed? refresh the status card.
+                if board?.pending.isEmpty ?? true, renewing == false { reload() }
+            }
+        }
+    }
+
+    private var hostCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Domain & install host", systemImage: "network").font(.headline).foregroundStyle(Theme.text)
+                Text("Installs run over an on-device Vapor HTTPS server. Use any domain you control: point `*.<domain>` (A record) at 127.0.0.1, then issue a wildcard cert for it with Renew below. iOS trusts the cert, connects to loopback, installs. Default zefv.dev ships with a cert.")
+                    .font(.caption).foregroundStyle(Theme.subtle)
+                Field(label: "Domain", text: $domain, placeholder: ServerConfig.defaultDomain, keyboard: .URL)
+                Field(label: "Install host", text: $host, placeholder: "mr.\(cleanDomain.isEmpty ? ServerConfig.defaultDomain : cleanDomain)", keyboard: .URL)
+                if !domainOK { Text("Enter a domain like example.com").font(.caption).foregroundStyle(.orange) }
+                else if !hostOK { Text("Host must be under \(cleanDomain).").font(.caption).foregroundStyle(.orange) }
+                else if !certCoversHost {
+                    Text("Loaded cert covers \(sans.isEmpty ? "—" : sans.joined(separator: ", ")) — not \(clean). Save, then Renew now to issue one for \(cleanDomain).")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                HStack(spacing: 8) {
+                    Image(systemName: dnsChecking ? "hourglass" : (dnsLoopback == true ? "checkmark.circle.fill" : (dnsLoopback == false ? "xmark.octagon.fill" : "questionmark.circle")))
+                        .foregroundStyle(dnsLoopback == true ? .green : (dnsLoopback == false ? .red : Theme.subtle))
+                    Text(dnsChecking ? "Resolving *.\(cleanDomain)…"
+                         : dnsLoopback == true ? "*.\(cleanDomain) → 127.0.0.1 ✓"
+                         : dnsLoopback == false ? "*.\(cleanDomain) does not resolve to 127.0.0.1 — add a wildcard A record"
+                         : "DNS not checked")
+                        .font(.caption).foregroundStyle(Theme.subtle)
+                    Spacer()
+                    Button { Task { await checkLoopback() } } label: { Text("Check").font(.caption.weight(.semibold)).foregroundStyle(Theme.accent) }
+                        .disabled(!domainOK || dnsChecking)
+                }
+                accentButton(saved ? "Saved" : "Save", saved ? "checkmark.circle.fill" : "network", enabled: hostOK) {
+                    ServerConfig.setCertDomain(cleanDomain)
+                    ServerConfig.setInstallHost(clean.isEmpty ? "mr.\(cleanDomain)" : clean)
+                    domain = ServerConfig.certDomain; host = ServerConfig.installHost; saved = true
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    Task { await checkLoopback() }
+                }
+            }
+        }
+    }
+
+    private func checkLoopback() async {
+        guard domainOK else { return }
+        dnsChecking = true
+        dnsLoopback = await ZefvCert.resolvesToLoopback("ota-probe.\(cleanDomain)")
+        dnsChecking = false
+    }
+
+    private var certCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("Certificate", systemImage: "lock.shield.fill").font(.headline).foregroundStyle(Theme.text)
+                    Spacer()
+                    statusPill
+                }
+                kv("In use", cached ? "Refreshed from repo" : "Bundled in IPA")
+                kv("Covers", sans.isEmpty ? "—" : sans.joined(separator: ", "))
+                kv("Expires", expires.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
+                kv("Refreshed", fetchedAt?.formatted(date: .abbreviated, time: .shortened) ?? "never")
+                if let error { Text(error).font(.caption).foregroundStyle(.orange) }
+                if let note { Text(note).font(.caption).foregroundStyle(.green) }
+                HStack(spacing: 10) {
+                    accentButton(refreshing ? "Fetching…" : "Pull latest", "arrow.down.circle", busy: refreshing) { Task { await refresh() } }
+                    if cached {
+                        Button { ZefvCert.clearCache(); reload() } label: {
+                            Image(systemName: "trash").frame(width: 46, height: 46)
+                                .background(Theme.card).foregroundStyle(.orange)
+                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+                }
+                Button { Task { await renew() } } label: {
+                    HStack {
+                        if renewing { ProgressView().tint(Theme.accent) } else { Image(systemName: "bolt.fill") }
+                        Text(renewing ? "Dispatching…" : "Renew now — issue cert for *.\(ServerConfig.certDomain)").fontWeight(.semibold)
+                        Spacer()
+                    }
+                    .padding(.vertical, 12).padding(.horizontal, 14)
+                    .background(Theme.card).foregroundStyle(Theme.accent)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(renewing || !config.hasToken)
+                Text("Auto-pulls on install when within \(ServerConfig.refreshBufferDays) days of expiry. Renew forces a new issuance; watch it in the Build tab, then Pull latest.")
+                    .font(.caption2).foregroundStyle(Theme.subtle)
+            }
+        }
+    }
+
+    private var sourceCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Cert repo — no computer needed", systemImage: "iphone.and.arrow.forward").font(.headline).foregroundStyle(Theme.text)
+                Text("Everything runs from this phone. Sign in to GitHub, paste a token in Settings › Access token, pick any repo you own, tap Link. Linking installs the certbot workflow on the repo and creates the `certs` folder (branch) for you on first link-up. Renewals, TXT challenges and the cert files all live there — no Mac, no server, no terminal.")
+                    .font(.caption).foregroundStyle(Theme.subtle)
+                Field(label: "Owner", text: $certOwner, placeholder: "your-github-user")
+                Field(label: "Repo", text: $certRepo, placeholder: "unzip-drop")
+                Field(label: "Branch (certs folder)", text: $certBranch, placeholder: "certs")
+                Field(label: "Let's Encrypt email", text: $leEmail, placeholder: "you@example.com", keyboard: .emailAddress)
+                if let linkReport { Text(linkReport).font(.caption).foregroundStyle(.green) }
+                HStack(spacing: 10) {
+                    accentButton(linking ? "Linking…" : "Link repo", "link", enabled: config.hasToken && !certOwner.isEmpty && !certRepo.isEmpty, busy: linking) {
+                        Task { await link() }
+                    }
+                    Button { saveSource() } label: {
+                        Image(systemName: sourceSaved ? "checkmark" : "square.and.arrow.down").frame(width: 46, height: 46)
+                            .background(Theme.card).foregroundStyle(Theme.accent)
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+                if !config.hasToken {
+                    Text("Token needs: Contents, Actions, Workflows — all Read and write — on this repo.").font(.caption).foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    private func saveSource() {
+        ServerConfig.setCertSource(owner: Config.clean(certOwner).isEmpty ? "mrzefv" : Config.clean(certOwner),
+                                   repo: Config.clean(certRepo).isEmpty ? "unzip-drop" : Config.clean(certRepo),
+                                   branch: Config.clean(certBranch).isEmpty ? "certs" : Config.clean(certBranch))
+        UserDefaults.standard.set(Config.clean(leEmail), forKey: "uzd_le_email")
+        certOwner = ServerConfig.certRepoOwner; certRepo = ServerConfig.certRepoName; certBranch = ServerConfig.certBranch
+        sourceSaved = true
+    }
+
+    private func link() async {
+        saveSource()
+        linking = true; error = nil; linkReport = nil
+        do {
+            let r = try await CertSourceLinker.link(owner: ServerConfig.certRepoOwner, repo: ServerConfig.certRepoName, token: config.token)
+            var parts: [String] = ["Linked \(ServerConfig.certRepoOwner)/\(ServerConfig.certRepoName)."]
+            if !r.installedFiles.isEmpty { parts.append("Installed \(r.installedFiles.count) pipeline files.") }
+            if r.branchCreated { parts.append("Created the certs folder.") }
+            parts.append(contentsOf: r.notes)
+            parts.append("Next: set your domain above, add the wildcard A record, tap Renew now.")
+            linkReport = parts.joined(separator: " ")
+            await loadBoard()
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch { self.error = error.localizedDescription }
+        linking = false
+    }
+
+    private func accentButton(_ title: String, _ icon: String, enabled: Bool = true, busy: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                if busy { ProgressView().tint(.black) } else { Image(systemName: icon) }
+                Text(title).fontWeight(.semibold)
+                Spacer()
+            }
+            .padding(.vertical, 12).padding(.horizontal, 14)
+            .background(enabled ? Theme.accent : Theme.subtle).foregroundStyle(.black)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .disabled(!enabled || busy)
     }
 
     private func reload() {
         expires = ZefvCert.effectiveNotAfter; cached = ZefvCert.hasCached; fetchedAt = ZefvCert.meta?.fetchedAt
+        sans = ZefvCert.effectiveSANs
     }
 
     private var statusPill: some View {
@@ -688,11 +921,30 @@ private struct OTADomainScreen: View {
     }
 
     private func refresh() async {
-        refreshing = true; error = nil
+        refreshing = true; error = nil; note = nil
         do {
-            _ = try await ZefvCert.fetch(); reload()
+            _ = try await ZefvCert.fetch(token: config.token); reload()
+            note = "Pulled from \(ServerConfig.certRepoOwner)/\(ServerConfig.certRepoName)@\(ServerConfig.certBranch)"
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch { self.error = error.localizedDescription }
         refreshing = false
+    }
+
+    private func renew() async {
+        renewing = true; error = nil; note = nil
+        let client = ActionsClient(owner: ServerConfig.certRepoOwner, repo: ServerConfig.certRepoName, token: config.token)
+        do {
+            let wfs = try await client.workflows()
+            guard let wf = wfs.first(where: { $0.path == ServerConfig.certWorkflowPath }) else {
+                throw GitHubError.badConfig("certs.yml not found in \(ServerConfig.certRepoOwner)/\(ServerConfig.certRepoName). Tap Link repo below first — it installs the workflow for you.")
+            }
+            let email = UserDefaults.standard.string(forKey: "uzd_le_email") ?? ""
+            guard !email.isEmpty else { throw GitHubError.badConfig("Enter a Let's Encrypt email in the Cert repo card and save.") }
+            try await client.dispatch(workflowID: wf.id, ref: "main",
+                                      inputs: ["domain": ServerConfig.certDomain, "email": email, "force": "true"])
+            note = "certbot run dispatched for *.\(ServerConfig.certDomain) — TXT values appear above within ~1 min. Add them at your DNS host; the run finishes on its own. Then Pull latest."
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch { self.error = error.localizedDescription }
+        renewing = false
     }
 }

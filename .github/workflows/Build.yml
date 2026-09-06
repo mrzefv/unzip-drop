@@ -2,6 +2,7 @@ name: Build IPA
 
 on:
   push:
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -17,6 +18,19 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
+
+      - name: Bake latest OTA cert from the certs branch
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads origin certs >/dev/null 2>&1; then
+            git fetch --depth=1 origin certs
+            for f in server.crt server.pem; do
+              git show origin/certs:$f > "Sources/Resources/$f" && echo "updated Sources/Resources/$f"
+            done
+            openssl x509 -in Sources/Resources/server.crt -noout -subject -enddate
+          else
+            echo "no certs branch yet — shipping the bundled pair"
+          fi
 
       - name: Build unsigned IPA
         run: bash build.sh

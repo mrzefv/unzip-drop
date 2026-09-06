@@ -3,10 +3,12 @@
 //  On-device OTA install the way full mSign does it: a Vapor HTTPS server on
 //  the device (NIOSSL) serving an itms-services manifest + the signed IPA.
 //
-//  *.zefv.dev resolves to 127.0.0.1 and is covered by a Let's Encrypt wildcard
-//  cert. The cert + key ship in the bundle (Sources/Resources/server.crt +
-//  server.pem, straight from mSign) and are refreshed from
-//  mrzefv.com/certs/pack.json before expiry. iOS trusts the chain, connects to
+//  Any domain works: point `*.<domain>` at 127.0.0.1 and let certs.yml issue
+//  a Let's Encrypt wildcard for it. zefv.dev is just the default whose cert
+//  ships in the bundle. The cert is one WE issue: .github/workflows/certs.yml runs certbot (DNS-01) and
+//  publishes server.crt / server.pem / pack.json on the `certs` branch. A copy
+//  ships in the bundle (Build.yml bakes the latest one in) and the app refreshes
+//  from the branch before expiry. iOS trusts the chain, connects to
 //  loopback as mr.zefv.dev, installs — no network needed for the install itself.
 //
 
@@ -17,9 +19,18 @@ import NIOSSL
 // MARK: - Config
 
 nonisolated enum ServerConfig {
-    /// SNI + manifest host. Must resolve to 127.0.0.1 and be covered by the cert (*.zefv.dev).
+    /// Bring-your-own domain. Requirements: `*.<domain>` (and ideally `<domain>`) have an
+    /// A record → 127.0.0.1, and certs.yml has issued a wildcard cert for it.
+    /// Default is zefv.dev, whose cert ships in the bundle.
+    static let defaultDomain = "zefv.dev"
+    static var certDomain: String {
+        UserDefaults.standard.string(forKey: "uzd_cert_domain") ?? defaultDomain
+    }
+    static func setCertDomain(_ d: String) { UserDefaults.standard.set(d, forKey: "uzd_cert_domain") }
+
+    /// SNI + manifest host. Must be under `certDomain` and covered by the cert's SANs.
     static var installHost: String {
-        UserDefaults.standard.string(forKey: "uzd_install_host") ?? "mr.zefv.dev"
+        UserDefaults.standard.string(forKey: "uzd_install_host") ?? "mr.\(certDomain)"
     }
     static func setInstallHost(_ h: String) { UserDefaults.standard.set(h, forKey: "uzd_install_host") }
 
@@ -27,9 +38,21 @@ nonisolated enum ServerConfig {
     ///   server.crt ← fullchain.pem   server.pem ← privkey.pem
     static let certResource = "server"
 
-    /// mSign's refresh endpoint. Real host (not a 127.0.0.1 domain). Serves
-    ///   { "bundle": "<chain file>", "key": "<privkey file>", "expires": "<ISO8601>" }
-    /// with filenames relative to the manifest's directory; certbot republishes them.
+    /// Hand-rolled cert pipeline: .github/workflows/certs.yml runs certbot
+    /// (DNS-01) for *.zefv.dev and commits server.crt / server.pem / pack.json
+    /// to the `certs` branch. The app reads them through the GitHub Contents
+    /// API with its own token, so private repos work too.
+    static var certRepoOwner: String { UserDefaults.standard.string(forKey: "uzd_cert_owner") ?? "mrzefv" }
+    static var certRepoName:  String { UserDefaults.standard.string(forKey: "uzd_cert_repo")  ?? "unzip-drop" }
+    static var certBranch:    String { UserDefaults.standard.string(forKey: "uzd_cert_branch") ?? "certs" }
+    static func setCertSource(owner: String, repo: String, branch: String) {
+        UserDefaults.standard.set(owner, forKey: "uzd_cert_owner")
+        UserDefaults.standard.set(repo,  forKey: "uzd_cert_repo")
+        UserDefaults.standard.set(branch, forKey: "uzd_cert_branch")
+    }
+    static let certWorkflowPath = ".github/workflows/certs.yml"
+
+    /// Legacy fallback (mSign's endpoint), tried only if the GitHub source fails.
     static let refreshURL = URL(string: "https://mrzefv.com/certs/pack.json")!
     static let refreshBufferDays = 21
 }
@@ -53,6 +76,39 @@ nonisolated enum ZefvCert {
     static var crtURL: URL? { hasCached ? cachedCrt : bundledCrt }
     static var keyURL: URL? { hasCached ? cachedKey : bundledKey }
     static var isAvailable: Bool { crtURL != nil && keyURL != nil }
+
+    /// SANs of the cert in effect (bundled or refreshed).
+    static var effectiveSANs: [String] {
+        guard let u = crtURL, let d = try? Data(contentsOf: u) else { return [] }
+        return sans(fromPEM: d)
+    }
+
+    /// Does the current cert cover `host`? Exact match or one-label wildcard.
+    static func covers(_ host: String, sans: [String]? = nil) -> Bool {
+        let h = host.lowercased()
+        for san in (sans ?? effectiveSANs).map({ $0.lowercased() }) {
+            if san == h { return true }
+            if san.hasPrefix("*."), h.hasSuffix(String(san.dropFirst(1))),
+               !h.dropLast(san.count - 1).contains(".") { return true }
+        }
+        return false
+    }
+
+    /// Does `host` resolve to loopback? (A record via DNS-over-HTTPS.)
+    static func resolvesToLoopback(_ host: String) async -> Bool? {
+        for q in ["https://cloudflare-dns.com/dns-query?name=\(host)&type=A",
+                  "https://dns.google/resolve?name=\(host)&type=A"] {
+            guard let u = URL(string: q) else { continue }
+            var req = URLRequest(url: u); req.setValue("application/dns-json", forHTTPHeaderField: "accept")
+            req.cachePolicy = .reloadIgnoringLocalCacheData
+            guard let (d, _) = try? await URLSession.shared.data(for: req),
+                  let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+            let ips = ((j["Answer"] as? [[String: Any]]) ?? []).compactMap { $0["data"] as? String }
+            if ips.isEmpty { continue }
+            return ips.contains { $0.hasPrefix("127.") }
+        }
+        return nil
+    }
 
     struct Meta: Codable, Sendable { var notAfter: Date?; var fetchedAt: Date }
 
@@ -90,33 +146,67 @@ nonisolated enum ZefvCert {
         let expires: String?
     }
 
-    /// Pull a fresh chain + key from mSign's pack.json and cache them.
-    static func fetch() async throws -> Meta {
-        var req = URLRequest(url: ServerConfig.refreshURL); req.cachePolicy = .reloadIgnoringLocalCacheData
+    /// Pull a fresh chain + key. Primary: `certs` branch of the configured repo via the
+    /// GitHub Contents API (token optional for public repos). Fallback: mSign's pack.json.
+    static func fetch(token: String? = nil) async throws -> Meta {
+        do { return try await fetchFromGitHub(token: token) }
+        catch let primary {
+            do { return try await fetchFromURL(ServerConfig.refreshURL) }
+            catch { throw primary }
+        }
+    }
+
+    static func fetchFromGitHub(token: String?) async throws -> Meta {
+        let o = ServerConfig.certRepoOwner, r = ServerConfig.certRepoName, b = ServerConfig.certBranch
+        func raw(_ path: String) async throws -> Data {
+            var c = URLComponents(string: "https://api.github.com/repos/\(o)/\(r)/contents/\(path)")!
+            c.queryItems = [URLQueryItem(name: "ref", value: b)]
+            var req = URLRequest(url: c.url!)
+            req.cachePolicy = .reloadIgnoringLocalCacheData
+            req.setValue("application/vnd.github.raw+json", forHTTPHeaderField: "Accept")
+            req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+            req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+            if let token, !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+            let (d, resp) = try await URLSession.shared.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 400, !d.isEmpty else {
+                throw CertError.badPack("\(o)/\(r)@\(b)/\(path) → HTTP \(code). Run the 'OTA certs' workflow once, and make sure the token can read the repo.")
+            }
+            return d
+        }
+        let packData = try await raw("pack.json")
+        let m: Manifest
+        do { m = try JSONDecoder().decode(Manifest.self, from: packData) } catch { throw CertError.badPack("unreadable pack.json") }
+        guard let keyFile = m.key, !keyFile.isEmpty else { throw CertError.badPack("pack.json has no key entry") }
+        let chain = try await raw(m.bundle)
+        let key   = try await raw(keyFile)
+        return try store(chain: chain, key: key, expires: m.expires)
+    }
+
+    static func fetchFromURL(_ url: URL) async throws -> Meta {
+        var req = URLRequest(url: url); req.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode ?? 0 < 400 else { throw CertError.badPack("HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)") }
         let m: Manifest
         do { m = try JSONDecoder().decode(Manifest.self, from: data) } catch { throw CertError.badPack("unreadable pack.json") }
-        guard let keyFile = m.key, !keyFile.isEmpty else { throw CertError.badPack("pack.json has no \"key\" — the private key must be published for the on-device server.") }
-
-        let base = ServerConfig.refreshURL.deletingLastPathComponent()
+        guard let keyFile = m.key, !keyFile.isEmpty else { throw CertError.badPack("pack.json has no key entry") }
+        let base = url.deletingLastPathComponent()
         func get(_ name: String) async throws -> Data {
             let u = name.hasPrefix("http") ? URL(string: name)! : base.appendingPathComponent(name)
             let (d, r) = try await URLSession.shared.data(from: u)
             guard (r as? HTTPURLResponse)?.statusCode ?? 0 < 400, !d.isEmpty else { throw CertError.badPack("couldn't download \(name)") }
             return d
         }
-        let chain = try await get(m.bundle)
-        let key = try await get(keyFile)
+        return try store(chain: try await get(m.bundle), key: try await get(keyFile), expires: m.expires)
+    }
 
-        // Validate before overwriting a working copy.
+    /// Validate (NIOSSL must parse both, key must match the leaf's SAN set) then cache.
+    private static func store(chain: Data, key: Data, expires: String?) throws -> Meta {
         _ = try NIOSSLCertificate.fromPEMBytes(Array(chain))
         _ = try NIOSSLPrivateKey(bytes: Array(key), format: .pem)
-
         try chain.write(to: cachedCrt, options: .atomic)
         try key.write(to: cachedKey, options: .atomic)
-
-        let exp = m.expires.flatMap { ISO8601DateFormatter().date(from: $0) } ?? notAfter(fromPEM: chain)
+        let exp = expires.flatMap { ISO8601DateFormatter().date(from: $0) } ?? notAfter(fromPEM: chain)
         let meta = Meta(notAfter: exp, fetchedAt: Date())
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
         try? enc.encode(meta).write(to: metaURL)
@@ -124,9 +214,9 @@ nonisolated enum ZefvCert {
     }
 
     @discardableResult
-    static func refreshIfNeeded() async -> Meta? {
+    static func refreshIfNeeded(token: String? = nil) async -> Meta? {
         guard needsRefresh else { return meta }
-        return try? await fetch()
+        return try? await fetch(token: token)
     }
 
     static func clearCache() {
@@ -169,6 +259,186 @@ nonisolated enum ZefvCert {
         let f = DateFormatter(); f.timeZone = TimeZone(identifier: "UTC"); f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = na.tag == 0x17 ? "yyMMddHHmmss'Z'" : "yyyyMMddHHmmss'Z'"
         return f.date(from: s)
+    }
+}
+
+extension ZefvCert {
+    /// dNSName SANs from the leaf cert: find the SAN extension OID (2.5.29.17) in DER,
+    /// then read the [2] IA5String entries of the inner SEQUENCE.
+    static func sans(fromPEM pem: Data) -> [String] {
+        guard let s = String(data: pem, encoding: .utf8),
+              let a = s.range(of: "-----BEGIN CERTIFICATE-----"),
+              let b = s.range(of: "-----END CERTIFICATE-----") else { return [] }
+        let b64 = s[a.upperBound..<b.lowerBound].components(separatedBy: .whitespacesAndNewlines).joined()
+        guard let der = Data(base64Encoded: b64) else { return [] }
+        let x = [UInt8](der)
+        let oid: [UInt8] = [0x06, 0x03, 0x55, 0x1D, 0x11]
+        guard x.count > oid.count + 4 else { return [] }
+        var i = 0
+        while i + oid.count < x.count {
+            if Array(x[i..<i+oid.count]) == oid { break }
+            i += 1
+        }
+        guard i + oid.count < x.count else { return [] }
+        var p = i + oid.count
+        func len(_ at: inout Int) -> Int? {
+            guard at < x.count else { return nil }
+            var l = Int(x[at]); at += 1
+            if l & 0x80 != 0 { let n = l & 0x7F; l = 0; guard at + n <= x.count else { return nil }; for _ in 0..<n { l = (l << 8) | Int(x[at]); at += 1 } }
+            return l
+        }
+        if p < x.count, x[p] == 0x01 { p += 3 }                  // optional critical BOOLEAN
+        guard p < x.count, x[p] == 0x04 else { return [] }        // OCTET STRING
+        p += 1; guard let _ = len(&p) else { return [] }
+        guard p < x.count, x[p] == 0x30 else { return [] }        // SEQUENCE
+        p += 1; guard let seqLen = len(&p) else { return [] }
+        let end = min(x.count, p + seqLen)
+        var out: [String] = []
+        while p < end {
+            let tag = x[p]; p += 1
+            guard let l = len(&p), p + l <= end else { break }
+            if tag == 0x82, let str = String(bytes: x[p..<p+l], encoding: .ascii) { out.append(str) }
+            p += l
+        }
+        return out
+    }
+}
+
+// MARK: - One-tap link-up (phone only: sign in to GitHub, link a repo, done)
+
+nonisolated enum CertSourceLinker {
+    struct Report: Sendable {
+        var repoOK = false
+        var installedFiles: [String] = []
+        var branchCreated = false
+        var notes: [String] = []
+    }
+
+    private static func gh(_ path: String, token: String, method: String = "GET", body: [String: Any]? = nil,
+                           accept: String = "application/vnd.github+json") async throws -> (Int, [String: Any]) {
+        var req = URLRequest(url: URL(string: "https://api.github.com" + path)!)
+        req.httpMethod = method
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue(accept, forHTTPHeaderField: "Accept")
+        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        if let body { req.setValue("application/json", forHTTPHeaderField: "Content-Type"); req.httpBody = try JSONSerialization.data(withJSONObject: body) }
+        let (d, r) = try await URLSession.shared.data(for: req)
+        let code = (r as? HTTPURLResponse)?.statusCode ?? 0
+        let obj = (try? JSONSerialization.jsonObject(with: d) as? [String: Any]) ?? [:]
+        return (code, obj)
+    }
+
+    /// 1) verify the token sees the repo, 2) install certs.yml + hooks on the default branch
+    ///    if they're missing, 3) create the orphan `certs` branch (README + empty challenge board).
+    static func link(owner: String, repo: String, token: String) async throws -> Report {
+        guard !token.isEmpty else { throw GitHubError.badConfig("Add a GitHub token in Settings › Access token first.") }
+        var rep = Report()
+        let base = "/repos/\(owner)/\(repo)"
+
+        let (rc, rj) = try await gh(base, token: token)
+        guard rc == 200 else { throw GitHubError.badConfig("Can't see \(owner)/\(repo) (HTTP \(rc)). Check the repo name and that the token has Contents + Actions + Workflows: Read and write on it.") }
+        rep.repoOK = true
+        let defaultBranch = rj["default_branch"] as? String ?? "main"
+
+        // 2) pipeline files — push only what's missing (the app's own push engine).
+        var missing: [(path: String, data: Data)] = []
+        for f in CertPipeline.files {
+            let (c, _) = try await gh("\(base)/contents/\(f.path)?ref=\(defaultBranch)", token: token)
+            if c == 404 { missing.append(f) }
+        }
+        if !missing.isEmpty {
+            let client = GitHubClient(owner: owner, repo: repo, branch: defaultBranch, token: token)
+            do {
+                _ = try await client.push(files: missing, subpath: "", message: "Add OTA cert pipeline (certbot via Actions)", progress: { _, _ in })
+                rep.installedFiles = missing.map(\.path)
+            } catch {
+                throw GitHubError.badConfig("Installing the workflow failed: \(error.localizedDescription) — the token needs Workflows: Read and write to add .github/workflows files.")
+            }
+        } else {
+            rep.notes.append("Pipeline already installed on \(defaultBranch).")
+        }
+
+        // 3) certs branch (orphan commit via the Git Data API).
+        let (bc, _) = try await gh("\(base)/branches/\(CertPipeline.branch)", token: token)
+        if bc == 404 {
+            func blob(_ text: String) async throws -> String {
+                let (c, j) = try await gh("\(base)/git/blobs", token: token, method: "POST", body: ["content": text, "encoding": "utf-8"])
+                guard c == 201, let sha = j["sha"] as? String else { throw GitHubError.badConfig("blob failed (\(c))") }
+                return sha
+            }
+            let readme = try await blob("# OTA certs\n\nPublished by `.github/workflows/certs.yml`: server.crt (fullchain), server.pem (key), pack.json, challenge.json.\n")
+            let board  = try await blob("{\"records\":[],\"updatedAt\":\"\",\"instructions\":\"Linked. Tap Renew now in the app to issue your first cert.\"}\n")
+            let (tc, tj) = try await gh("\(base)/git/trees", token: token, method: "POST", body: ["tree": [
+                ["path": "README.md",      "mode": "100644", "type": "blob", "sha": readme],
+                ["path": "challenge.json", "mode": "100644", "type": "blob", "sha": board],
+            ]])
+            guard tc == 201, let tree = tj["sha"] as? String else { throw GitHubError.badConfig("tree failed (\(tc))") }
+            let (cc, cj) = try await gh("\(base)/git/commits", token: token, method: "POST", body: ["message": "init certs branch", "tree": tree, "parents": []])
+            guard cc == 201, let commit = cj["sha"] as? String else { throw GitHubError.badConfig("commit failed (\(cc))") }
+            let (refc, _) = try await gh("\(base)/git/refs", token: token, method: "POST", body: ["ref": "refs/heads/\(CertPipeline.branch)", "sha": commit])
+            guard refc == 201 else { throw GitHubError.badConfig("creating branch failed (\(refc))") }
+            rep.branchCreated = true
+        } else {
+            rep.notes.append("certs branch already exists.")
+        }
+        return rep
+    }
+}
+
+// MARK: - ACME challenge board (manual DNS-01 progress from certs.yml)
+
+nonisolated struct AcmeChallenge: Decodable, Identifiable, Sendable {
+    let domain: String
+    let name: String
+    let value: String
+    let step: Int
+    let of: Int
+    let status: String          // pending | seen | validated | timeout
+    var id: String { value }
+}
+
+nonisolated struct AcmeBoard: Decodable, Sendable {
+    let records: [AcmeChallenge]
+    let updatedAt: String?
+    let instructions: String?
+    var pending: [AcmeChallenge] { records.filter { $0.status == "pending" } }
+}
+
+extension ZefvCert {
+    /// challenge.json from the certs branch (nil if the branch/file doesn't exist yet).
+    static func challengeBoard(token: String?) async -> AcmeBoard? {
+        let o = ServerConfig.certRepoOwner, r = ServerConfig.certRepoName, b = ServerConfig.certBranch
+        var c = URLComponents(string: "https://api.github.com/repos/\(o)/\(r)/contents/challenge.json")!
+        c.queryItems = [URLQueryItem(name: "ref", value: b)]
+        var req = URLRequest(url: c.url!)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.setValue("application/vnd.github.raw+json", forHTTPHeaderField: "Accept")
+        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+        if let token, !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        guard let (d, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode ?? 0 < 400 else { return nil }
+        return try? JSONDecoder().decode(AcmeBoard.self, from: d)
+    }
+
+    /// Live TXT lookup over DNS-over-HTTPS (same resolvers the hook polls).
+    static func txtRecords(_ name: String) async -> [String] {
+        var out = Set<String>()
+        for q in ["https://cloudflare-dns.com/dns-query?name=\(name)&type=TXT",
+                  "https://dns.google/resolve?name=\(name)&type=TXT"] {
+            guard let u = URL(string: q) else { continue }
+            var req = URLRequest(url: u); req.setValue("application/dns-json", forHTTPHeaderField: "accept")
+            req.cachePolicy = .reloadIgnoringLocalCacheData
+            guard let (d, _) = try? await URLSession.shared.data(for: req),
+                  let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let ans = j["Answer"] as? [[String: Any]] else { continue }
+            for a in ans {
+                if let s = a["data"] as? String { out.insert(s.replacingOccurrences(of: "\"", with: "")) }
+            }
+        }
+        return Array(out)
     }
 }
 

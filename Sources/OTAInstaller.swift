@@ -17,9 +17,11 @@ final class OTAInstaller {
     private var bgTask: UIBackgroundTaskIdentifier = .invalid
 
     enum InstallError: LocalizedError {
-        case ipaMissing, openFailed
+        case ipaMissing, openFailed, hostNotCovered(String, [String])
         var errorDescription: String? {
             switch self {
+            case .hostNotCovered(let h, let sans):
+                return "The loaded cert doesn't cover \(h) (it covers \(sans.isEmpty ? "nothing readable" : sans.joined(separator: ", "))). Set the OTA domain to match, or renew a cert for it in Settings › OTA Domain."
             case .ipaMissing: return "Signed IPA not found on disk."
             case .openFailed: return "iOS refused the itms-services URL. Check the OTA host resolves to 127.0.0.1 and is covered by the zefv.dev cert."
             }
@@ -35,8 +37,12 @@ final class OTAInstaller {
         guard FileManager.default.fileExists(atPath: ipaURL.path) else { throw InstallError.ipaMissing }
 
         // Near expiry: pull a fresh chain from mrzefv.com (no-op offline; bundled pair still works).
-        if ZefvCert.needsRefresh { await ZefvCert.refreshIfNeeded() }
+        if ZefvCert.needsRefresh { await ZefvCert.refreshIfNeeded(token: Keychain.get("gh_token")) }
         guard ZefvCert.isAvailable else { throw ZefvCert.CertError.unavailable }
+        let sans = ZefvCert.effectiveSANs
+        guard ZefvCert.covers(ServerConfig.installHost, sans: sans) else {
+            throw InstallError.hostNotCovered(ServerConfig.installHost, sans)
+        }
 
         let icon57  = Self.squarePNG(iconData, side: 57)
         let icon512 = Self.squarePNG(iconData, side: 512)

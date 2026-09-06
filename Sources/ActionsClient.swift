@@ -157,9 +157,10 @@ struct ActionsClient {
     }
 
     /// Trigger `workflow_dispatch` on a workflow. GitHub returns 204 with no body.
-    func dispatch(workflowID: Int, ref: String) async throws {
-        _ = try await json("\(repoPath)/actions/workflows/\(workflowID)/dispatches", method: "POST",
-                           body: ["ref": ref])
+    func dispatch(workflowID: Int, ref: String, inputs: [String: String] = [:]) async throws {
+        var body: [String: Any] = ["ref": ref]
+        if !inputs.isEmpty { body["inputs"] = inputs }
+        _ = try await json("\(repoPath)/actions/workflows/\(workflowID)/dispatches", method: "POST", body: body)
     }
 
     func cancel(runID: Int) async throws {

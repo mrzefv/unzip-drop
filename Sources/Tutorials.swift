@@ -30,7 +30,67 @@ struct TutorialStep: Identifiable {
 // MARK: - Content
 
 enum TutorialLibrary {
-    static let all: [Tutorial] = [flex, hooking, pipeline]
+    static let all: [Tutorial] = [phoneOnly, certs, flex, hooking, pipeline]
+
+    // 0. Phone-only setup
+    static let phoneOnly = Tutorial(
+        id: "phone", icon: "iphone", title: "Set up with just your phone",
+        subtitle: "No computer. Sign in to GitHub, link a repo, done", minutes: 5,
+        steps: [
+            TutorialStep(
+                title: "What you need",
+                body: "An iPhone with this app, a GitHub account, and a domain you control (optional — zefv.dev is preconfigured). That's the whole list. No Mac, no Xcode, no server, no terminal — every build, sign, install and cert renewal runs on GitHub Actions or on the phone itself."),
+            TutorialStep(
+                title: "Sign in to GitHub and make a token",
+                body: "On github.com (Safari is fine): Settings › Developer settings › Fine-grained tokens › Generate. Repository access: the repo(s) you'll use. Permissions — Contents, Actions, Workflows: Read and write. Copy it.",
+                code: "https://github.com/settings/personal-access-tokens/new",
+                codeTitle: "Token page"),
+            TutorialStep(
+                title: "Paste the token",
+                body: "Settings › Access token › paste. It's stored in the Keychain and only ever sent to api.github.com."),
+            TutorialStep(
+                title: "Link a repo",
+                body: "Create an empty repo on github.com (private is fine). Settings › Repository: owner + repo + branch. That's where zips you drop get pushed and where the Build tab watches runs."),
+            TutorialStep(
+                title: "Link the certs folder (one tap)",
+                body: "Settings › OTA Domain › Cert repo: same owner/repo (or a separate one), your Let's Encrypt email, tap Link repo. First link-up installs the certbot workflow into the repo and creates the `certs` folder (a branch) automatically. Nothing to create by hand.",
+                tip: "Linking is idempotent — tap it again any time; it only adds what's missing."),
+            TutorialStep(
+                title: "Point your domain (optional)",
+                body: "Skip this to use zefv.dev. For your own domain: at your DNS host add an A record `*` → 127.0.0.1 (and `@` → 127.0.0.1). Then Settings › OTA Domain: type the domain, tap Check — it should say → 127.0.0.1 ✓. Save."),
+            TutorialStep(
+                title: "Issue the cert",
+                body: "Tap Renew now. Within a minute the DNS challenge card shows a TXT name and value — add it at your DNS host, the workflow notices and continues; a second value follows for the apex, add it too (keep both). When it finishes, Pull latest. Done — installs now go over https://mr.<your domain>."),
+            TutorialStep(
+                title: "Daily loop",
+                body: "Drop zip → Push → Build tab shows the run → tap the IPA artifact → Sign tab → Sign → Install. Certs auto-refresh from the certs folder before they expire."),
+        ])
+
+    // 0b. Certs in depth
+    static let certs = Tutorial(
+        id: "certs", icon: "lock.shield.fill", title: "How the OTA cert works",
+        subtitle: "Loopback domain + Let's Encrypt wildcard, issued by Actions", minutes: 6,
+        steps: [
+            TutorialStep(
+                title: "Why a public cert for 127.0.0.1",
+                body: "iOS only installs from itms-services manifests served over HTTPS with a trusted cert. A hostname that resolves to loopback but carries a real Let's Encrypt cert satisfies that: the phone talks to a server on itself, over TLS iOS already trusts."),
+            TutorialStep(
+                title: "DNS-01 is the only way for wildcards",
+                body: "Let's Encrypt won't issue *.domain over HTTP; it needs a TXT record at _acme-challenge.<domain>. certbot gives one value for the wildcard and another for the apex — both on the same record name.",
+                code: "_acme-challenge.example.com  TXT  \"<value A>\"\n_acme-challenge.example.com  TXT  \"<value B>\"",
+                codeTitle: "Two records, same name"),
+            TutorialStep(
+                title: "The wait-before-validate hook",
+                body: "certs.yml runs certbot with a manual auth hook. The hook publishes the value to challenge.json, then polls Cloudflare and Google DNS-over-HTTPS every 20s. Only when the record is visible does it return and let certbot ask Let's Encrypt — so a slow DNS edit never burns a validation attempt.",
+                code: "curl -H 'accept: application/dns-json' \\\n  'https://cloudflare-dns.com/dns-query?name=_acme-challenge.example.com&type=TXT'",
+                codeTitle: "What the hook checks"),
+            TutorialStep(
+                title: "Where the files go",
+                body: "server.crt (fullchain), server.pem (private key), pack.json (expiry + hashes) on the `certs` branch. The app pulls them with your token; Build.yml bakes the latest pair into every IPA so fresh installs work offline."),
+            TutorialStep(
+                title: "Renewal",
+                body: "Weekly cron re-issues when < 30 days remain (needs repo variable LE_EMAIL for unattended runs), or tap Renew now. The app auto-pulls when within 21 days of expiry at install time."),
+        ])
 
     // 1. Capture class names with FLEX
     static let flex = Tutorial(
@@ -135,10 +195,79 @@ enum TutorialLibrary {
         ])
 }
 
+// MARK: - Tutorials list (table) — tap a row to open the tutorial
+
+struct TutorialsListScreen: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                ZStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "archivebox.fill").foregroundStyle(Theme.accent)
+                        Text("UNZIP DROP").font(.system(size: 15, weight: .heavy, design: .rounded)).kerning(1).foregroundStyle(Theme.text)
+                        Spacer()
+                    }
+                    Text("Tutorials").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.subtle)
+                    HStack {
+                        Spacer()
+                        Button { dismiss() } label: {
+                            Image(systemName: "chevron.down").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.accent)
+                                .frame(width: 34, height: 34).background(Theme.accent.opacity(0.14)).clipShape(Circle())
+                        }
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(Theme.bg)
+                .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
+
+                List {
+                    Section {
+                        ForEach(TutorialLibrary.all) { t in
+                            NavigationLink(value: t.id) {
+                                HStack(spacing: 14) {
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.accent.opacity(0.14))
+                                        Image(systemName: t.icon).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.accent)
+                                    }.frame(width: 38, height: 38)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(t.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
+                                        Text(t.subtitle).font(.system(size: 13)).foregroundStyle(Theme.subtle).lineLimit(2)
+                                        Text("\(t.steps.count) steps · ~\(t.minutes) min").font(.caption2.monospaced()).foregroundStyle(Theme.accent)
+                                    }
+                                }
+                                .padding(.vertical, 6)
+                            }
+                            .listRowBackground(Theme.card)
+                        }
+                    } header: {
+                        Text("GUIDES").font(.system(size: 12, weight: .semibold)).kerning(1.1).foregroundStyle(Theme.subtle)
+                    } footer: {
+                        Text("Everything here is done from the phone: GitHub sign-in, one linked repo, and this app. Check steps off as you go.")
+                            .font(.caption2).foregroundStyle(Theme.subtle)
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(Theme.bg)
+            }
+            .background(Theme.bg.ignoresSafeArea())
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: String.self) { id in
+                TutorialScreen(tutorial: TutorialLibrary.all.first { $0.id == id } ?? TutorialLibrary.phoneOnly, pushed: true)
+                    .toolbar(.hidden, for: .navigationBar)
+            }
+        }
+        .tint(Theme.accent)
+    }
+}
+
 // MARK: - Tutorial screen
 
 struct TutorialScreen: View {
     let tutorial: Tutorial
+    var pushed: Bool = false
     @Environment(\.dismiss) private var dismiss
     @State private var done: Set<UUID> = []
     @State private var copied: UUID?
@@ -155,7 +284,7 @@ struct TutorialScreen: View {
                 HStack {
                     Spacer()
                     Button { dismiss() } label: {
-                        Image(systemName: "chevron.down").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.accent)
+                        Image(systemName: pushed ? "chevron.left" : "chevron.down").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.accent)
                             .frame(width: 34, height: 34).background(Theme.accent.opacity(0.14)).clipShape(Circle())
                     }
                 }

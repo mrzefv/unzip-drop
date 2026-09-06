@@ -101,10 +101,11 @@ jobs:
           echo "need=$NEED" >> "$GITHUB_OUTPUT"
           echo "Renew: $NEED"
 
-      - name: Install certbot
+      - name: Install certbot + dig
         if: steps.decide.outputs.need == 'yes'
         run: |
           set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq bind9-dnsutils >/dev/null
           python3 -m pip install --quiet --upgrade pip
           if [ "$DNS_MODE" = "cloudflare" ]; then python3 -m pip install --quiet certbot certbot-dns-cloudflare
           else python3 -m pip install --quiet certbot; fi

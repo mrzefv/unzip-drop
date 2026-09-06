@@ -389,13 +389,23 @@ nonisolated enum CertSourceLinker {
 
 // MARK: - ACME challenge board (manual DNS-01 progress from certs.yml)
 
+nonisolated struct AcmeCheck: Decodable, Sendable {
+    struct NS: Decodable, Sendable { let seen: Bool; let txt: String? }
+    let at: String?
+    let authoritative: [String: NS]?
+    let authoritativeSeen: Bool?
+    let resolvers: [String: Bool]?
+}
+
 nonisolated struct AcmeChallenge: Decodable, Identifiable, Sendable {
     let domain: String
     let name: String
     let value: String
     let step: Int
     let of: Int
-    let status: String          // pending | seen | validated | timeout
+    let status: String          // pending | seen | forced | validated | timeout
+    let force: Bool?
+    let lastCheck: AcmeCheck?
     var id: String { value }
 }
 
@@ -421,6 +431,50 @@ extension ZefvCert {
         guard let (d, resp) = try? await URLSession.shared.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode ?? 0 < 400 else { return nil }
         return try? JSONDecoder().decode(AcmeBoard.self, from: d)
+    }
+
+    /// Flip "force": true on a pending record in challenge.json (certs branch). The hook
+    /// pulls the file every poll and proceeds to validation as soon as it sees it.
+    static func forceChallenge(value: String, token: String) async throws {
+        guard !token.isEmpty else { throw GitHubError.badConfig("GitHub token required.") }
+        let o = ServerConfig.certRepoOwner, r = ServerConfig.certRepoName, b = ServerConfig.certBranch
+        let url = URL(string: "https://api.github.com/repos/\(o)/\(r)/contents/challenge.json?ref=\(b)")!
+        var req = URLRequest(url: url); req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+        let (d, resp) = try await URLSession.shared.data(for: req)
+        guard (resp as? HTTPURLResponse)?.statusCode == 200,
+              let meta = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let sha = meta["sha"] as? String,
+              let b64 = (meta["content"] as? String)?.replacingOccurrences(of: "\n", with: ""),
+              let raw = Data(base64Encoded: b64),
+              var doc = try? JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
+            throw GitHubError.badConfig("Couldn't read challenge.json on \(b).")
+        }
+        var recs = doc["records"] as? [[String: Any]] ?? []
+        var hit = false
+        for i in recs.indices where (recs[i]["value"] as? String) == value { recs[i]["force"] = true; hit = true }
+        guard hit else { throw GitHubError.badConfig("That challenge is no longer on the board.") }
+        doc["records"] = recs
+        doc["updatedAt"] = ISO8601DateFormatter().string(from: Date())
+        let newData = try JSONSerialization.data(withJSONObject: doc, options: [.prettyPrinted, .sortedKeys])
+        var put = URLRequest(url: URL(string: "https://api.github.com/repos/\(o)/\(r)/contents/challenge.json")!)
+        put.httpMethod = "PUT"
+        put.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        put.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        put.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        put.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        put.httpBody = try JSONSerialization.data(withJSONObject: [
+            "message": "acme: force continue (from app)",
+            "content": newData.base64EncodedString(),
+            "sha": sha, "branch": b,
+        ])
+        let (_, pr) = try await URLSession.shared.data(for: put)
+        guard (200...299).contains((pr as? HTTPURLResponse)?.statusCode ?? 0) else {
+            throw GitHubError.badConfig("Couldn't update challenge.json (HTTP \((pr as? HTTPURLResponse)?.statusCode ?? 0)).")
+        }
     }
 
     /// Live TXT lookup over DNS-over-HTTPS (same resolvers the hook polls).

@@ -615,6 +615,7 @@ private struct OTADomainScreen: View {
     @State private var checking = false
     @State private var boardTimer: Timer?
     @State private var copied: String?
+    @State private var forcing: String?
 
     private var clean: String {
         host.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -678,27 +679,95 @@ private struct OTADomainScreen: View {
                         }
                         copyRow("Name", r.name)
                         copyRow("TXT value", r.value)
+                        checkDetails(r)
+                        if r.status == "pending" {
+                            Button { Task { await force(r) } } label: {
+                                HStack {
+                                    if forcing == r.value { ProgressView().tint(.black) } else { Image(systemName: "forward.fill") }
+                                    Text(r.force == true ? "Force sent — continuing" : "Force continue (record is saved)").fontWeight(.semibold)
+                                    Spacer()
+                                }
+                                .padding(.vertical, 10).padding(.horizontal, 12)
+                                .background(r.force == true ? Theme.subtle : Color.orange).foregroundStyle(.black)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .disabled(forcing != nil || r.force == true || !config.hasToken)
+                        }
                     }
                     .padding(10).background(Theme.bg)
                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(r.status == "pending" ? Theme.accent.opacity(0.5) : Theme.stroke, lineWidth: 1))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 if !b.pending.isEmpty {
-                    Text("Add each pending value as a TXT record on \(b.pending.first!.name) at your DNS host (keep both). The workflow polls DNS itself and continues once it sees them; nothing to click here.")
+                    Text("Add each pending value as a TXT record on \(b.pending.first!.name) at your DNS host (keep both). The workflow checks the zone's authoritative nameservers every 20s and continues on its own. Already saved it and it still says waiting? Tap Force continue.")
                         .font(.caption2).foregroundStyle(Theme.subtle)
                 }
             }
         }
     }
 
+    private func checkDetails(_ r: AcmeChallenge) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let c = r.lastCheck {
+                if let auth = c.authoritative, !auth.isEmpty {
+                    ForEach(auth.keys.sorted(), id: \.self) { ns in
+                        let v = auth[ns]!
+                        HStack(spacing: 6) {
+                            Image(systemName: v.seen ? "checkmark.circle.fill" : "circle").foregroundStyle(v.seen ? .green : Theme.subtle)
+                            Text("auth \(ns)").font(.caption2.monospaced()).foregroundStyle(Theme.subtle).lineLimit(1)
+                            Spacer()
+                            Text(v.seen ? "has value" : (v.txt?.isEmpty == false ? "other TXT only" : "no TXT")).font(.caption2).foregroundStyle(v.seen ? .green : .orange)
+                        }
+                    }
+                } else {
+                    Text("authoritative NS: not resolved yet").font(.caption2).foregroundStyle(Theme.subtle)
+                }
+                if let rs = c.resolvers {
+                    HStack(spacing: 10) {
+                        ForEach(rs.keys.sorted(), id: \.self) { k in
+                            HStack(spacing: 3) {
+                                Image(systemName: rs[k]! ? "checkmark" : "xmark").font(.system(size: 9, weight: .bold))
+                                Text(k).font(.caption2)
+                            }.foregroundStyle(rs[k]! ? .green : Theme.subtle)
+                        }
+                        Spacer()
+                        Text("phone: \(dnsSeen[r.value] == true ? "sees it" : "not yet")").font(.caption2).foregroundStyle(dnsSeen[r.value] == true ? .green : Theme.subtle)
+                    }
+                }
+                if let at = c.at { Text("workflow checked \(at)").font(.caption2).foregroundStyle(Theme.subtle) }
+            } else {
+                Text("Waiting for the workflow's first check…").font(.caption2).foregroundStyle(Theme.subtle)
+            }
+            Text("Gate is the authoritative NS row. Public resolvers can hold a cached miss for minutes — ignore them once auth shows the value.")
+                .font(.caption2).foregroundStyle(Theme.subtle)
+        }
+        .padding(.top, 2)
+    }
+
+    private func force(_ r: AcmeChallenge) async {
+        forcing = r.value; error = nil
+        do {
+            try await ZefvCert.forceChallenge(value: r.value, token: config.token)
+            note = "Force sent — the workflow picks it up on its next poll (≤ 20s) and validates."
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            await loadBoard()
+        } catch { self.error = error.localizedDescription }
+        forcing = nil
+    }
+
     private func statusTag(_ r: AcmeChallenge) -> some View {
         let live = dnsSeen[r.value] == true
+        let auth = r.lastCheck?.authoritativeSeen == true
         let (text, color): (String, Color) = {
             switch r.status {
             case "validated": return ("VALIDATED", .green)
             case "seen":      return ("SEEN · VALIDATING", .green)
+            case "forced":    return ("FORCED · VALIDATING", .green)
             case "timeout":   return ("TIMED OUT", .red)
-            default:          return (live ? "LIVE IN DNS" : "WAITING FOR TXT", live ? .green : .orange)
+            default:
+                if r.force == true { return ("FORCING", .green) }
+                if auth { return ("AUTH HAS IT", .green) }
+                return (live ? "SEEN BY PHONE" : "WAITING FOR TXT", live ? .yellow : .orange)
             }
         }()
         return Text(text).font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(1)

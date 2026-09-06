@@ -15,20 +15,19 @@ struct RootView: View {
     @State private var tab = 0
 
     var body: some View {
-        VStack(spacing: 0) {
-            TopBar()
-            ZStack {
-                switch tab {
-                case 0: SignView()
-                case 1: SourcesView()
-                case 2: SignedView()
-                default: SettingsView()
-                }
+        ZStack {
+            switch tab {
+            case 0: SignView()
+            case 1: SourcesView()
+            case 2: SignedView()
+            default: SettingsView()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             TabBar(selected: $tab)
         }
-        .background(Theme.bg.ignoresSafeArea())
+        .background(Color.black.ignoresSafeArea())
         .onChange(of: signQueue.requestedTab) { t in
             if let t { tab = t; signQueue.requestedTab = nil }
         }
@@ -68,11 +67,8 @@ private struct TabBar: View {
         }
         .frame(height: 50)
         .padding(.top, 8)
-        .background(
-            Theme.bg
-                .overlay(Rectangle().fill(Theme.stroke).frame(height: 0.5), alignment: .top)
-                .ignoresSafeArea(edges: .bottom)
-        )
+        .background(BarBlur())
+        .overlay(Rectangle().fill(Theme.stroke).frame(height: 0.5), alignment: .top)
     }
 }
 

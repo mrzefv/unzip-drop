@@ -21,16 +21,24 @@ jobs:
 
       - name: Bake latest OTA cert from the certs branch
         run: |
-          set -euo pipefail
-          if git ls-remote --exit-code --heads origin certs >/dev/null 2>&1; then
-            git fetch --depth=1 origin certs
-            for f in server.crt server.pem; do
-              git show origin/certs:$f > "Sources/Resources/$f" && echo "updated Sources/Resources/$f"
-            done
-            openssl x509 -in Sources/Resources/server.crt -noout -subject -enddate
-          else
-            echo "no certs branch yet — shipping the bundled pair"
+          set -uo pipefail
+          if ! git ls-remote --exit-code --heads origin certs >/dev/null 2>&1; then
+            echo "no certs branch yet — shipping the bundled pair"; exit 0
           fi
+          git fetch --depth=1 origin certs
+          if ! git cat-file -e origin/certs:server.crt 2>/dev/null || ! git cat-file -e origin/certs:server.pem 2>/dev/null; then
+            echo "certs branch has no issued cert yet — shipping the bundled pair"; exit 0
+          fi
+          tmp=$(mktemp -d)
+          git show origin/certs:server.crt > "$tmp/server.crt"
+          git show origin/certs:server.pem > "$tmp/server.pem"
+          if ! openssl x509 -in "$tmp/server.crt" -noout >/dev/null 2>&1; then
+            echo "::warning::server.crt on certs branch is not a valid PEM — keeping bundled pair"; exit 0
+          fi
+          mkdir -p Sources/Resources
+          cp "$tmp/server.crt" "$tmp/server.pem" Sources/Resources/
+          echo "baked cert from certs branch:"
+          openssl x509 -in Sources/Resources/server.crt -noout -subject -enddate
 
       - name: Build unsigned IPA
         run: bash build.sh

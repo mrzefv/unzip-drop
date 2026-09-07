@@ -1148,7 +1148,7 @@ private struct LocalCAScreen: View {
             Card {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Fully local OTA certificate", systemImage: "iphone.and.arrow.forward").font(.headline).foregroundStyle(Theme.text)
-                    Text("Generates a root CA on this device (OpenSSL), signs a leaf for your OTA host, and serves installs with it. No DNS, no external CA, works offline. iOS trusts it only after you install the root profile below — inspect it first; nothing is signed by anyone but your device.")
+                    Text("Generates a root CA on this device (OpenSSL), signs a leaf for your OTA host, and serves installs with it. No DNS, no external CA, works offline. Private keys never touch disk in the clear — they're stored in the Keychain with ThisDeviceOnly protection, excluded from backups. iOS trusts it only after you install the root profile below — inspect it first; nothing is signed by anyone but your device.")
                         .font(.caption).foregroundStyle(Theme.subtle)
                 }
             }
@@ -1197,6 +1197,7 @@ private struct LocalCAScreen: View {
                     kv("Leaf issued", m.leafIssued.formatted(date: .abbreviated, time: .shortened))
                 }
                 kv("Key usage", "CA · certificate signing only")
+                kv("Private key storage", "Keychain · ThisDeviceOnly (never backed up)")
             }
         }
     }

@@ -647,14 +647,19 @@ nonisolated final class LocalOTAServer: Identifiable, @unchecked Sendable {
     }
 
     private static func tls() throws -> TLSConfiguration {
-        let crt: URL?, key: URL?
         if ServerConfig.certMode == "local" {
-            crt = LocalCAManager.hasLeaf ? LocalCAManager.leafCertURL : nil
-            key = LocalCAManager.hasLeaf ? LocalCAManager.leafKeyURL  : nil
-        } else {
-            crt = ZefvCert.crtURL; key = ZefvCert.keyURL
+            guard LocalCAManager.hasLeaf else { throw ZefvCert.CertError.unavailable }
+            // The leaf private key lives only in the Keychain (ThisDeviceOnly,
+            // never backed up). Materialize it to a private temp file just long
+            // enough for NIOSSL to read it, then it's deleted.
+            return try LocalCAManager.withLeafKeyFile { keyFile in
+                try .makeServerConfiguration(
+                    certificateChain: NIOSSLCertificate.fromPEMFile(LocalCAManager.leafCertURL.path).map { NIOSSLCertificateSource.certificate($0) },
+                    privateKey: .privateKey(try NIOSSLPrivateKey(file: keyFile.path, format: .pem))
+                )
+            }
         }
-        guard let crt, let key else { throw ZefvCert.CertError.unavailable }
+        guard let crt = ZefvCert.crtURL, let key = ZefvCert.keyURL else { throw ZefvCert.CertError.unavailable }
         return try .makeServerConfiguration(
             certificateChain: NIOSSLCertificate.fromPEMFile(crt.path).map { NIOSSLCertificateSource.certificate($0) },
             privateKey: .privateKey(try NIOSSLPrivateKey(file: key.path, format: .pem))

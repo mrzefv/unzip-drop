@@ -1,20 +1,25 @@
 //
 //  LocalCAManager.swift
-//  Hand-rolled OTA TLS. Generates a root CA once (LocalCA.mm / OpenSSL), keeps
-//  it in the Keychain-backed Documents dir, issues a leaf for the chosen host,
-//  and packages the root as a .mobileconfig the user installs + trusts once.
-//  After that, every OTA install uses our own cert with zero external CA.
+//  Hand-rolled OTA TLS. Generates a root CA once (LocalCA.mm / OpenSSL). The
+//  private keys (root + leaf) live ONLY in the Keychain, marked
+//  kSecAttrAccessibleWhenUnlockedThisDeviceOnly — never included in an
+//  iTunes/Finder or iCloud backup and never portable to another device.
+//  Certs (public, harmless) are plain files in Documents so Vapor's TLS
+//  config and the .mobileconfig builder can read them directly. Keys are
+//  materialized to a private temp file only for the instant Vapor needs to
+//  load them, then deleted immediately.
 //
 
 import Foundation
 
 nonisolated enum LocalCAManager {
-    static var docs: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
-    static var rootCertURL: URL { docs.appendingPathComponent("localca-root.crt") }   // PEM
-    static var rootKeyURL:  URL { docs.appendingPathComponent("localca-root.key") }   // PEM
-    static var leafCertURL: URL { docs.appendingPathComponent("localca-leaf.crt") }   // PEM fullchain
-    static var leafKeyURL:  URL { docs.appendingPathComponent("localca-leaf.key") }   // PEM
+    private static var docs: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
+    static var rootCertURL: URL { docs.appendingPathComponent("localca-root.crt") }   // PEM, public
+    static var leafCertURL: URL { docs.appendingPathComponent("localca-leaf.crt") }   // PEM fullchain, public
     static var metaURL:     URL { docs.appendingPathComponent("localca.json") }
+
+    private static let kRootKey = "localca-root-key"
+    private static let kLeafKey = "localca-leaf-key"
 
     struct Meta: Codable, Sendable { var host: String; var rootCreated: Date; var leafIssued: Date; var validYears: Int }
 
@@ -25,61 +30,77 @@ nonisolated enum LocalCAManager {
     }
 
     static var hasRoot: Bool {
-        let fm = FileManager.default
-        return fm.fileExists(atPath: rootCertURL.path) && fm.fileExists(atPath: rootKeyURL.path)
+        FileManager.default.fileExists(atPath: rootCertURL.path) && Keychain.getSecret(kRootKey) != nil
     }
     static var hasLeaf: Bool {
-        let fm = FileManager.default
-        return fm.fileExists(atPath: leafCertURL.path) && fm.fileExists(atPath: leafKeyURL.path)
+        FileManager.default.fileExists(atPath: leafCertURL.path) && Keychain.getSecret(kLeafKey) != nil
     }
 
     enum CAError: LocalizedError {
-        case generateFailed, issueFailed, noRoot
+        case generateFailed, issueFailed, noRoot, keychainWriteFailed
         var errorDescription: String? {
             switch self {
-            case .generateFailed: return "Couldn't generate the root CA."
-            case .issueFailed:    return "Couldn't issue the leaf certificate."
-            case .noRoot:         return "No local root CA yet — create one first."
+            case .generateFailed:     return "Couldn't generate the root CA."
+            case .issueFailed:        return "Couldn't issue the leaf certificate."
+            case .noRoot:             return "No local root CA yet — create one first."
+            case .keychainWriteFailed: return "Couldn't save the private key to the Keychain."
             }
         }
     }
 
-    /// Create the root once (idempotent unless force).
+    /// Create the root once (idempotent unless force). Key → Keychain only; cert → file.
     @discardableResult
     static func ensureRoot(commonName: String = "MRvEK Local Root CA", years: Int = 10, force: Bool = false) throws -> Bool {
         if hasRoot && !force { return false }
         guard let pair = LocalCA.generateRootCA(withCommonName: commonName, validYears: Int32(years)),
               let cert = pair["cert"], let key = pair["key"] else { throw CAError.generateFailed }
         try cert.data(using: .utf8)!.write(to: rootCertURL, options: .atomic)
-        try key.data(using: .utf8)!.write(to: rootKeyURL, options: [.atomic, .completeFileProtection])
+        guard Keychain.setSecret(kRootKey, key) else { throw CAError.keychainWriteFailed }
         return true
     }
 
-    /// Issue (or re-issue) a leaf for `host`, writing the fullchain + key.
+    /// Issue (or re-issue) a leaf for `host`. Key → Keychain only; fullchain cert → file.
     static func issueLeaf(host: String, years: Int = 5) throws {
         try ensureRoot()
         guard let rootCert = try? String(contentsOf: rootCertURL),
-              let rootKey  = try? String(contentsOf: rootKeyURL) else { throw CAError.noRoot }
+              let rootKey  = Keychain.getSecret(kRootKey) else { throw CAError.noRoot }
         guard let pair = LocalCA.issueLeaf(forHost: host, rootCertPEM: rootCert, rootKeyPEM: rootKey, validYears: Int32(years)),
               let cert = pair["cert"], let key = pair["key"] else { throw CAError.issueFailed }
         try cert.data(using: .utf8)!.write(to: leafCertURL, options: .atomic)
-        try key.data(using: .utf8)!.write(to: leafKeyURL, options: [.atomic, .completeFileProtection])
+        guard Keychain.setSecret(kLeafKey, key) else { throw CAError.keychainWriteFailed }
         let m = Meta(host: host, rootCreated: rootCreatedDate(), leafIssued: Date(), validYears: years)
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
         try? enc.encode(m).write(to: metaURL)
     }
 
     static func reset() {
-        for u in [rootCertURL, rootKeyURL, leafCertURL, leafKeyURL, metaURL] { try? FileManager.default.removeItem(at: u) }
+        for u in [rootCertURL, leafCertURL, metaURL] { try? FileManager.default.removeItem(at: u) }
+        Keychain.deleteSecret(kRootKey)
+        Keychain.deleteSecret(kLeafKey)
     }
 
     private static func rootCreatedDate() -> Date {
         (try? FileManager.default.attributesOfItem(atPath: rootCertURL.path)[.creationDate] as? Date) ?? Date()
     }
 
+    // MARK: Leaf key — materialized just-in-time for Vapor's TLS config
+
+    /// Writes the leaf private key to a private, excluded-from-backup temp file
+    /// so `NIOSSLPrivateKey(file:)` can load it, then deletes it. Callers must
+    /// use the URL immediately and not retain it.
+    static func withLeafKeyFile<T>(_ body: (URL) throws -> T) throws -> T {
+        guard let key = Keychain.getSecret(kLeafKey) else { throw CAError.noRoot }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("localca-leaf-\(UUID().uuidString).key")
+        try key.data(using: .utf8)!.write(to: tmp, options: [.atomic, .completeFileProtection])
+        var noBackup = URL(fileURLWithPath: tmp.path)
+        var rv = URLResourceValues(); rv.isExcludedFromBackup = true
+        try? noBackup.setResourceValues(rv)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        return try body(tmp)
+    }
+
     // MARK: Root DER (for the profile payload)
 
-    /// Convert the root PEM to DER bytes for embedding in the .mobileconfig.
     static func rootDER() -> Data? {
         guard let pem = try? String(contentsOf: rootCertURL),
               let b = pem.range(of: "-----BEGIN CERTIFICATE-----"),
@@ -90,8 +111,6 @@ nonisolated enum LocalCAManager {
 
     // MARK: .mobileconfig (install the root as a trusted cert)
 
-    /// Build an unsigned configuration profile that installs the root CA.
-    /// The user still enables full trust in Settings afterwards.
     static func mobileConfig() -> Data? {
         guard let der = rootDER() else { return nil }
         let payloadUUID = UUID().uuidString
@@ -128,7 +147,6 @@ nonisolated enum LocalCAManager {
         return xml.data(using: .utf8)
     }
 
-    /// Write the profile to a temp file for sharing/opening.
     static func writeMobileConfig() -> URL? {
         guard let data = mobileConfig() else { return nil }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("MRvEK-OTA-Trust.mobileconfig")

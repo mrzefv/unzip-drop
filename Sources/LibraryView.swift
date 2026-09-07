@@ -29,6 +29,9 @@ struct LibraryView: View {
     @State private var installing: String?
     @State private var error: String?
     @State private var sheetItem: LibraryItem?
+    @State private var showSearch = false
+    @State private var selecting = false
+    @State private var selected: Set<String> = []
 
     private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
     private var inbox: URL { AppPaths.dir("inbox") }
@@ -40,11 +43,11 @@ struct LibraryView: View {
 
     var body: some View {
         ZStack {
-            Theme.bg.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
                     header
-                    if !items.isEmpty {
+                    if showSearch && !items.isEmpty {
                         TextField("Search", text: $search)
                             .autocorrectionDisabled().textInputAutocapitalization(.never)
                             .padding(10).background(Theme.card).foregroundStyle(Theme.text)
@@ -57,7 +60,14 @@ struct LibraryView: View {
                     } else if items.isEmpty {
                         Card { Text("No apps yet. Download one in Browse, or tap + to import an .ipa.").font(.caption).foregroundStyle(Theme.subtle) }
                     } else {
-                        ForEach(filtered) { row($0) }
+                        VStack(spacing: 0) {
+                            ForEach(filtered) { it in
+                                row(it)
+                                if it.id != filtered.last?.id {
+                                    Divider().overlay(Theme.stroke).padding(.leading, 84)
+                                }
+                            }
+                        }
                     }
                 }
                 .padding(16)
@@ -91,36 +101,79 @@ struct LibraryView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 14) {
+            Button { withAnimation { ThemePanelState.shared.open.toggle() } } label: {
+                Image(systemName: "paintpalette.fill").font(.system(size: 20)).foregroundStyle(blue)
+            }
             Text("Library").font(.title2.bold()).foregroundStyle(Theme.text)
             Spacer()
-            Text("\(items.count) Apps").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
-            Button { importing = true } label: {
-                Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(blue).padding(.leading, 12)
+            if selecting {
+                Text("\(selected.count) selected").font(.caption).foregroundStyle(Theme.subtle)
+            } else {
+                Text("\(items.count) Apps").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
+            }
+            Button { withAnimation { showSearch.toggle(); if !showSearch { search = "" } } } label: {
+                Image(systemName: "magnifyingglass").font(.system(size: 19, weight: .semibold)).foregroundStyle(blue)
+            }
+            Menu {
+                if selecting {
+                    Button { selectAll() } label: { Label("Select all", systemImage: "checkmark.circle") }
+                    Button(role: .destructive) { deleteSelected() } label: { Label("Delete selected", systemImage: "trash") }
+                    Button { updateSelected() } label: { Label("Update selected", systemImage: "arrow.down.circle") }
+                    Button { selecting = false; selected.removeAll() } label: { Label("Done", systemImage: "xmark") }
+                } else {
+                    Button { selecting = true } label: { Label("Select", systemImage: "checkmark.circle") }
+                    Button { importing = true } label: { Label("Import IPA", systemImage: "plus") }
+                }
+            } label: {
+                Image(systemName: selecting ? "ellipsis.circle.fill" : "ellipsis.circle").font(.system(size: 19, weight: .semibold)).foregroundStyle(blue)
+            }
+            if !selecting {
+                Button { importing = true } label: {
+                    Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(blue)
+                }
             }
         }
     }
 
     private func row(_ it: LibraryItem) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             icon(it.icon)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(it.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
-                Text("\(it.version) · \(it.bundle)\(it.sizeString.isEmpty ? "" : " · \(it.sizeString)")")
-                    .font(.caption.monospaced()).foregroundStyle(Theme.subtle).lineLimit(1)
-                Text("Downloaded").font(.caption2)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(it.name).font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                Text("\(it.version) · \(it.bundle)").font(.system(size: 15)).foregroundStyle(Theme.subtle).lineLimit(1)
+                Text("Downloaded").font(.system(size: 13))
+                    .padding(.horizontal, 10).padding(.vertical, 4)
                     .background(Theme.card).foregroundStyle(Theme.subtle).clipShape(Capsule())
             }
             Spacer()
-            if installing == it.id { ProgressView().tint(Theme.accent) }
+            if selecting {
+                Image(systemName: selected.contains(it.id) ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22)).foregroundStyle(selected.contains(it.id) ? blue : Theme.subtle)
+            } else if installing == it.id { ProgressView().tint(Theme.accent) }
             else { Image(systemName: "arrow.up.forward").font(.system(size: 18, weight: .semibold)).foregroundStyle(blue) }
         }
-        .padding(12).background(Theme.card)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.vertical, 14).padding(.horizontal, 4)
         .contentShape(Rectangle())
-        .onTapGesture { sheetItem = it }
+        .onTapGesture {
+            if selecting { toggle(it.id) } else { sheetItem = it }
+        }
+    }
+
+    private func toggle(_ id: String) {
+        if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+    }
+    private func selectAll() { selected = Set(filtered.map { $0.id }) }
+    private func deleteSelected() {
+        for it in items where selected.contains(it.id) { try? FileManager.default.removeItem(at: it.url) }
+        items.removeAll { selected.contains($0.id) }
+        selected.removeAll(); selecting = false
+    }
+    private func updateSelected() {
+        // Re-download newer copies isn't tracked per-source here; hand each to the
+        // signer so the user can re-sign the latest. (Library update = re-process.)
+        for it in items where selected.contains(it.id) { SignQueue.shared.enqueue(it.url) }
+        selected.removeAll(); selecting = false
     }
 
     private func icon(_ data: Data?) -> some View {
@@ -128,7 +181,7 @@ struct LibraryView: View {
             if let data, let img = UIImage(data: data) { Image(uiImage: img).resizable().scaledToFill() }
             else { RoundedRectangle(cornerRadius: 12).fill(Theme.accent.opacity(0.15)).overlay(Image(systemName: "app.fill").foregroundStyle(Theme.accent)) }
         }
-        .frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: - Data

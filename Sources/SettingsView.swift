@@ -33,7 +33,7 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-                Theme.bg.ignoresSafeArea()
+                Color.clear.ignoresSafeArea()
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
 
@@ -312,7 +312,7 @@ private struct DetailScreen<Content: View>: View {
                     .padding(16)
             }
         }
-        .background(Theme.bg.ignoresSafeArea())
+        .background(Color.clear.ignoresSafeArea())
         .scrollDismissesKeyboard(.interactively)
     }
 }
@@ -1568,7 +1568,7 @@ private struct ProfileInspector: View {
                 Text(text).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.text)
                     .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled).padding(16)
             }
-            .background(Theme.bg.ignoresSafeArea())
+            .background(Color.clear.ignoresSafeArea())
             .navigationTitle(".mobileconfig").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }

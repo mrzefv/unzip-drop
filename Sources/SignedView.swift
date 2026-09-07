@@ -8,12 +8,14 @@ import UIKit
 
 struct SignedView: View {
     @ObservedObject private var signed = SignedStore.shared
-    @ObservedObject private var ota = OTAInstaller.shared
     @State private var installing: String?
     @State private var share: URLItem?
     @State private var error: String?
     @State private var search = ""
     @State private var sheetEntry: SignedEntry?
+    @State private var showSearch = false
+    @State private var selecting = false
+    @State private var selected: Set<String> = []
 
     private var entries: [SignedEntry] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -22,17 +24,39 @@ struct SignedView: View {
 
     var body: some View {
         ZStack {
-            Theme.bg.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack {
+                    HStack(spacing: 14) {
+                        Button { withAnimation { ThemePanelState.shared.open.toggle() } } label: {
+                            Image(systemName: "paintpalette.fill").font(.system(size: 20)).foregroundStyle(Theme.accent)
+                        }
                         Text("Signed").font(.title2.bold()).foregroundStyle(Theme.text)
                         Spacer()
-                        Text("\(signed.entries.count)").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
+                        if selecting {
+                            Text("\(selected.count) selected").font(.caption).foregroundStyle(Theme.subtle)
+                        } else {
+                            Text("\(signed.entries.count)").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
+                        }
+                        Button { withAnimation { showSearch.toggle(); if !showSearch { search = "" } } } label: {
+                            Image(systemName: "magnifyingglass").font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.accent)
+                        }
+                        Menu {
+                            if selecting {
+                                Button { selectAll() } label: { Label("Select all", systemImage: "checkmark.circle") }
+                                Button(role: .destructive) { deleteSelected() } label: { Label("Delete selected", systemImage: "trash") }
+                                Button { updateSelected() } label: { Label("Re-sign selected", systemImage: "checkmark.seal") }
+                                Button { selecting = false; selected.removeAll() } label: { Label("Done", systemImage: "xmark") }
+                            } else {
+                                Button { selecting = true } label: { Label("Select", systemImage: "checkmark.circle") }
+                            }
+                        } label: {
+                            Image(systemName: selecting ? "ellipsis.circle.fill" : "ellipsis.circle").font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.accent)
+                        }
                     }
                     if signed.entries.isEmpty {
                         Card { Text("Nothing signed yet. Library tab › pick an IPA › Sign.").font(.caption).foregroundStyle(Theme.subtle) }
-                    } else {
+                    } else if showSearch {
                         TextField("Search", text: $search)
                             .autocorrectionDisabled().textInputAutocapitalization(.never)
                             .padding(10).background(Theme.card).foregroundStyle(Theme.text)
@@ -40,27 +64,14 @@ struct SignedView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                     if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) } }
-                    if ota.tracing {
-                        Card { HStack(spacing: 10) { ProgressView().tint(Theme.accent); Text("Watching installd… report in ~25s.").font(.caption).foregroundStyle(Theme.subtle) } }
-                    }
-                    if let r = ota.lastReport {
-                        Card {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Label("Install trace", systemImage: "waveform.path.ecg").font(.headline).foregroundStyle(Theme.text)
-                                    Spacer()
-                                    Text(r.delivered ? "IPA DELIVERED" : "NOT DELIVERED")
-                                        .font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(0.5)
-                                        .padding(.horizontal, 7).padding(.vertical, 3)
-                                        .background((r.delivered ? Color.green : Color.orange).opacity(0.18))
-                                        .foregroundStyle(r.delivered ? .green : .orange).clipShape(Capsule())
-                                }
-                                Text(r.diagnosis).font(.system(size: 13)).foregroundStyle(Theme.text)
-                                if let p = r.profileNote { Text(p).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.subtle) }
+                    VStack(spacing: 0) {
+                        ForEach(entries) { e in
+                            row(e)
+                            if e.id != entries.last?.id {
+                                Divider().overlay(Theme.stroke).padding(.leading, 84)
                             }
                         }
                     }
-                    ForEach(entries) { e in row(e) }
                 }
                 .padding(16)
             }
@@ -89,24 +100,45 @@ struct SignedView: View {
     }
 
     private func row(_ e: SignedEntry) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             icon(e.iconURL.flatMap { try? Data(contentsOf: $0) })
-            VStack(alignment: .leading, spacing: 2) {
-                Text(e.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
-                Text("\(e.bundleID) · v\(e.version)\(e.sizeString.isEmpty ? "" : " · \(e.sizeString)")").font(.caption.monospaced()).foregroundStyle(Theme.subtle).lineLimit(1)
-                Text("\(e.certName) · \(e.signedAt.formatted(date: .abbreviated, time: .shortened))").font(.caption2).foregroundStyle(Theme.subtle)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(e.name).font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                Text("\(e.version) · \(e.bundleID)").font(.system(size: 15)).foregroundStyle(Theme.subtle).lineLimit(1)
+                Text("Signed \(relative(e.signedAt))").font(.system(size: 13))
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Theme.card).foregroundStyle(Theme.subtle).clipShape(Capsule())
             }
             Spacer()
-            if installing == e.id { ProgressView().tint(Theme.accent) }
-            else {
-                Image(systemName: "arrow.up.forward").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent)
-            }
+            if selecting {
+                Image(systemName: selected.contains(e.id) ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22)).foregroundStyle(selected.contains(e.id) ? Theme.accent : Theme.subtle)
+            } else if installing == e.id { ProgressView().tint(Theme.accent) }
+            else { Image(systemName: "arrow.up.forward").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent) }
         }
-        .padding(12).background(Theme.card)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.vertical, 14).padding(.horizontal, 4)
         .contentShape(Rectangle())
-        .onTapGesture { sheetEntry = e }
+        .onTapGesture {
+            if selecting { toggle(e.id) } else { sheetEntry = e }
+        }
+    }
+
+    private func toggle(_ id: String) {
+        if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+    }
+    private func selectAll() { selected = Set(entries.map { $0.id }) }
+    private func deleteSelected() {
+        for e in signed.entries where selected.contains(e.id) { signed.delete(e) }
+        selected.removeAll(); selecting = false
+    }
+    private func updateSelected() {
+        for e in signed.entries where selected.contains(e.id) { SignQueue.shared.enqueue(e.ipaURL) }
+        selected.removeAll(); selecting = false
+    }
+
+    private func relative(_ d: Date) -> String {
+        let f = RelativeDateTimeFormatter(); f.unitsStyle = .abbreviated
+        return f.localizedString(for: d, relativeTo: Date())
     }
 
     private func icon(_ data: Data?) -> some View {
@@ -114,7 +146,7 @@ struct SignedView: View {
             if let data, let img = UIImage(data: data) { Image(uiImage: img).resizable().scaledToFill() }
             else { RoundedRectangle(cornerRadius: 9).fill(Theme.accent.opacity(0.15)).overlay(Image(systemName: "app.fill").foregroundStyle(Theme.accent)) }
         }
-        .frame(width: 42, height: 42).clipShape(RoundedRectangle(cornerRadius: 9))
+        .frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func install(_ e: SignedEntry) async {
@@ -183,7 +215,7 @@ struct AppActionSheet: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
-        .background(Theme.bg.ignoresSafeArea())
+        .background(Color.clear.ignoresSafeArea())
     }
 
     private func iconThumb(_ side: CGFloat) -> some View {

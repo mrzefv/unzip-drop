@@ -238,7 +238,7 @@ struct SourcesView: View {
 
     private var sourcesBody: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
             VStack(spacing: 0) {
                 HStack {
                     Text("Sources").font(.title2.bold()).foregroundStyle(Theme.text)
@@ -386,7 +386,7 @@ private struct SourceDetailScreen: View {
             .background(BarBlur())
             .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
         }
-        .background(Color.black.ignoresSafeArea())
+        .background(Color.clear.ignoresSafeArea())
         .task { await load() }
         .sheet(item: $openGroup) { g in
             AppDetailSheet(source: current, group: g)
@@ -710,7 +710,7 @@ struct AppDetailSheet: View {
                 bottomBar.background(BarBlur())
             }
         }
-        .background(Color.black.ignoresSafeArea())
+        .background(Color.clear.ignoresSafeArea())
         .onAppear { selectedID = group.latest.id; refreshDevice() }
         .onChange(of: selectedID) { _ in refreshDevice() }
     }

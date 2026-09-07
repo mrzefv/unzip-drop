@@ -14,26 +14,49 @@ struct RootView: View {
     @State private var showSign = false
     @ObservedObject private var hub = GitHubHub.shared
     @State private var tab = 0
+    @ObservedObject private var theme = ThemeManager.shared
+    @ObservedObject private var themePanel = ThemePanelState.shared
+    @State private var wheelExpanded = true
+    @State private var bgExpanded = false
 
     var body: some View {
         ZStack {
-            switch tab {
-            case 0: LibraryView()
-            case 1: SourcesView()
-            case 2: SignedView()
-            default: SettingsView()
+            // App-wide animated background — shows behind every tab, incl. Browse.
+            ParticleBackground(accent: theme.accent, style: theme.background)
+
+            ZStack {
+                switch tab {
+                case 0: LibraryView()
+                case 1: SourcesView()
+                case 2: SignedView()
+                default: SettingsView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if themePanel.open {
+                Color.black.opacity(0.25).ignoresSafeArea().onTapGesture { withAnimation { themePanel.open = false } }
+                VStack {
+                    ThemePalettePanel(expandedWheel: $wheelExpanded, expandedBackground: $bgExpanded) { themePanel.open = false }
+                        .padding(.top, 60)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(2)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             TabBar(selected: $tab)
         }
-        .background(Color.black.ignoresSafeArea())
+        .tint(theme.accent)
+        .preferredColorScheme(theme.darkMode ? .dark : .light)
         .onChange(of: signQueue.requestedTab) { t in
             // Signing is a flow, not a tab: present SignView over whatever's showing.
             if t != nil { showSign = true; signQueue.requestedTab = nil }
         }
         .fullScreenCover(isPresented: $showSign) { SignView().preferredColorScheme(.dark) }
+
         .fullScreenCover(isPresented: $hub.isPresented) {
             GitHubHubScreen()
                 .environmentObject(session)

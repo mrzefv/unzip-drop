@@ -1077,7 +1077,8 @@ struct InstallPromptOverlay: View {
                         Text("\(source) | ᴍʀZefv").font(.system(size: 12, weight: .semibold)).foregroundStyle(blue).padding(.vertical, 12)
                     }
                 }
-                .frame(maxHeight: 520)
+                .frame(maxHeight: 460)
+                .fixedSize(horizontal: false, vertical: true)
                 Divider().overlay(Color.white.opacity(0.10))
                 HStack(spacing: 0) {
                     Button(action: onCancel) { Text("Cancel").font(.system(size: 16)).foregroundStyle(blue).frame(maxWidth: .infinity).padding(.vertical, 14) }

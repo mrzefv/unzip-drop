@@ -10,6 +10,7 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import ZIPFoundation
 
 struct SigningSheet: View {
     let ipaURL: URL
@@ -91,7 +92,6 @@ struct SigningSheet: View {
                     dylibInjection
                     changesSummary
                     if let error { Text(error).font(.caption).foregroundStyle(.orange).padding(.horizontal, 4) }
-                    if let r = result { signedCard(r) }
                     if ota.tracing { tracingCard }
                     if let rep = ota.lastReport { reportCard(rep) }
                     Spacer(minLength: 20)

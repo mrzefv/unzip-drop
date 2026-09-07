@@ -57,6 +57,16 @@ nonisolated enum ServerConfig {
     }
     static let certWorkflowPath = ".github/workflows/certs.yml"
 
+    // ACME certificate authority + optional ZeroSSL EAB credentials.
+    static var certCA: String { UserDefaults.standard.string(forKey: "uzd_cert_ca") ?? "letsencrypt" }
+    static func setCertCA(_ v: String) { UserDefaults.standard.set(v, forKey: "uzd_cert_ca") }
+    static var eabKID: String { UserDefaults.standard.string(forKey: "uzd_eab_kid") ?? "" }
+    static var eabHMAC: String { UserDefaults.standard.string(forKey: "uzd_eab_hmac") ?? "" }
+    static func setEAB(kid: String, hmac: String) {
+        UserDefaults.standard.set(kid, forKey: "uzd_eab_kid")
+        UserDefaults.standard.set(hmac, forKey: "uzd_eab_hmac")
+    }
+
     /// Legacy fallback (mSign's endpoint), tried only if the GitHub source fails.
     static let refreshURL = URL(string: "https://mrzefv.com/certs/pack.json")!
     static let refreshBufferDays = 21
@@ -175,7 +185,7 @@ nonisolated enum ZefvCert {
             let (d, resp) = try await URLSession.shared.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             guard code < 400, !d.isEmpty else {
-                throw CertError.badPack("\(o)/\(r)@\(b)/\(path) → HTTP \(code). Run the 'OTA certs' workflow once, and make sure the token can read the repo.")
+                throw CertError.badPack("\(o)/\(r)@\(b)/\(path) → HTTP \(code). The cert files aren't on the certs branch yet. If the last run showed VALIDATED, its publish step failed — open the run's 'Write pack.json & publish' step, or tap Renew now to re-issue. Also confirm the token can read this repo.")
             }
             return d
         }
@@ -394,13 +404,23 @@ nonisolated enum CertSourceLinker {
 
 // MARK: - ACME challenge board (manual DNS-01 progress from certs.yml)
 
+nonisolated struct AcmeCheck: Decodable, Sendable {
+    struct NS: Decodable, Sendable { let seen: Bool; let txt: String? }
+    let at: String?
+    let authoritative: [String: NS]?
+    let authoritativeSeen: Bool?
+    let resolvers: [String: Bool]?
+}
+
 nonisolated struct AcmeChallenge: Decodable, Identifiable, Sendable {
     let domain: String
     let name: String
     let value: String
     let step: Int
     let of: Int
-    let status: String          // pending | seen | validated | timeout
+    let status: String          // pending | seen | forced | validated | timeout
+    let force: Bool?
+    let lastCheck: AcmeCheck?
     var id: String { value }
 }
 
@@ -426,6 +446,92 @@ extension ZefvCert {
         guard let (d, resp) = try? await URLSession.shared.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode ?? 0 < 400 else { return nil }
         return try? JSONDecoder().decode(AcmeBoard.self, from: d)
+    }
+
+    /// Flip "force": true on a pending record in challenge.json (certs branch). The hook
+    /// pulls the file every poll and proceeds to validation as soon as it sees it.
+    static func forceChallenge(value: String, token: String) async throws {
+        guard !token.isEmpty else { throw GitHubError.badConfig("GitHub token required.") }
+        let o = ServerConfig.certRepoOwner, r = ServerConfig.certRepoName, b = ServerConfig.certBranch
+        let url = URL(string: "https://api.github.com/repos/\(o)/\(r)/contents/challenge.json?ref=\(b)")!
+        var req = URLRequest(url: url); req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+        let (d, resp) = try await URLSession.shared.data(for: req)
+        guard (resp as? HTTPURLResponse)?.statusCode == 200,
+              let meta = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let sha = meta["sha"] as? String,
+              let b64 = (meta["content"] as? String)?.replacingOccurrences(of: "\n", with: ""),
+              let raw = Data(base64Encoded: b64),
+              var doc = try? JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
+            throw GitHubError.badConfig("Couldn't read challenge.json on \(b).")
+        }
+        var recs = doc["records"] as? [[String: Any]] ?? []
+        var hit = false
+        for i in recs.indices where (recs[i]["value"] as? String) == value { recs[i]["force"] = true; hit = true }
+        guard hit else { throw GitHubError.badConfig("That challenge is no longer on the board.") }
+        doc["records"] = recs
+        doc["updatedAt"] = ISO8601DateFormatter().string(from: Date())
+        let newData = try JSONSerialization.data(withJSONObject: doc, options: [.prettyPrinted, .sortedKeys])
+        var put = URLRequest(url: URL(string: "https://api.github.com/repos/\(o)/\(r)/contents/challenge.json")!)
+        put.httpMethod = "PUT"
+        put.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        put.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        put.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        put.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        put.httpBody = try JSONSerialization.data(withJSONObject: [
+            "message": "acme: force continue (from app)",
+            "content": newData.base64EncodedString(),
+            "sha": sha, "branch": b,
+        ])
+        let (_, pr) = try await URLSession.shared.data(for: put)
+        guard (200...299).contains((pr as? HTTPURLResponse)?.statusCode ?? 0) else {
+            throw GitHubError.badConfig("Couldn't update challenge.json (HTTP \((pr as? HTTPURLResponse)?.statusCode ?? 0)).")
+        }
+    }
+
+    /// What's actually on the certs branch — reports per-file presence so the
+    /// UI can distinguish "publish step failed" from "wrong repo/branch/token".
+    struct BranchProbe: Sendable {
+        var reachable = false
+        var httpCode = 0
+        var hasPackJson = false, hasServerCrt = false, hasServerPem = false
+        var files: [String] = []
+        var summary: String {
+            if httpCode == 404 && files.isEmpty { return "Branch/repo not found, or token can't read it (HTTP 404)." }
+            if !reachable { return "Couldn't reach the branch (HTTP \(httpCode))." }
+            if hasPackJson && hasServerCrt && hasServerPem { return "All cert files present — tap Pull latest." }
+            var missing: [String] = []
+            if !hasPackJson { missing.append("pack.json") }
+            if !hasServerCrt { missing.append("server.crt") }
+            if !hasServerPem { missing.append("server.pem") }
+            return "Branch exists but missing: \(missing.joined(separator: ", ")). The workflow's publish step didn't finish — re-run it (Renew now)."
+        }
+    }
+
+    static func probeCertBranch(token: String?) async -> BranchProbe {
+        var p = BranchProbe()
+        let o = ServerConfig.certRepoOwner, r = ServerConfig.certRepoName, b = ServerConfig.certBranch
+        var c = URLComponents(string: "https://api.github.com/repos/\(o)/\(r)/git/trees/\(b)")!
+        c.queryItems = [URLQueryItem(name: "recursive", value: "0")]
+        var req = URLRequest(url: c.url!)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+        if let token, !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        guard let (d, resp) = try? await URLSession.shared.data(for: req) else { return p }
+        p.httpCode = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard p.httpCode < 400, let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let tree = j["tree"] as? [[String: Any]] else { return p }
+        p.reachable = true
+        p.files = tree.compactMap { $0["path"] as? String }
+        p.hasPackJson = p.files.contains("pack.json")
+        p.hasServerCrt = p.files.contains("server.crt")
+        p.hasServerPem = p.files.contains("server.pem")
+        return p
     }
 
     /// Live TXT lookup over DNS-over-HTTPS (same resolvers the hook polls).

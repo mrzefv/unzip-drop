@@ -636,11 +636,15 @@ private struct OTADomainScreen: View {
     }
     private var domainOK: Bool { cleanDomain.contains(".") && !cleanDomain.contains(" ") }
     private var hostOK: Bool { domainOK && (clean.lowercased().hasSuffix("." + cleanDomain) || clean.lowercased() == cleanDomain) }
-    private var certCoversHost: Bool { ZefvCert.covers(clean.isEmpty ? "mr.\(cleanDomain)" : clean, sans: sans) }
+    private var certCoversHost: Bool {
+        let h = clean.isEmpty ? "mr.\(cleanDomain)" : clean
+        return mode == "local" ? LocalCAManager.covers(h) : ZefvCert.covers(h, sans: sans)
+    }
 
     var body: some View {
         DetailScreen(title: "On-Device OTA Domain") {
             modeCard
+            activeCertCard
             if mode == "public" { hostCard
             if let board, !board.records.isEmpty || renewing { challengeCard(board) }
             certCard
@@ -831,6 +835,44 @@ private struct OTADomainScreen: View {
                 // Cert landed? refresh the status card.
                 if board?.pending.isEmpty ?? true, renewing == false { reload() }
             }
+        }
+    }
+
+    /// Always-visible readout of exactly which cert is live right now, so it's
+    /// obvious whether the app will actually use the trusted local leaf.
+    private var activeCertCard: some View {
+        let liveSANs = mode == "local" ? LocalCAManager.leafSANs() : sans
+        let hostOKNow = mode == "local" ? LocalCAManager.covers(host) : ZefvCert.covers(host, sans: sans)
+        let ready = (mode == "local" ? LocalCAManager.hasLeaf : ZefvCert.isAvailable) && hostOKNow
+        return Card {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Active cert", systemImage: mode == "local" ? "iphone" : "globe").font(.headline).foregroundStyle(Theme.text)
+                    Spacer()
+                    Text(ready ? "MATCHES HOST" : "MISMATCH")
+                        .font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(0.5)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background((ready ? Color.green : Color.orange).opacity(0.18))
+                        .foregroundStyle(ready ? .green : .orange).clipShape(Capsule())
+                }
+                kvRow("Mode", mode == "local" ? "Fully local (root CA)" : "Public (ACME)")
+                kvRow("Install host", host)
+                kvRow("Cert covers", liveSANs.isEmpty ? "—" : liveSANs.joined(separator: ", "))
+                if !ready {
+                    Text(mode == "local"
+                         ? "Issue a leaf for \(host) in Local CA settings — instant, the root you trusted covers any host it signs."
+                         : "Renew or Pull latest so the ACME cert covers \(host).")
+                        .font(.caption2).foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    private func kvRow(_ k: String, _ v: String) -> some View {
+        HStack {
+            Text(k).font(.caption).foregroundStyle(Theme.subtle)
+            Spacer()
+            Text(v).font(.caption.monospaced()).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
         }
     }
 

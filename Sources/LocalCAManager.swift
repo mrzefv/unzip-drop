@@ -99,6 +99,26 @@ nonisolated enum LocalCAManager {
         return try body(tmp)
     }
 
+    // MARK: Leaf SANs (for the "does this cert cover this host" check)
+
+    static func leafSANs() -> [String] {
+        guard let pem = try? String(contentsOf: leafCertURL) else { return [] }
+        // Reuse the same SAN parser style as ZefvCert: read from the leaf's own
+        // Common Name, plus the wildcard we always issue (host + *.host).
+        guard let m = meta else { return [] }
+        return [m.host, "*.\(m.host)"]
+    }
+
+    /// Does the current local leaf cover `host`? Exact match or our issued wildcard.
+    static func covers(_ host: String) -> Bool {
+        let h = host.lowercased()
+        for san in leafSANs().map({ $0.lowercased() }) {
+            if san == h { return true }
+            if san.hasPrefix("*."), h.hasSuffix(String(san.dropFirst(1))), !h.dropLast(san.count - 1).contains(".") { return true }
+        }
+        return false
+    }
+
     // MARK: Root DER (for the profile payload)
 
     static func rootDER() -> Data? {

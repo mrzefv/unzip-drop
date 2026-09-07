@@ -1,8 +1,16 @@
 //
 //  OTAInstaller.swift
-//  Serves a locally-signed IPA over the on-device Vapor HTTPS server
-//  (zefv.dev cert) and hands iOS the itms-services URL. Keeps the server
-//  alive under a background task for the ~90s installd needs.
+//  Serves a locally-signed IPA over the on-device Vapor HTTPS server and hands
+//  iOS the itms-services URL. Keeps the server alive under a background task
+//  for the ~90s installd needs.
+//
+//  Cert source follows ServerConfig.certMode:
+//    "public" → the ACME (zefv.dev-style) cert, refreshed from the certs repo.
+//    "local"  → our own root CA's leaf (LocalCAManager) — no network needed,
+//               covers whatever host it was last issued for.
+//  The "does this cert actually cover this host" check reads whichever cert
+//  is active for the current mode, so a public-cert host mismatch never gets
+//  reported while you're on Local, and vice versa.
 //
 
 import Foundation
@@ -17,13 +25,23 @@ final class OTAInstaller {
     private var bgTask: UIBackgroundTaskIdentifier = .invalid
 
     enum InstallError: LocalizedError {
-        case ipaMissing, openFailed, hostNotCovered(String, [String])
+        case ipaMissing, openFailed
+        case hostNotCovered(host: String, mode: String, sans: [String])
+        case noLocalLeaf(host: String)
+
         var errorDescription: String? {
             switch self {
-            case .hostNotCovered(let h, let sans):
-                return "The loaded cert doesn't cover \(h) (it covers \(sans.isEmpty ? "nothing readable" : sans.joined(separator: ", "))). Set the OTA domain to match, or renew a cert for it in Settings › OTA Domain."
+            case .hostNotCovered(let h, let mode, let sans):
+                let covering = sans.isEmpty ? "nothing readable" : sans.joined(separator: ", ")
+                if mode == "local" {
+                    return "Your local leaf covers \(covering) — not \(h). Settings › Local CA: set host to \(h) and Re-issue leaf (instant, no profile needed again)."
+                }
+                return "The loaded ACME cert covers \(covering) — not \(h). Set the OTA domain to match, or renew a cert for it in Settings › OTA Domain. Or switch Cert mode to Fully local."
+            case .noLocalLeaf(let h):
+                return "Cert mode is Fully local but no leaf has been issued yet. Settings › Local CA: create the CA and issue a leaf for \(h)."
             case .ipaMissing: return "Signed IPA not found on disk."
-            case .openFailed: return "iOS refused the itms-services URL. Check the OTA host resolves to 127.0.0.1 and is covered by the zefv.dev cert."
+            case .openFailed:
+                return "iOS refused the itms-services URL. Check the OTA host resolves to 127.0.0.1 and matches the active cert (see Settings › OTA Domain — Active cert)."
             }
         }
     }
@@ -36,12 +54,22 @@ final class OTAInstaller {
     func install(ipaURL: URL, bundleID: String, name: String, version: String, iconData: Data?) async throws {
         guard FileManager.default.fileExists(atPath: ipaURL.path) else { throw InstallError.ipaMissing }
 
-        // Near expiry: pull a fresh chain from mrzefv.com (no-op offline; bundled pair still works).
-        if ZefvCert.needsRefresh { await ZefvCert.refreshIfNeeded(token: Keychain.get("gh_token")) }
-        guard ZefvCert.isAvailable else { throw ZefvCert.CertError.unavailable }
-        let sans = ZefvCert.effectiveSANs
-        guard ZefvCert.covers(ServerConfig.installHost, sans: sans) else {
-            throw InstallError.hostNotCovered(ServerConfig.installHost, sans)
+        let host = ServerConfig.installHost
+        let mode = ServerConfig.certMode
+
+        if mode == "local" {
+            guard LocalCAManager.hasLeaf else { throw InstallError.noLocalLeaf(host: host) }
+            guard LocalCAManager.covers(host) else {
+                throw InstallError.hostNotCovered(host: host, mode: mode, sans: LocalCAManager.leafSANs())
+            }
+        } else {
+            // Near expiry: pull a fresh chain from the certs repo (no-op offline; bundled pair still works).
+            if ZefvCert.needsRefresh { await ZefvCert.refreshIfNeeded(token: Keychain.get("gh_token")) }
+            guard ZefvCert.isAvailable else { throw ZefvCert.CertError.unavailable }
+            let sans = ZefvCert.effectiveSANs
+            guard ZefvCert.covers(host, sans: sans) else {
+                throw InstallError.hostNotCovered(host: host, mode: mode, sans: sans)
+            }
         }
 
         let icon57  = Self.squarePNG(iconData, side: 57)

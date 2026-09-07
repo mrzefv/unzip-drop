@@ -15,12 +15,14 @@ private enum Screen: Identifiable, Hashable {
     case dylibTemplate, ipaTemplate
     case certificates, otaDomain, certInspector, transparency
     case tutorials
+    case zefvAccount
     var id: String {
         switch self {
         case .about: return "about"; case .repo: return "repo"; case .token: return "token"
         case .dylibTemplate: return "tpl-dylib"; case .ipaTemplate: return "tpl-ipa"
         case .certificates: return "certs"; case .otaDomain: return "ota"; case .certInspector: return "inspect"; case .transparency: return "transparency"
         case .tutorials: return "tutorials"
+        case .zefvAccount: return "zefv-account"
         }
     }
 }
@@ -29,15 +31,14 @@ struct SettingsView: View {
     @EnvironmentObject var config: Config
     @EnvironmentObject var session: Session
     @ObservedObject private var certs = CertificateStore.shared
+    @ObservedObject private var zefv  = ZefvClient.shared
     @State private var screen: Screen?
 
     var body: some View {
         ZStack {
                 Color.clear.ignoresSafeArea()
-                VStack(spacing: 0) {
-                    AccentTopBar(title: "Settings", subtitle: "\(Theme.appName) \(Theme.appVersion)")
-                    ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 0) {
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
 
                         SettingsSection("General", trailing: "\(Theme.appName.uppercased()) \(Theme.appVersion)") {
                             SettingsRow(icon: "info.circle.fill", title: "About", subtitle: "App information and version") { screen = .about }
@@ -71,6 +72,12 @@ struct SettingsView: View {
                                         subtitle: certs.active?.name ?? "No signing certificate") { screen = .certificates }
                             SettingsRow(icon: "network", title: "On-Device OTA Domain",
                                         subtitle: "\(ServerConfig.installHost) · certbot via Actions") { screen = .otaDomain }
+                        }
+
+                        SettingsSection("zefv.dev Account", trailing: zefv.currentUser?.rank_name.uppercased()) {
+                            SettingsRow(icon: "person.crop.circle.badge.checkmark",
+                                        title: zefv.currentUser?.username ?? (zefv.isAuthenticated ? "Loading…" : "Sign in or register"),
+                                        subtitle: zefvSubtitle) { screen = .zefvAccount }
                         }
 
                         SettingsSection("Transparency") {
@@ -107,7 +114,6 @@ struct SettingsView: View {
                     .padding(.top, 6)
                     .padding(.bottom, 20)
             }
-            }
         }
         .fullScreenCover(item: $screen) { s in
             Group {
@@ -122,6 +128,7 @@ struct SettingsView: View {
                 case .dylibTemplate: DylibTemplateScreen()
                 case .ipaTemplate:   IPATemplateScreen()
                 case .tutorials: TutorialsListScreen()
+                case .zefvAccount: ZefvAccountScreen()
                 }
             }
             .environmentObject(config)
@@ -133,6 +140,23 @@ struct SettingsView: View {
     private var repoSubtitle: String {
         guard !config.owner.isEmpty, !config.repo.isEmpty else { return "Set owner, repo and branch" }
         return "\(config.owner)/\(config.repo) @ \(config.branch.isEmpty ? "main" : config.branch)"
+    }
+
+    private var zefvSubtitle: String {
+        guard let u = zefv.currentUser else {
+            return zefv.isAuthenticated
+                ? "Signed in — refresh account"
+                : "Publish signed IPAs to your username.zefv.dev subdomain"
+        }
+        let quota = u.quota_bytes < 0 ? "unlimited" : byteString(u.quota_bytes)
+        return "\(u.username).zefv.dev · Level \(u.level) · \(byteString(u.bytes_used)) / \(quota)"
+    }
+
+    private func byteString(_ n: Int) -> String {
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        var v = Double(n); var i = 0
+        while v >= 1024, i < units.count - 1 { v /= 1024; i += 1 }
+        return String(format: v < 10 && i > 0 ? "%.1f %@" : "%.0f %@", v, units[i])
     }
 }
 

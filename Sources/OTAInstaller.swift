@@ -81,6 +81,8 @@ final class OTAInstaller: ObservableObject {
 
         if mode == "local" {
             guard LocalCAManager.hasLeaf else { throw InstallError.noLocalLeaf(host: host) }
+            // Auto-reissue when within 30 days of the 397-day cap (iOS TLS limit).
+            if LocalCAManager.reissueIfNeeded() { /* fresh leaf issued */ }
             guard LocalCAManager.covers(host) else {
                 throw InstallError.hostNotCovered(host: host, mode: mode, sans: LocalCAManager.leafSANs())
             }

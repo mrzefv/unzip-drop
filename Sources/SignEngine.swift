@@ -10,6 +10,15 @@ import Foundation
 import Darwin
 import ZIPFoundation
 
+/// Parallel DAG signing toggle — pushed into the zsign engine via ZSignSetParallel.
+/// Independent frameworks/dylibs/plugins are signed concurrently (dispatch_apply),
+/// which is the main speedup on multi-framework apps. Default ON.
+nonisolated enum ParallelSigning {
+    private static let key = "uzd_parallel_signing"
+    static var isEnabled: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+    static func set(_ v: Bool) { UserDefaults.standard.set(v, forKey: key) }
+}
+
 enum ZsignError: Error, LocalizedError {
     case fileNotFound(String)
     case signingFailed(code: Int32)
@@ -38,9 +47,9 @@ nonisolated struct ZsignSigner {
     ///   - p12Path:       absolute path to the signing `.p12`.
     ///   - p12Password:   password for the `.p12` (pass `""` if none).
     ///   - bundleID/displayName/version: pass non-nil to override Info.plist values.
-    ///   - skipEmbeddedProvision: when true, does NOT write embedded.mobileprovision.
-    ///     (This fork's C arg is named `dontGenerate…` but writes the profile only
-    ///     when TRUE — so we pass !skipEmbeddedProvision below.)
+    ///   - skipEmbeddedProvision: kept for API compat. This zsign fork only WRITES
+    ///     embedded.mobileprovision inside `if(dontGenerateEmbeddedMobileProvision)`,
+    ///     so we always pass true; a post-sign guard below also verifies the file exists.
     nonisolated static func signAppBundle(
         appBundlePath: String,
         provisionPath: String,
@@ -64,7 +73,7 @@ nonisolated struct ZsignSigner {
             bundleID ?? "",
             displayName ?? "",
             version ?? "",
-            !skipEmbeddedProvision   // this zsign fork writes embedded.mobileprovision only when TRUE
+            true   // fork writes embedded.mobileprovision only inside `if(dontGenerate…)`; always embed
         )
         if code != 0 { throw ZsignError.signingFailed(code: code) }
     }
@@ -155,6 +164,8 @@ nonisolated struct SignOutcome: Sendable {
     let name: String
     let bundleID: String
     let version: String
+    var entitlements: [String: String] = [:]
+    var sizeBytes: Int64 = 0
 }
 
 nonisolated struct SignOptions: Sendable {
@@ -243,10 +254,12 @@ nonisolated enum Signer {
         // 2b. Pre-sign mutations (strip content, plist tweaks, icon, dylibs).
         try applyPreSign(appURL: appURL, options: o, onLog: onLog)
 
-        // 3. Sign in place — capture the engine's real stdout.
+        // 3. Sign in place — capture the engine's real stdout, mSign-style.
         let capture = onLog.map { ConsoleCapture($0) }
         capture?.start()
         do {
+            // Parallel DAG signing (mSign's speed path). Safe: disjoint subtrees.
+            ZSignSetParallel(ParallelSigning.isEnabled)
             try ZsignSigner.signAppBundle(
                 appBundlePath: appURL.path,
                 provisionPath: provURL.path,
@@ -261,6 +274,16 @@ nonisolated enum Signer {
         } catch {
             capture?.stop()
             throw error
+        }
+
+        // Deterministic safety net: installd refuses an app with no profile. If for
+        // any reason zsign didn't write embedded.mobileprovision, write it ourselves
+        // from the same provisioning file we signed with, then re-seal is unneeded
+        // (the profile isn't part of the code signature).
+        let embeddedProv = appURL.appendingPathComponent("embedded.mobileprovision")
+        if !fm.fileExists(atPath: embeddedProv.path) {
+            try? material.provision.write(to: embeddedProv)
+            onLog?(">>> embedded.mobileprovision was missing — wrote it from the signing profile")
         }
 
         // 4. Read identifiers back from the SIGNED app's own Info.plist — this is
@@ -285,7 +308,32 @@ nonisolated enum Signer {
         try fm.zipItem(at: payload, to: signed, shouldKeepParent: true, compressionMethod: .none)
         onLog?(">>> Done.")
 
-        return SignOutcome(ipaURL: signed, name: name, bundleID: bundleID, version: version)
+        let ents = Signer.readEntitlements(appURL: appURL)
+        let sz = (try? fm.attributesOfItem(atPath: signed.path)[.size] as? Int64) ?? 0
+        return SignOutcome(ipaURL: signed, name: name, bundleID: bundleID, version: version, entitlements: ents, sizeBytes: sz)
+    }
+
+    /// Best-effort entitlements read from the signed app's embedded profile.
+    /// The .mobileprovision is a CMS blob; its plist payload has an "Entitlements"
+    /// dict. We extract the plist span and read that key. Values are flattened to
+    /// strings/lists for display in the install prompt.
+    nonisolated static func readEntitlements(appURL: URL) -> [String: String] {
+        let prov = appURL.appendingPathComponent("embedded.mobileprovision")
+        guard let data = try? Data(contentsOf: prov),
+              let start = data.range(of: Data("<?xml".utf8)),
+              let end = data.range(of: Data("</plist>".utf8)) else { return [:] }
+        let plistData = data.subdata(in: start.lowerBound..<end.upperBound)
+        guard let obj = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any],
+              let ent = obj["Entitlements"] as? [String: Any] else { return [:] }
+        var out: [String: String] = [:]
+        for (k, v) in ent {
+            if let b = v as? Bool { out[k] = b ? "true" : "false" }
+            else if let s = v as? String { out[k] = s }
+            else if let arr = v as? [String] { out[k] = arr.joined(separator: ", ") }
+            else if let arr = v as? [Any] { out[k] = arr.map { "\($0)" }.joined(separator: ", ") }
+            else { out[k] = "\(v)" }
+        }
+        return out
     }
 
     // MARK: - Pre-sign mutations

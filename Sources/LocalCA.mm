@@ -88,6 +88,13 @@ static void randSerial(X509 *cert) {
                        rootCertPEM:(NSString *)rootCertPEM
                         rootKeyPEM:(NSString *)rootKeyPEM
                         validYears:(int)years {
+    return [self issueLeafForHost:host rootCertPEM:rootCertPEM rootKeyPEM:rootKeyPEM validDays:(years * 365)];
+}
+
++ (NSDictionary *)issueLeafForHost:(NSString *)host
+                       rootCertPEM:(NSString *)rootCertPEM
+                        rootKeyPEM:(NSString *)rootKeyPEM
+                         validDays:(int)days {
     // Load root.
     BIO *rcb = BIO_new_mem_buf(rootCertPEM.UTF8String, -1);
     X509 *root = PEM_read_bio_X509(rcb, NULL, NULL, NULL); BIO_free(rcb);
@@ -100,7 +107,7 @@ static void randSerial(X509 *cert) {
     X509_set_version(x, 2);
     randSerial(x);
     X509_gmtime_adj(X509_getm_notBefore(x), -3600);
-    X509_gmtime_adj(X509_getm_notAfter(x), (long)years * 365 * 24 * 3600);
+    X509_gmtime_adj(X509_getm_notAfter(x), (long)days * 24 * 3600);   // iOS rejects leaves > 398 days
     X509_set_pubkey(x, leafKey);
     setName(X509_get_subject_name(x), host.UTF8String, "MRvEK OTA");
     X509_set_issuer_name(x, X509_get_subject_name(root));

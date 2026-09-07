@@ -21,7 +21,9 @@ nonisolated enum LocalCAManager {
     private static let kRootKey = "localca-root-key"
     private static let kLeafKey = "localca-leaf-key"
 
-    struct Meta: Codable, Sendable { var host: String; var rootCreated: Date; var leafIssued: Date; var validYears: Int }
+    static let leafValidDays = 397   // iOS rejects TLS leaves valid > 398 days
+
+    struct Meta: Codable, Sendable { var host: String; var rootCreated: Date; var leafIssued: Date; var validYears: Int; var validDays: Int? }
 
     static var meta: Meta? {
         guard let d = try? Data(contentsOf: metaURL) else { return nil }
@@ -60,17 +62,37 @@ nonisolated enum LocalCAManager {
     }
 
     /// Issue (or re-issue) a leaf for `host`. Key → Keychain only; fullchain cert → file.
-    static func issueLeaf(host: String, years: Int = 5) throws {
+    static func issueLeaf(host: String, days: Int = leafValidDays) throws {
         try ensureRoot()
         guard let rootCert = try? String(contentsOf: rootCertURL),
               let rootKey  = Keychain.getSecret(kRootKey) else { throw CAError.noRoot }
-        guard let pair = LocalCA.issueLeaf(forHost: host, rootCertPEM: rootCert, rootKeyPEM: rootKey, validYears: Int32(years)),
+        let capped = min(max(days, 1), 397)
+        guard let pair = LocalCA.issueLeaf(forHost: host, rootCertPEM: rootCert, rootKeyPEM: rootKey, validDays: Int32(capped)),
               let cert = pair["cert"], let key = pair["key"] else { throw CAError.issueFailed }
         try cert.data(using: .utf8)!.write(to: leafCertURL, options: .atomic)
         guard Keychain.setSecret(kLeafKey, key) else { throw CAError.keychainWriteFailed }
-        let m = Meta(host: host, rootCreated: rootCreatedDate(), leafIssued: Date(), validYears: years)
+        let m = Meta(host: host, rootCreated: rootCreatedDate(), leafIssued: Date(), validYears: 0, validDays: capped)
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
         try? enc.encode(m).write(to: metaURL)
+    }
+
+    /// When the current leaf expires (nil if none).
+    static var leafExpiry: Date? {
+        guard let m = meta, let d = m.validDays else {
+            // legacy leaf issued in years
+            return meta.map { $0.leafIssued.addingTimeInterval(Double($0.validYears) * 365 * 86400) }
+        }
+        return m.leafIssued.addingTimeInterval(Double(d) * 86400)
+    }
+    static var leafDaysLeft: Int? { leafExpiry.map { Calendar.current.dateComponents([.day], from: Date(), to: $0).day ?? 0 } }
+    static var leafNeedsReissue: Bool { (leafDaysLeft ?? -1) < 30 }
+
+    /// Re-issue the current host's leaf if it's within 30 days of expiry.
+    @discardableResult
+    static func reissueIfNeeded() -> Bool {
+        guard hasLeaf, leafNeedsReissue, let host = meta?.host else { return false }
+        try? issueLeaf(host: host)
+        return true
     }
 
     static func reset() {

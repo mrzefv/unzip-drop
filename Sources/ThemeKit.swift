@@ -1,12 +1,14 @@
 //
 //  ThemeKit.swift
-//  App-wide theme: live accent color, dark-mode toggle, and an animated
-//  background that renders behind every tab. Driven by ThemeManager
-//  (an ObservableObject) so changing the accent updates the whole app live.
+//  App-wide theme: live accent color, dark-mode toggle, and animated
+//  backgrounds that render behind every tab. Ported to match the web
+//  plugin — 6 backgrounds (None / Particles / Trailing Balls / Matrix /
+//  Binary Rain / Confetti), 5 particle shapes, same 8 presets, #FF8800
+//  default.
 //
-//  Ported to match the web plugin (msign.party color wheel) — same 6
-//  backgrounds (None / Particles / Trailing Balls / Matrix / Binary Rain /
-//  Confetti), same 5 particle shapes, same 8 presets, same #FF8800 default.
+//  Animation architecture: each animated field owns a reference-typed
+//  simulation state (`class`) so we can mutate it from inside `Canvas`
+//  closures without touching `@State`. `TimelineView` drives redraws.
 //
 
 import SwiftUI
@@ -33,8 +35,6 @@ final class ThemeManager: ObservableObject {
         didSet { UserDefaults.standard.set(particleShape.rawValue, forKey: "theme_particle_shape") }
     }
 
-    // MARK: - Background styles (mirrors the web plugin's `cw-bg-*` set)
-
     enum BackgroundStyle: String, CaseIterable, Identifiable {
         case none     = "None"
         case particles = "Particles"
@@ -45,7 +45,6 @@ final class ThemeManager: ObservableObject {
 
         var id: String { rawValue }
 
-        /// SF Symbol for the small tile in the picker row on the left.
         var icon: String {
             switch self {
             case .none:      return "circle.slash"
@@ -57,8 +56,6 @@ final class ThemeManager: ObservableObject {
             }
         }
     }
-
-    // MARK: - Particle shape (only applies when background == .particles)
 
     enum ParticleShape: String, CaseIterable, Identifiable {
         case circle, square, triangle, star, diamond
@@ -77,14 +74,12 @@ final class ThemeManager: ObservableObject {
 
     var accent: Color { Color(hex: accentHex) }
 
-    /// Presets — matches the web plugin's swatches exactly.
     static let presets: [String] = [
         "#FF8800", "#FF3B5C", "#A855F7", "#3B82F6",
         "#10B981", "#F59E0B", "#EF4444", "#06B6D4",
     ]
 
     private init() {
-        // Default accent matches the web plugin: #FF8800
         accentHex = UserDefaults.standard.string(forKey: "theme_accent_hex") ?? "#FF8800"
         darkMode  = UserDefaults.standard.object(forKey: "theme_dark_mode") as? Bool ?? true
         background = BackgroundStyle(rawValue: UserDefaults.standard.string(forKey: "theme_bg_style") ?? "") ?? .particles
@@ -97,7 +92,6 @@ final class ThemeManager: ObservableObject {
 struct ParticleBackground: View {
     var accent: Color
     var style: ThemeManager.BackgroundStyle
-    // Kept as an environment observer so a shape change re-renders particles.
     @ObservedObject private var theme = ThemeManager.shared
 
     var body: some View {
@@ -123,10 +117,10 @@ struct ParticleBackground: View {
 }
 
 // MARK: - Shape drawing helper
+// Takes a GraphicsContext by value (Canvas gives us a value-typed one, not inout).
+// Returns nothing — we call layer methods internally.
 
-/// Draws a filled shape centred at `center` with the given `size` into a
-/// GraphicsContext, matching the web plugin's `drawShape(name, size)` function.
-private func drawParticleShape(_ ctx: inout GraphicsContext,
+private func drawParticleShape(in ctx: GraphicsContext,
                                shape: ThemeManager.ParticleShape,
                                center: CGPoint,
                                size: CGFloat,
@@ -172,8 +166,9 @@ private func drawParticleShape(_ ctx: inout GraphicsContext,
 
 // MARK: - Particles
 
-/// particles.js-style constellation: floating particles of a chosen shape
-/// with faint lines connecting nearby pairs.
+/// Constellation-style particles: seeded by index so positions are stable
+/// per-particle, then perturbed with sin(t)/cos(t) for slow drift. Purely
+/// time-driven — no mutable state.
 struct ParticleField: View {
     var color: Color
     var shape: ThemeManager.ParticleShape
@@ -183,41 +178,42 @@ struct ParticleField: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
             Canvas { ctx, size in
-                let t = timeline.date.timeIntervalSinceReferenceDate
+                let t: Double = timeline.date.timeIntervalSinceReferenceDate
                 var pts: [(pt: CGPoint, size: CGFloat, alpha: Double, rot: Double)] = []
                 pts.reserveCapacity(count)
                 for i in 0..<count {
-                    let seed = Double(i) * 12.9898
-                    let sx = abs(sin(seed))
-                    let sy = abs(cos(seed * 1.7))
-                    let x = (sx + 0.05 * sin(t * 0.13 + seed)).truncatingRemainder(dividingBy: 1) * size.width
-                    let y = (sy + 0.05 * cos(t * 0.11 + seed)).truncatingRemainder(dividingBy: 1) * size.height
-                    let sz: CGFloat = 6 + CGFloat(abs(sin(seed * 3.7))) * 7  // 6–13
-                    let a  = 0.55 + abs(sin(seed * 2.1)) * 0.4               // 0.55–0.95
-                    let rt = t * 0.4 + seed
-                    pts.append((CGPoint(x: abs(x), y: abs(y)), sz, a, rt))
+                    let seed: Double = Double(i) * 12.9898
+                    let sx: Double = abs(sin(seed))
+                    let sy: Double = abs(cos(seed * 1.7))
+                    let nx: Double = (sx + 0.11 * sin(t * 0.32 + seed)).truncatingRemainder(dividingBy: 1)
+                    let ny: Double = (sy + 0.11 * cos(t * 0.28 + seed)).truncatingRemainder(dividingBy: 1)
+                    let x: CGFloat = CGFloat(abs(nx)) * size.width
+                    let y: CGFloat = CGFloat(abs(ny)) * size.height
+                    let sz: CGFloat = CGFloat(6.0) + CGFloat(abs(sin(seed * 3.7))) * CGFloat(7.0)
+                    let a:  Double  = 0.55 + abs(sin(seed * 2.1)) * 0.4
+                    let rt: Double  = t * 0.4 + seed
+                    pts.append((CGPoint(x: x, y: y), sz, a, rt))
                 }
-
-                // Link lines between nearby particles
+                // Links
                 for i in 0..<pts.count {
                     for j in (i + 1)..<pts.count {
-                        let dx = pts[i].pt.x - pts[j].pt.x
-                        let dy = pts[i].pt.y - pts[j].pt.y
-                        let dist = (dx * dx + dy * dy).squareRoot()
+                        let dx: CGFloat = pts[i].pt.x - pts[j].pt.x
+                        let dy: CGFloat = pts[i].pt.y - pts[j].pt.y
+                        let dist: CGFloat = (dx * dx + dy * dy).squareRoot()
                         if dist < linkDist {
                             var path = Path()
                             path.move(to: pts[i].pt)
                             path.addLine(to: pts[j].pt)
-                            let op = (1 - Double(dist / linkDist)) * 0.42
+                            let op: Double = (1.0 - Double(dist / linkDist)) * 0.42
                             ctx.stroke(path,
                                        with: .color(color.opacity(op)),
                                        lineWidth: 1.1)
                         }
                     }
                 }
-                // Draw the particles themselves
+                // Shapes
                 for p in pts {
-                    drawParticleShape(&ctx,
+                    drawParticleShape(in: ctx,
                                       shape: shape,
                                       center: p.pt,
                                       size: p.size,
@@ -233,60 +229,65 @@ struct ParticleField: View {
 
 // MARK: - Trailing Balls
 
-/// Three small balls with fading accent trails that overlap creating
-/// intricate patterns. Uses TimelineView with a running clock; positions
-/// and trails are recomputed each frame from a compact state machine.
-struct TrailingBallsField: View {
-    var color: Color
-
-    @State private var balls: [Ball] = []
-    private let maxTrail = 70
-
+/// Reference-typed simulation so we can mutate it safely from inside Canvas.
+@MainActor
+private final class BallsState {
     struct Ball {
-        var x: CGFloat
-        var y: CGFloat
-        var vx: CGFloat
-        var vy: CGFloat
+        var x: CGFloat; var y: CGFloat
+        var vx: CGFloat; var vy: CGFloat
         var trail: [CGPoint]
     }
+    var balls: [Ball] = []
+    var lastSize: CGSize = .zero
+    let maxTrail = 70
+
+    func step(in size: CGSize) {
+        // (Re)seed on size change / first frame
+        if balls.isEmpty || lastSize != size {
+            lastSize = size
+            balls = (0..<3).map { i in
+                let seed = Double(i) * 17.3
+                let ang = seed
+                let speed: Double = 0.9 + abs(sin(seed * 2.1)) * 0.5
+                let baseX: CGFloat = CGFloat(0.2 + abs(sin(seed)) * 0.6)
+                let baseY: CGFloat = CGFloat(0.2 + abs(cos(seed)) * 0.6)
+                return Ball(
+                    x: size.width  * baseX,
+                    y: size.height * baseY,
+                    vx: CGFloat(cos(ang) * speed),
+                    vy: CGFloat(sin(ang) * speed),
+                    trail: []
+                )
+            }
+            return
+        }
+        for i in 0..<balls.count {
+            var b = balls[i]
+            b.x += b.vx
+            b.y += b.vy
+            let r: CGFloat = 5
+            if b.x - r < 0 { b.x = r; b.vx = -b.vx }
+            if b.x + r > size.width  { b.x = size.width  - r; b.vx = -b.vx }
+            if b.y - r < 0 { b.y = r; b.vy = -b.vy }
+            if b.y + r > size.height { b.y = size.height - r; b.vy = -b.vy }
+            b.trail.append(CGPoint(x: b.x, y: b.y))
+            if b.trail.count > maxTrail { b.trail.removeFirst() }
+            balls[i] = b
+        }
+    }
+}
+
+struct TrailingBallsField: View {
+    var color: Color
+    // Reference type — mutation from Canvas is fine, no @State recursion.
+    @State private var state = BallsState()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { _ in
             Canvas { ctx, size in
-                // Initialize on first frame with a size we know
-                if balls.isEmpty {
-                    var seeded: [Ball] = []
-                    for i in 0..<3 {
-                        let seed = Double(i) * 17.3
-                        let ang = seed
-                        let speed = 0.9 + (abs(sin(seed * 2.1))) * 0.5
-                        seeded.append(Ball(
-                            x: size.width * (0.2 + CGFloat(abs(sin(seed))) * 0.6),
-                            y: size.height * (0.2 + CGFloat(abs(cos(seed))) * 0.6),
-                            vx: CGFloat(cos(ang) * speed),
-                            vy: CGFloat(sin(ang) * speed),
-                            trail: []
-                        ))
-                    }
-                    DispatchQueue.main.async { self.balls = seeded }
-                    return
-                }
-
-                var updated = balls
-                for i in 0..<updated.count {
-                    var b = updated[i]
-                    b.x += b.vx
-                    b.y += b.vy
-                    let r: CGFloat = 5
-                    if b.x - r < 0 { b.x = r; b.vx = -b.vx }
-                    if b.x + r > size.width  { b.x = size.width  - r; b.vx = -b.vx }
-                    if b.y - r < 0 { b.y = r; b.vy = -b.vy }
-                    if b.y + r > size.height { b.y = size.height - r; b.vy = -b.vy }
-                    b.trail.append(CGPoint(x: b.x, y: b.y))
-                    if b.trail.count > maxTrail { b.trail.removeFirst() }
-                    updated[i] = b
-
-                    // Draw fading trail
+                state.step(in: size)
+                let r: CGFloat = 5
+                for b in state.balls {
                     for t in 1..<b.trail.count {
                         var path = Path()
                         path.move(to: b.trail[t - 1])
@@ -296,15 +297,11 @@ struct TrailingBallsField: View {
                                    with: .color(color.opacity(op)),
                                    style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                     }
-                    // Glowing ball
-                    let ballRect = CGRect(x: b.x - r, y: b.y - r, width: r * 2, height: r * 2)
-                    ctx.fill(Path(ellipseIn: ballRect), with: .color(color))
-                    // Glow ring
-                    ctx.fill(Path(ellipseIn: ballRect.insetBy(dx: -4, dy: -4)),
+                    let rect = CGRect(x: b.x - r, y: b.y - r, width: r * CGFloat(2), height: r * CGFloat(2))
+                    ctx.fill(Path(ellipseIn: rect), with: .color(color))
+                    ctx.fill(Path(ellipseIn: rect.insetBy(dx: CGFloat(-4), dy: CGFloat(-4))),
                              with: .color(color.opacity(0.3)))
                 }
-                // Publish updated state for next frame
-                DispatchQueue.main.async { self.balls = updated }
             }
         }
         .drawingGroup()
@@ -313,41 +310,47 @@ struct TrailingBallsField: View {
 
 // MARK: - Matrix
 
-/// Slow falling 0/1 digits in vertical columns, classic Matrix rain.
+@MainActor
+private final class MatrixState {
+    var drops: [CGFloat] = []
+    var lastColCount: Int = 0
+    let fontSize: CGFloat = 14
+
+    func step(in size: CGSize) -> Int {
+        let cols = max(1, Int(size.width / fontSize))
+        if drops.count != cols {
+            drops = (0..<cols).map { _ in CGFloat.random(in: CGFloat(-50) ... CGFloat(0)) }
+            lastColCount = cols
+        }
+        for i in 0..<cols {
+            let y: CGFloat = drops[i] * fontSize
+            if y > size.height && Double.random(in: 0...1) > 0.985 {
+                drops[i] = CGFloat(0)
+            }
+            drops[i] += CGFloat(0.18) + CGFloat.random(in: CGFloat(0) ... CGFloat(0.18))
+        }
+        return cols
+    }
+}
+
 struct MatrixField: View {
     var color: Color
-    private let fontSize: CGFloat = 14
-
-    @State private var drops: [CGFloat] = []
+    @State private var state = MatrixState()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
             Canvas { ctx, size in
-                let cols = max(1, Int(size.width / fontSize))
-                if drops.count != cols {
-                    var d = [CGFloat]()
-                    d.reserveCapacity(cols)
-                    for _ in 0..<cols { d.append(CGFloat.random(in: -50 ... 0)) }
-                    DispatchQueue.main.async { self.drops = d }
-                    return
-                }
-
-                var updated = drops
+                let cols = state.step(in: size)
+                let fs = state.fontSize
                 for i in 0..<cols {
                     let ch = Bool.random() ? "0" : "1"
-                    let x = CGFloat(i) * fontSize
-                    let y = updated[i] * fontSize
+                    let x = CGFloat(i) * fs + fs / 2
+                    let y = state.drops[i] * fs
                     let text = Text(ch)
-                        .font(.system(size: fontSize, design: .monospaced))
+                        .font(.system(size: fs, design: .monospaced))
                         .foregroundColor(color.opacity(0.85))
-                    ctx.draw(text, at: CGPoint(x: x + fontSize / 2, y: y))
-                    if y > size.height && Double.random(in: 0...1) > 0.985 {
-                        updated[i] = 0
-                    }
-                    // Slow: 0.18–0.36 per frame, matches web
-                    updated[i] += 0.18 + CGFloat.random(in: 0 ... 0.18)
+                    ctx.draw(text, at: CGPoint(x: x, y: y))
                 }
-                DispatchQueue.main.async { self.drops = updated }
             }
         }
         .drawingGroup()
@@ -356,68 +359,69 @@ struct MatrixField: View {
 
 // MARK: - Binary Rain
 
-/// Slower, longer multi-character binary streams per column with per-column
-/// speed variance. Head bright, tail fades. Matches the web plugin's
-/// `startBinary()`.
+@MainActor
+private final class BinaryState {
+    struct Col {
+        var y: CGFloat
+        var speed: CGFloat
+        var chars: [Character]
+    }
+    var cols: [Col] = []
+    let fontSize: CGFloat = 12
+
+    func step(in size: CGSize) -> Int {
+        let colCount = max(1, Int(size.width / fontSize))
+        if cols.count != colCount {
+            cols = (0..<colCount).map { _ in
+                let len = Int.random(in: 12 ... 28)
+                var chars = [Character]()
+                for _ in 0..<len { chars.append(Bool.random() ? "0" : "1") }
+                return Col(
+                    y: CGFloat.random(in: CGFloat(-50) ... CGFloat(-5)),
+                    speed: 0.15 + CGFloat.random(in: CGFloat(0) ... CGFloat(0.35)),
+                    chars: chars
+                )
+            }
+        }
+        for i in 0..<colCount {
+            var col = cols[i]
+            col.y += col.speed
+            if col.y * fontSize > size.height + CGFloat(col.chars.count) * fontSize {
+                col.y = -CGFloat(col.chars.count) - CGFloat.random(in: CGFloat(0) ... CGFloat(10))
+                col.speed = 0.15 + CGFloat.random(in: CGFloat(0) ... CGFloat(0.35))
+                for k in 0..<col.chars.count { col.chars[k] = Bool.random() ? "0" : "1" }
+            }
+            if Double.random(in: 0...1) < 0.02 && !col.chars.isEmpty {
+                let idx = Int.random(in: 0..<col.chars.count)
+                col.chars[idx] = Bool.random() ? "0" : "1"
+            }
+            cols[i] = col
+        }
+        return colCount
+    }
+}
+
 struct BinaryRainField: View {
     var color: Color
-    private let fontSize: CGFloat = 12
-
-    struct BinaryCol {
-        var y: CGFloat            // top-of-stream position (in char units)
-        var speed: CGFloat        // per-frame drop speed (char units)
-        var chars: [Character]    // the binary string this column shows
-    }
-    @State private var cols: [BinaryCol] = []
+    @State private var state = BinaryState()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
             Canvas { ctx, size in
-                let colCount = max(1, Int(size.width / fontSize))
-                if cols.count != colCount {
-                    var c = [BinaryCol]()
-                    c.reserveCapacity(colCount)
-                    for _ in 0..<colCount {
-                        let len = Int.random(in: 12 ... 28)
-                        var chars = [Character]()
-                        for _ in 0..<len { chars.append(Bool.random() ? "0" : "1") }
-                        c.append(BinaryCol(
-                            y: CGFloat.random(in: -50 ... -5),
-                            speed: 0.15 + CGFloat.random(in: 0 ... 0.35),
-                            chars: chars
-                        ))
-                    }
-                    DispatchQueue.main.async { self.cols = c }
-                    return
-                }
-
-                var updated = cols
-                for i in 0..<colCount {
-                    var col = updated[i]
-                    col.y += col.speed
-                    if col.y * fontSize > size.height + CGFloat(col.chars.count) * fontSize {
-                        col.y = -CGFloat(col.chars.count) - CGFloat.random(in: 0 ... 10)
-                        col.speed = 0.15 + CGFloat.random(in: 0 ... 0.35)
-                        for k in 0..<col.chars.count { col.chars[k] = Bool.random() ? "0" : "1" }
-                    }
-                    // Occasional shimmer
-                    if Double.random(in: 0...1) < 0.02 && !col.chars.isEmpty {
-                        let idx = Int.random(in: 0..<col.chars.count)
-                        col.chars[idx] = Bool.random() ? "0" : "1"
-                    }
-                    // Draw: head bright, tail fades
+                let count = state.step(in: size)
+                let fs = state.fontSize
+                for i in 0..<count {
+                    let col = state.cols[i]
                     for k in 0..<col.chars.count {
-                        let y = (col.y + CGFloat(k)) * fontSize
-                        if y < 0 || y > size.height + fontSize { continue }
+                        let y = (col.y + CGFloat(k)) * fs
+                        if y < 0 || y > size.height + fs { continue }
                         let op = 0.15 + Double(k) / Double(col.chars.count) * 0.7
                         let text = Text(String(col.chars[k]))
-                            .font(.system(size: fontSize, design: .monospaced))
+                            .font(.system(size: fs, design: .monospaced))
                             .foregroundColor(color.opacity(op))
-                        ctx.draw(text, at: CGPoint(x: CGFloat(i) * fontSize + fontSize / 2, y: y))
+                        ctx.draw(text, at: CGPoint(x: CGFloat(i) * fs + fs / 2, y: y))
                     }
-                    updated[i] = col
                 }
-                DispatchQueue.main.async { self.cols = updated }
             }
         }
         .drawingGroup()
@@ -426,85 +430,85 @@ struct BinaryRainField: View {
 
 // MARK: - Confetti
 
-/// Real paper-strip-style confetti: thin rectangles that tumble (3D flip
-/// simulated by squashing width with cos(flip)) and sway horizontally.
-struct ConfettiField: View {
-    var color: Color
-
+@MainActor
+private final class ConfettiState {
     struct Piece {
-        var x: CGFloat
-        var y: CGFloat
-        var w: CGFloat
-        var h: CGFloat
-        var vy: CGFloat
-        var vx: CGFloat
-        var sway: Double
-        var swaySpeed: Double
-        var rot: Double
-        var vr: Double
-        var flip: Double
-        var flipSpeed: Double
+        var x: CGFloat; var y: CGFloat
+        var w: CGFloat; var h: CGFloat
+        var vy: CGFloat; var vx: CGFloat
+        var sway: Double; var swaySpeed: Double
+        var rot: Double; var vr: Double
+        var flip: Double; var flipSpeed: Double
         var alpha: Double
     }
-    @State private var pieces: [Piece] = []
+    var pieces: [Piece] = []
+    var lastN: Int = 0
+
+    func step(in size: CGSize) {
+        let N = min(120, Int(size.width / 14))
+        if pieces.count != N {
+            pieces = (0..<N).map { _ in
+                let x:  CGFloat = CGFloat.random(in: CGFloat(0)...size.width)
+                let y:  CGFloat = CGFloat.random(in: -size.height...size.height)
+                let w:  CGFloat = CGFloat(6)  + CGFloat.random(in: CGFloat(0)...CGFloat(5))
+                let h:  CGFloat = CGFloat(10) + CGFloat.random(in: CGFloat(0)...CGFloat(7))
+                let vy: CGFloat = CGFloat(1.0) + CGFloat.random(in: CGFloat(0)...CGFloat(1.8))
+                let vx: CGFloat = CGFloat(-0.6) + CGFloat.random(in: CGFloat(0)...CGFloat(1.2))
+                let sway: Double      = Double.random(in: 0 ... (Double.pi * 2))
+                let swaySpeed: Double = 0.02 + Double.random(in: 0 ... 0.03)
+                let rot: Double       = Double.random(in: 0 ... (Double.pi * 2))
+                let vr: Double        = -0.05 + Double.random(in: 0 ... 0.10)
+                let flip: Double      = Double.random(in: 0 ... (Double.pi * 2))
+                let flipSpeed: Double = 0.08 + Double.random(in: 0 ... 0.10)
+                let alpha: Double     = 0.55 + Double.random(in: 0 ... 0.4)
+                return Piece(
+                    x: x, y: y, w: w, h: h,
+                    vy: vy, vx: vx,
+                    sway: sway, swaySpeed: swaySpeed,
+                    rot: rot, vr: vr,
+                    flip: flip, flipSpeed: flipSpeed,
+                    alpha: alpha
+                )
+            }
+            lastN = N
+        }
+        for i in 0..<pieces.count {
+            var p = pieces[i]
+            p.sway += p.swaySpeed
+            p.x += p.vx + CGFloat(sin(p.sway)) * CGFloat(0.4)
+            p.y += p.vy
+            p.rot += p.vr
+            p.flip += p.flipSpeed
+            if p.y > size.height + CGFloat(20) {
+                p.y = CGFloat(-20)
+                p.x = CGFloat.random(in: CGFloat(0)...size.width)
+            }
+            if p.x < CGFloat(-20) { p.x = size.width + CGFloat(20) }
+            if p.x > size.width + CGFloat(20) { p.x = CGFloat(-20) }
+            pieces[i] = p
+        }
+    }
+}
+
+struct ConfettiField: View {
+    var color: Color
+    @State private var state = ConfettiState()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { _ in
             Canvas { ctx, size in
-                let N = min(120, Int(size.width / 14))
-                if pieces.count != N {
-                    var seeded: [Piece] = []
-                    seeded.reserveCapacity(N)
-                    for _ in 0..<N {
-                        seeded.append(Piece(
-                            x: CGFloat.random(in: 0...size.width),
-                            y: CGFloat.random(in: -size.height...size.height),
-                            w: 6 + CGFloat.random(in: 0...5),
-                            h: 10 + CGFloat.random(in: 0...7),
-                            vy: 1.0 + CGFloat.random(in: 0...1.8),
-                            vx: -0.6 + CGFloat.random(in: 0...1.2),
-                            sway: Double.random(in: 0...(.pi * 2)),
-                            swaySpeed: 0.02 + Double.random(in: 0...0.03),
-                            rot: Double.random(in: 0...(.pi * 2)),
-                            vr: -0.05 + Double.random(in: 0...0.10),
-                            flip: Double.random(in: 0...(.pi * 2)),
-                            flipSpeed: 0.08 + Double.random(in: 0...0.10),
-                            alpha: 0.55 + Double.random(in: 0...0.4)
-                        ))
-                    }
-                    DispatchQueue.main.async { self.pieces = seeded }
-                    return
-                }
-
-                var updated = pieces
-                for i in 0..<updated.count {
-                    var p = updated[i]
-                    p.sway += p.swaySpeed
-                    p.x += p.vx + CGFloat(sin(p.sway)) * 0.4
-                    p.y += p.vy
-                    p.rot += p.vr
-                    p.flip += p.flipSpeed
-
-                    if p.y > size.height + 20 {
-                        p.y = -20
-                        p.x = CGFloat.random(in: 0...size.width)
-                    }
-                    if p.x < -20 { p.x = size.width + 20 }
-                    if p.x > size.width + 20 { p.x = -20 }
-
-                    let widthScale = max(0.1, CGFloat(abs(cos(p.flip))))
-                    let drawAlpha = cos(p.flip) < 0 ? p.alpha * 0.55 : p.alpha
-
+                state.step(in: size)
+                for p in state.pieces {
+                    let widthScale: CGFloat = max(CGFloat(0.1), CGFloat(abs(cos(p.flip))))
+                    let drawAlpha: Double = cos(p.flip) < 0 ? p.alpha * 0.55 : p.alpha
                     ctx.drawLayer { layer in
                         layer.translateBy(x: p.x, y: p.y)
                         layer.rotate(by: .radians(p.rot))
-                        let w = p.w * widthScale
-                        let rect = CGRect(x: -w / 2, y: -p.h / 2, width: w, height: p.h)
+                        let w: CGFloat = p.w * widthScale
+                        let rect = CGRect(x: -w / CGFloat(2), y: -p.h / CGFloat(2), width: w, height: p.h)
                         layer.fill(Path(rect), with: .color(color.opacity(drawAlpha)))
                     }
-                    updated[i] = p
                 }
-                DispatchQueue.main.async { self.pieces = updated }
             }
         }
         .drawingGroup()
@@ -520,41 +524,44 @@ struct ThemePalettePanel: View {
     var onClose: () -> Void
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
 
-            // ─── Accent color card (collapsible wheel) ───
+            // Accent color card (collapsible wheel)
             card {
-                VStack(spacing: 14) {
+                VStack(spacing: 10) {
                     HStack(spacing: 12) {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .fill(theme.accent)
-                            .frame(width: 46, height: 46)
+                            .frame(width: 38, height: 38)
                             .overlay(RoundedRectangle(cornerRadius: 10)
                                 .stroke(theme.accent.opacity(0.45), lineWidth: 2))
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("ACCENT COLOR").font(.system(size: 11, weight: .heavy)).kerning(1).foregroundStyle(Theme.subtle)
+                            Text("ACCENT COLOR")
+                                .font(.system(size: 10, weight: .heavy)).kerning(1)
+                                .foregroundStyle(Theme.subtle)
                             Text(theme.accentHex.uppercased())
-                                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                                .font(.system(size: 16, weight: .bold, design: .monospaced))
                                 .foregroundStyle(.white)
                         }
                         Spacer()
                         Button { withAnimation { expandedWheel.toggle() } } label: {
                             Image(systemName: expandedWheel ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 12))
                                 .foregroundStyle(.white.opacity(0.6))
                         }
                     }
                     if expandedWheel {
-                        ColorWheel(hex: $theme.accentHex).frame(height: 240)
-                        HStack(spacing: 10) {
+                        ColorWheel(hex: $theme.accentHex).frame(height: 190)
+                        HStack(spacing: 8) {
                             ForEach(ThemeManager.presets, id: \.self) { hex in
                                 Button { theme.accentHex = hex } label: {
                                     Circle()
                                         .fill(Color(hex: hex))
-                                        .frame(width: 28, height: 28)
+                                        .frame(width: 24, height: 24)
                                         .overlay(
                                             Circle().stroke(
                                                 .white.opacity(theme.accentHex.caseInsensitiveCompare(hex) == .orderedSame ? 0.95 : 0),
-                                                lineWidth: 2.5)
+                                                lineWidth: 2)
                                         )
                                 }
                             }
@@ -563,41 +570,48 @@ struct ThemePalettePanel: View {
                 }
             }
 
-            // ─── Appearance (dark/light) ───
+            // Appearance (dark/light)
             card {
                 HStack(spacing: 12) {
                     tile(theme.darkMode ? "moon.fill" : "sun.max.fill")
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("APPEARANCE").font(.system(size: 11, weight: .heavy)).kerning(1).foregroundStyle(Theme.subtle)
-                        Text(theme.darkMode ? "Dark mode" : "Light mode").font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
+                        Text("APPEARANCE")
+                            .font(.system(size: 10, weight: .heavy)).kerning(1)
+                            .foregroundStyle(Theme.subtle)
+                        Text(theme.darkMode ? "Dark mode" : "Light mode")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
                     }
                     Spacer()
-                    Toggle("", isOn: $theme.darkMode).labelsHidden().tint(theme.accent)
+                    Toggle("", isOn: $theme.darkMode).labelsHidden().tint(theme.accent).scaleEffect(0.85)
                 }
             }
 
-            // ─── Background style (collapsible with live mini-preview) ───
+            // Background style
             card {
-                VStack(spacing: 10) {
-                    HStack(spacing: 12) {
-                        // The mini-preview tile reflects the CURRENT bg style,
-                        // matching the web plugin's `#cw-bg-preview-mini`.
+                VStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         BgMiniPreview(style: theme.background, accent: theme.accent)
-                            .frame(width: 40, height: 40)
+                            .frame(width: 34, height: 34)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("BACKGROUND").font(.system(size: 11, weight: .heavy)).kerning(1).foregroundStyle(Theme.subtle)
-                            Text(theme.background.rawValue).font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
+                            Text("BACKGROUND")
+                                .font(.system(size: 10, weight: .heavy)).kerning(1)
+                                .foregroundStyle(Theme.subtle)
+                            Text(theme.background.rawValue)
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.white)
                         }
                         Spacer()
                         Button { withAnimation { expandedBackground.toggle() } } label: {
                             Image(systemName: expandedBackground ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 12))
                                 .foregroundStyle(.white.opacity(0.6))
                         }
                     }
                     if expandedBackground {
-                        // 2-column grid of the 6 backgrounds
-                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
-                                  spacing: 8) {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 6),
+                                            GridItem(.flexible(), spacing: 6)],
+                                  spacing: 6) {
                             ForEach(ThemeManager.BackgroundStyle.allCases) { s in
                                 Button { theme.background = s } label: {
                                     HStack(spacing: 10) {
@@ -627,7 +641,6 @@ struct ThemePalettePanel: View {
                             }
                         }
 
-                        // Particle shape sub-row (only when Particles is active)
                         if theme.background == .particles {
                             VStack(alignment: .leading, spacing: 7) {
                                 Text("PARTICLE SHAPE")
@@ -657,38 +670,34 @@ struct ThemePalettePanel: View {
                 }
             }
         }
-        .padding(12)
+        .padding(10)
         .background(Color(red: 0.10, green: 0.08, blue: 0.12))
-        .overlay(RoundedRectangle(cornerRadius: 20)
+        .overlay(RoundedRectangle(cornerRadius: 16)
             .stroke(theme.accent.opacity(0.6), lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .frame(maxWidth: 360)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(maxWidth: 300)
         .padding(.horizontal, 12)
     }
 
     private func card<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         content()
-            .padding(14)
+            .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(red: 0.14, green: 0.11, blue: 0.17))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
     private func tile(_ icon: String) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(theme.accent.opacity(0.18))
-                .frame(width: 40, height: 40)
-            Image(systemName: icon).foregroundStyle(theme.accent)
+                .frame(width: 34, height: 34)
+            Image(systemName: icon).font(.system(size: 14)).foregroundStyle(theme.accent)
         }
     }
 }
 
 // MARK: - Live mini-preview tile
 
-/// Matches the web plugin's `#cw-bg-preview-mini` / `.cw-pv-*` behaviour:
-/// a small tile that renders a static representation of the chosen bg
-/// (dots for particles/balls, mini "01" text for matrix/binary, angled
-/// strips for confetti). Used in both the collapsed bg row and the list.
 struct BgMiniPreview: View {
     var style: ThemeManager.BackgroundStyle
     var accent: Color
@@ -712,14 +721,13 @@ struct BgMiniPreview: View {
                 .foregroundStyle(Color.white.opacity(0.4))
         case .particles:
             Canvas { ctx, size in
-                let cx = size.width / 2, cy = size.height / 2
+                let cx = size.width / CGFloat(2), cy = size.height / CGFloat(2)
                 let dots = [
                     CGPoint(x: cx - 8, y: cy - 6),
                     CGPoint(x: cx + 6, y: cy - 8),
                     CGPoint(x: cx - 4, y: cy + 8),
                     CGPoint(x: cx + 8, y: cy + 5),
                 ]
-                // Faint links between neighbours
                 for i in 0..<dots.count {
                     for j in (i + 1)..<dots.count {
                         var p = Path()
@@ -735,7 +743,7 @@ struct BgMiniPreview: View {
             }
         case .balls:
             Canvas { ctx, size in
-                let cx = size.width / 2, cy = size.height / 2
+                let cx = size.width / CGFloat(2), cy = size.height / CGFloat(2)
                 let balls = [
                     CGPoint(x: cx - 7, y: cy + 3),
                     CGPoint(x: cx + 4, y: cy - 5),
@@ -761,7 +769,7 @@ struct BgMiniPreview: View {
                 .multilineTextAlignment(.center)
         case .confetti:
             Canvas { ctx, size in
-                let cx = size.width / 2, cy = size.height / 2
+                let cx = size.width / CGFloat(2), cy = size.height / CGFloat(2)
                 let strips: [(CGPoint, CGFloat)] = [
                     (CGPoint(x: cx - 7, y: cy - 5),  0.5),
                     (CGPoint(x: cx + 4, y: cy - 2), -0.7),
@@ -790,10 +798,9 @@ struct ColorWheel: View {
     var body: some View {
         GeometryReader { g in
             let d = min(g.size.width, g.size.height)
-            let c = CGPoint(x: g.size.width / 2, y: g.size.height / 2)
+            let c = CGPoint(x: g.size.width / CGFloat(2), y: g.size.height / CGFloat(2))
             let r = d / 2
             ZStack {
-                // Hue/sat wheel
                 AngularGradient(gradient: Gradient(colors: wheelColors), center: .center)
                     .mask(Circle())
                     .overlay(
@@ -802,9 +809,7 @@ struct ColorWheel: View {
                             .blendMode(.screen)
                             .mask(Circle())
                     )
-                // Hollow black centre, matching web
                 Circle().fill(Color.black).frame(width: r * 0.55, height: r * 0.55)
-                // Cursor
                 Circle().stroke(.white, lineWidth: 3)
                     .frame(width: 26, height: 26)
                     .position(pos == .zero ? c : pos)
@@ -841,7 +846,6 @@ extension Color {
 }
 
 // MARK: - Shared open/close state for the palette panel
-// Any tab's palette button toggles this shared state.
 
 @MainActor
 final class ThemePanelState: ObservableObject {

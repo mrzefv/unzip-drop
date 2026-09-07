@@ -49,6 +49,13 @@ struct RootView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             TabBar(selected: $tab)
         }
+        // ─── Accent frame lives at the OUTERMOST level, above every tab AND
+        // the TabBar. Nothing any tab draws (NavigationStack, List backgrounds,
+        // etc.) can cover it because this overlay is applied last. ───
+        .overlay(
+            AccentFrame(color: theme.accent)
+                .allowsHitTesting(false)
+        )
         .tint(theme.accent)
         .preferredColorScheme(theme.darkMode ? .dark : .light)
         .onChange(of: signQueue.requestedTab) { t in
@@ -94,7 +101,39 @@ private struct TabBar: View {
         .frame(height: 50)
         .padding(.top, 8)
         .background(BarBlur())
-        .overlay(Rectangle().fill(Theme.stroke).frame(height: 0.5), alignment: .top)
+        .overlay(Rectangle().fill(Theme.accent).frame(height: 2), alignment: .top)
+    }
+}
+
+// MARK: - Accent frame around the app content
+// 2px vertical rails on the left and right, plus a top border that visually
+// connects to the accent overlay on top of the TabBar. Everything is a
+// non-interactive overlay so it never intercepts touches.
+
+private struct AccentFrame: View {
+    var color: Color
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                // Left sidebar (2px) — full height incl. safe areas
+                Rectangle().fill(color)
+                    .frame(width: 2)
+                    .frame(maxHeight: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                // Right sidebar (2px)
+                Rectangle().fill(color)
+                    .frame(width: 2)
+                    .frame(maxHeight: .infinity, alignment: .trailing)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                // Top border (2px) — spans full width, meets both sidebars at corners
+                Rectangle().fill(color)
+                    .frame(height: 2)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .frame(maxHeight: .infinity, alignment: .top)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+        .ignoresSafeArea()
     }
 }
 

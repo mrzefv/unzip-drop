@@ -39,6 +39,8 @@ nonisolated struct ZsignSigner {
     ///   - p12Password:   password for the `.p12` (pass `""` if none).
     ///   - bundleID/displayName/version: pass non-nil to override Info.plist values.
     ///   - skipEmbeddedProvision: when true, does NOT write embedded.mobileprovision.
+    ///     (This fork's C arg is named `dontGenerate…` but writes the profile only
+    ///     when TRUE — so we pass !skipEmbeddedProvision below.)
     nonisolated static func signAppBundle(
         appBundlePath: String,
         provisionPath: String,
@@ -62,7 +64,7 @@ nonisolated struct ZsignSigner {
             bundleID ?? "",
             displayName ?? "",
             version ?? "",
-            skipEmbeddedProvision
+            !skipEmbeddedProvision   // this zsign fork writes embedded.mobileprovision only when TRUE
         )
         if code != 0 { throw ZsignError.signingFailed(code: code) }
     }

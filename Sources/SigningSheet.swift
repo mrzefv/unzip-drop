@@ -629,7 +629,10 @@ struct SigningSheet: View {
     private func buildOptionsValue() -> SignOptions {
         var s = SignOptions()
         s.name = name.isEmpty ? nil : name
-        s.bundleID = bundle.isEmpty ? nil : bundle
+        // Override only when the user changed it (mSign passes the field through as-is
+        // once it differs from the read value; unchanged → let the signer keep the app's own).
+        let b = bundle.trimmingCharacters(in: .whitespaces)
+        s.bundleID = (b.isEmpty || b == meta.bundleID) ? nil : b
         s.version = version.isEmpty ? nil : version
         s.iconPNG = iconPNG
         s.injectDylibs = dylibs.map { ($0.url, $0.weak) }

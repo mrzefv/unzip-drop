@@ -39,10 +39,6 @@ nonisolated struct ZsignSigner {
     ///   - p12Password:   password for the `.p12` (pass `""` if none).
     ///   - bundleID/displayName/version: pass non-nil to override Info.plist values.
     ///   - skipEmbeddedProvision: when true, does NOT write embedded.mobileprovision.
-    ///     NOTE: this zsign fork's last arg is misleadingly named
-    ///     `dontGenerateEmbeddedMobileProvision` but actually writes the profile
-    ///     ONLY when true — so we pass its logical inverse (!skip). Without the
-    ///     profile, installd rejects the app ("No embedded.mobileprovision").
     nonisolated static func signAppBundle(
         appBundlePath: String,
         provisionPath: String,
@@ -66,7 +62,7 @@ nonisolated struct ZsignSigner {
             bundleID ?? "",
             displayName ?? "",
             version ?? "",
-            !skipEmbeddedProvision   // fork writes embedded.mobileprovision when this is TRUE
+            skipEmbeddedProvision
         )
         if code != 0 { throw ZsignError.signingFailed(code: code) }
     }
@@ -265,13 +261,18 @@ nonisolated enum Signer {
             throw error
         }
 
-        // 4. Read identifiers back from the (possibly overridden) Info.plist.
-        let info = NSDictionary(contentsOf: appURL.appendingPathComponent("Info.plist"))
+        // 4. Read identifiers back from the SIGNED app's own Info.plist — this is
+        //    what installd will check the manifest against, so it must be exact.
+        let infoURL = appURL.appendingPathComponent("Info.plist")
+        let info = NSDictionary(contentsOf: infoURL)
         let name = (info?["CFBundleDisplayName"] as? String)
             ?? (info?["CFBundleName"] as? String)
             ?? o.name ?? appURL.deletingPathExtension().lastPathComponent
-        let bundleID = (info?["CFBundleIdentifier"] as? String) ?? o.bundleID ?? "unknown.bundle.id"
-        let version  = (info?["CFBundleShortVersionString"] as? String) ?? o.version ?? "1.0"
+        // Bundle id straight from the signed app's Info.plist (mSign does exactly
+        // this). Never the filename; com.unknown.app only if the plist is unreadable.
+        let bundleID = (info?["CFBundleIdentifier"] as? String) ?? o.bundleID ?? "com.unknown.app"
+        let version  = (info?["CFBundleShortVersionString"] as? String)
+            ?? (info?["CFBundleVersion"] as? String) ?? o.version ?? "1.0"
 
         // 5. Repack (stored) → signed .ipa in temp.
         let signed = fm.temporaryDirectory
@@ -377,12 +378,19 @@ nonisolated struct IPAMeta: Sendable {
 
         try fm.unzipItem(at: ipa, to: work)
 
-        let payload = work.appendingPathComponent("Payload", isDirectory: true)
-        guard let app = try? fm.contentsOfDirectory(at: payload, includingPropertiesForKeys: nil)
-            .first(where: { $0.pathExtension == "app" }) else {
-            // Not a normal IPA layout — fall back to the filename.
+        // Prefer Payload/*.app; if the layout is odd, search recursively for any
+        // .app with an Info.plist rather than falling back to the filename (which
+        // would poison the bundle id and make installd reject the manifest).
+        var app: URL? = (try? fm.contentsOfDirectory(at: work.appendingPathComponent("Payload"), includingPropertiesForKeys: nil))?
+            .first(where: { $0.pathExtension == "app" })
+        if app == nil, let e = fm.enumerator(at: work, includingPropertiesForKeys: nil) {
+            for case let u as URL in e where u.pathExtension == "app"
+                && fm.fileExists(atPath: u.appendingPathComponent("Info.plist").path) { app = u; break }
+        }
+        guard let app else {
+            // mSign convention: never let the filename become a bundle id.
             let base = ipa.deletingPathExtension().lastPathComponent
-            return IPAMeta(name: base, bundleID: "unknown.bundle.id", version: "1.0", iconPNG: nil)
+            return IPAMeta(name: base, bundleID: "com.unknown.app", version: "1.0", iconPNG: nil)
         }
 
         let info = NSDictionary(contentsOf: app.appendingPathComponent("Info.plist"))

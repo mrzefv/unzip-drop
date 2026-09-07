@@ -30,7 +30,7 @@ struct TutorialStep: Identifiable {
 // MARK: - Content
 
 enum TutorialLibrary {
-    static let all: [Tutorial] = [phoneOnly, certs, flex, hooking, pipeline]
+    static let all: [Tutorial] = [phoneOnly, localInstall, certs, flex, hooking, pipeline]
 
     // 0. Phone-only setup
     static let phoneOnly = Tutorial(
@@ -64,6 +64,37 @@ enum TutorialLibrary {
             TutorialStep(
                 title: "Daily loop",
                 body: "Drop zip → Push → Build tab shows the run → tap the IPA artifact → Sign tab → Sign → Install. Certs auto-refresh from the certs folder before they expire."),
+        ])
+
+    // 0a. Fully local install (own root CA, no DNS challenge)
+    static let localInstall = Tutorial(
+        id: "local", icon: "iphone.and.arrow.forward", title: "Fully local install (no ACME)",
+        subtitle: "Your own root CA — instant certs, no DNS challenge, one-time trust", minutes: 5,
+        steps: [
+            TutorialStep(
+                title: "What this is",
+                body: "Instead of asking Let's Encrypt for a cert (and doing the DNS TXT dance), the phone becomes its own certificate authority. It generates a root CA once, signs a leaf for your install host, and serves installs with it. iOS trusts it after you install the root profile a single time. Private keys never leave the Keychain."),
+            TutorialStep(
+                title: "Pick the host and point it at loopback",
+                body: "Any name that resolves to 127.0.0.1 works. At your DNS host add an A record for it → 127.0.0.1. In registrar panels the Subdomain field usually wants just the label (e.g. `sign`), not the full name — entering `sign.example.com` there makes `sign.example.com.example.com`. No DNS control? Use a free loopback name like 127-0-0-1.nip.io.",
+                tip: "This DNS step is separate from trust. If the host doesn't resolve to 127.0.0.1, iOS silently never shows the install sheet."),
+            TutorialStep(
+                title: "Switch to Fully local",
+                body: "Settings › OTA Domain › Certificate mode › Fully local. The Active cert card shows exactly which cert is live and whether it matches your host."),
+            TutorialStep(
+                title: "Create the CA and issue a leaf",
+                body: "Settings › OTA Domain › Open local CA settings › enter the host › Create CA & issue leaf. Tap Check to confirm the host resolves to 127.0.0.1."),
+            TutorialStep(
+                title: "Inspect, then install the trust profile",
+                body: "Tap View profile contents first — it's plain XML with one payload: your root cert. Then Install profile → Settings walks you through it. Finally: Settings › General › About › Certificate Trust Settings › toggle MRvEK Local Root CA on.",
+                tip: "iOS shows a red 'Unmanaged Root Certificate' warning. That's correct — it's a root you made, granting trust only on this device."),
+            TutorialStep(
+                title: "Sign & Install",
+                body: "Library › pick IPA › Configure & Sign › Sign IPA › Install. The iOS sheet appears (\"<host> would like to install…\"). After you tap Install, the Install trace card shows what installd did and diagnoses any failure."),
+            TutorialStep(
+                title: "If it says 'Unable to Install'",
+                body: "The delivery worked; installd rejected the package. Almost always: this device's UDID isn't in the .mobileprovision (Settings › Certificates shows ✅/❌ per profile), or an app with the same bundle ID is already installed from another team — delete it, or change the bundle ID in the sign sheet.",
+                tip: "Re-issuing a leaf for a new host is instant and needs no new profile — the root you trusted covers anything it signs."),
         ])
 
     // 0b. Certs in depth

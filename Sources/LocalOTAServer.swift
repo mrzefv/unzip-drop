@@ -347,7 +347,7 @@ nonisolated enum CertSourceLinker {
 
     /// 1) verify the token sees the repo, 2) install certs.yml + hooks on the default branch
     ///    if they're missing, 3) create the orphan `certs` branch (README + empty challenge board).
-    static func link(owner: String, repo: String, token: String) async throws -> Report {
+    static func link(owner: String, repo: String, token: String, forceUpdate: Bool = false) async throws -> Report {
         guard !token.isEmpty else { throw GitHubError.badConfig("Add a GitHub token in Settings › Access token first.") }
         var rep = Report()
         let base = "/repos/\(owner)/\(repo)"
@@ -358,15 +358,18 @@ nonisolated enum CertSourceLinker {
         let defaultBranch = rj["default_branch"] as? String ?? "main"
 
         // 2) pipeline files — push only what's missing (the app's own push engine).
+        // forceUpdate: push every pipeline file regardless — replaces a stale
+        // certs.yml/hook on main with the app's embedded copy.
         var missing: [(path: String, data: Data)] = []
         for f in CertPipeline.files {
+            if forceUpdate { missing.append(f); continue }
             let (c, _) = try await gh("\(base)/contents/\(f.path)?ref=\(defaultBranch)", token: token)
             if c == 404 { missing.append(f) }
         }
         if !missing.isEmpty {
             let client = GitHubClient(owner: owner, repo: repo, branch: defaultBranch, token: token)
             do {
-                _ = try await client.push(files: missing, subpath: "", message: "Add OTA cert pipeline (certbot via Actions)", progress: { _, _ in })
+                _ = try await client.push(files: missing, subpath: "", message: forceUpdate ? "Update OTA cert pipeline (certbot via Actions)" : "Add OTA cert pipeline (certbot via Actions)", progress: { _, _ in })
                 rep.installedFiles = missing.map(\.path)
             } catch {
                 throw GitHubError.badConfig("Installing the workflow failed: \(error.localizedDescription) — the token needs Workflows: Read and write to add .github/workflows files.")

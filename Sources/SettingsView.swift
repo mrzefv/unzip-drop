@@ -668,7 +668,7 @@ private struct OTADomainScreen: View {
             } else {
                 localModeCard
             }
-            Card {
+            if mode == "public" { Card {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("How the cert is made").font(.headline).foregroundStyle(Theme.text)
                     Text("`.github/workflows/certs.yml` runs certbot with a manual DNS-01 challenge for *.<your domain>. It publishes each TXT value here, then polls DNS until your record is live before letting Let's Encrypt validate — so no burned attempts or rate limits. Result goes to the `certs` branch; Build.yml bakes it into every IPA.")
@@ -676,7 +676,7 @@ private struct OTADomainScreen: View {
                     Text("No secrets, no computer: Link repo installs everything; Renew now sends your email and domain to the workflow. Weekly cron renews when < 30 days remain if you also set repo variable LE_EMAIL (optional).")
                         .font(.caption2).foregroundStyle(Theme.subtle)
                 }
-            }
+            } }
         }
         .fullScreenCover(isPresented: $showLocalCA) { LocalCAScreen().environmentObject(config).preferredColorScheme(.dark) }
         .alert("TXT record not visible yet", isPresented: Binding(get: { forceOverride != nil }, set: { if !$0 { forceOverride = nil } })) {
@@ -1192,6 +1192,13 @@ private struct OTADomainScreen: View {
                     accentButton(linking ? "Linking…" : "Link repo", "link", enabled: config.hasToken && !certOwner.isEmpty && !certRepo.isEmpty, busy: linking) {
                         Task { await link() }
                     }
+                    Button { Task { await link(force: true) } } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath").frame(width: 46, height: 46)
+                            .background(Theme.card).foregroundStyle(Theme.accent)
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .disabled(linking || !config.hasToken)
                     Button { saveSource() } label: {
                         Image(systemName: sourceSaved ? "checkmark" : "square.and.arrow.down").frame(width: 46, height: 46)
                             .background(Theme.card).foregroundStyle(Theme.accent)
@@ -1199,6 +1206,8 @@ private struct OTADomainScreen: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
                 }
+                Text("↻ Update pipeline: force-pushes the app's current certs.yml + hooks over whatever is on main. Use it after an app update, or if Renew fails with 'unexpected inputs' / 'No email'.")
+                    .font(.caption2).foregroundStyle(Theme.subtle)
                 if !config.hasToken {
                     Text("Token needs: Contents, Actions, Workflows — all Read and write — on this repo.").font(.caption).foregroundStyle(.orange)
                 }
@@ -1217,13 +1226,13 @@ private struct OTADomainScreen: View {
         sourceSaved = true
     }
 
-    private func link() async {
+    private func link(force: Bool = false) async {
         saveSource()
         linking = true; error = nil; linkReport = nil
         do {
-            let r = try await CertSourceLinker.link(owner: ServerConfig.certRepoOwner, repo: ServerConfig.certRepoName, token: config.token)
+            let r = try await CertSourceLinker.link(owner: ServerConfig.certRepoOwner, repo: ServerConfig.certRepoName, token: config.token, forceUpdate: force)
             var parts: [String] = ["Linked \(ServerConfig.certRepoOwner)/\(ServerConfig.certRepoName)."]
-            if !r.installedFiles.isEmpty { parts.append("Installed \(r.installedFiles.count) pipeline files.") }
+            if !r.installedFiles.isEmpty { parts.append((force ? "Updated " : "Installed ") + "\(r.installedFiles.count) pipeline files on main.") }
             if r.branchCreated { parts.append("Created the certs folder.") }
             parts.append(contentsOf: r.notes)
             parts.append("Next: set your domain above, add the wildcard A record, tap Renew now.")

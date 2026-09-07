@@ -160,6 +160,25 @@ final class CertificateStore: ObservableObject {
                            udids: plist["ProvisionedDevices"] as? [String] ?? [])
     }
 
+    // MARK: Device ↔ profile check
+
+    /// The device UDID we know about: a saved value, else a cert name that looks like one
+    /// (registration-service certs are named after the UDID, e.g. 00008110-000209003C60E01E).
+    nonisolated static func knownUDID(certName: String? = nil) -> String? {
+        if let saved = UserDefaults.standard.string(forKey: "uzd_device_udid"), !saved.isEmpty { return saved }
+        if let n = certName, n.range(of: #"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}$"#, options: .regularExpression) != nil { return n.uppercased() }
+        return nil
+    }
+    nonisolated static func setKnownUDID(_ u: String) {
+        UserDefaults.standard.set(u.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(), forKey: "uzd_device_udid")
+    }
+
+    /// nil = unknown UDID; true/false = definitive.
+    nonisolated static func profileIncludesDevice(_ info: ProfileInfo, udid: String?) -> Bool? {
+        guard let u = udid?.uppercased(), !u.isEmpty else { return nil }
+        return info.udids.contains { $0.uppercased() == u }
+    }
+
     nonisolated static func p12IsValid(_ data: Data, password: String) -> Bool {
         let opts = [kSecImportExportPassphrase as String: password] as CFDictionary
         var items: CFArray?

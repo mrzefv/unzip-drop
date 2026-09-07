@@ -1,8 +1,9 @@
 //
 //  CertPipeline.swift
 //  The certbot pipeline files, embedded so the app can install them into any
-//  repo with one tap (Settings › OTA Domain › Link repo). Keep in sync with
-//  the copies under .github/ — these are byte-for-byte the same.
+//  repo with one tap (Settings › OTA Domain › Link repo / Update pipeline).
+//  Byte-for-byte the copies under .github/. Regenerated from the fixed
+//  certs.yml (email/ca inputs, rebase-retry publish, glob live-dir).
 //
 
 import Foundation
@@ -30,8 +31,13 @@ name: OTA certs (certbot)
 # Encrypt is never asked to validate early. Result → server.crt / server.pem /
 # pack.json on `certs`; Build.yml bakes them into every IPA.
 #
-# No secrets required: the app passes `email` as a dispatch input. For the
-# weekly cron set var LE_EMAIL (or secret LE_EMAIL). Optional vars: CERT_DOMAIN (zefv.dev), RENEW_DAYS (30),
+# CA: Let's Encrypt (default) or ZeroSSL — both ACME, same DNS-01 flow.
+# For ZeroSSL set var CA=zerossl and add secrets ZEROSSL_EAB_KID + ZEROSSL_EAB_HMAC
+# (ZeroSSL dashboard → Developer → EAB credentials). The app can also pass ca /
+# eab_kid / eab_hmac as dispatch inputs.
+#
+# No secrets required for Let's Encrypt: the app passes `email` as a dispatch input.
+# For the weekly cron set var LE_EMAIL (or secret LE_EMAIL). Optional vars: CERT_DOMAIN (zefv.dev), RENEW_DAYS (30),
 # WAIT_MINUTES (45), POLL_SECONDS (20).
 # Automated alternative: set var DNS_MODE=cloudflare + secret CF_API_TOKEN.
 
@@ -45,7 +51,20 @@ on:
         type: string
         default: ""
       email:
-        description: "Let's Encrypt account email (blank = vars.LE_EMAIL / secrets.LE_EMAIL)"
+        description: "ACME account email (blank = vars.LE_EMAIL / secrets.LE_EMAIL)"
+        type: string
+        default: ""
+      ca:
+        description: "Certificate authority"
+        type: choice
+        options: [letsencrypt, zerossl]
+        default: letsencrypt
+      eab_kid:
+        description: "ZeroSSL EAB KID (blank = secrets.ZEROSSL_EAB_KID)"
+        type: string
+        default: ""
+      eab_hmac:
+        description: "ZeroSSL EAB HMAC (blank = secrets.ZEROSSL_EAB_HMAC)"
         type: string
         default: ""
       force:
@@ -73,6 +92,9 @@ jobs:
       CERTS_BRANCH: certs
       CERTS_WT: ${{ github.workspace }}/certs-wt
       LE_EMAIL: ${{ inputs.email || vars.LE_EMAIL || secrets.LE_EMAIL }}
+      CA: ${{ inputs.ca || vars.CA || 'letsencrypt' }}
+      ZEROSSL_EAB_KID:  ${{ inputs.eab_kid  || secrets.ZEROSSL_EAB_KID }}
+      ZEROSSL_EAB_HMAC: ${{ inputs.eab_hmac || secrets.ZEROSSL_EAB_HMAC }}
     steps:
       - name: Checkout main (scripts)
         uses: actions/checkout@v4
@@ -146,9 +168,29 @@ jobs:
           set -euo pipefail
           [ -n "${LE_EMAIL:-}" ] || { echo "::error::No email — pass it from the app (Renew now) or set repo var LE_EMAIL"; exit 1; }
           chmod +x .github/scripts/acme-*.sh
+          # CA selection: Let's Encrypt (default) or ZeroSSL. Both are ACME.
+          EAB=()
+          if [ "$CA" = "zerossl" ]; then
+            SERVER="https://acme.zerossl.com/v2/DV90"
+            if [ -n "${ZEROSSL_EAB_KID:-}" ] && [ -n "${ZEROSSL_EAB_HMAC:-}" ]; then
+              EAB=(--eab-kid "$ZEROSSL_EAB_KID" --eab-hmac-key "$ZEROSSL_EAB_HMAC")
+            else
+              # No EAB provided — derive one from the email via ZeroSSL's API.
+              echo "no EAB creds — requesting from ZeroSSL API for $LE_EMAIL"
+              RESP=$(curl -sS -X POST "https://api.zerossl.com/acme/eab-credentials-email" --data "email=$LE_EMAIL")
+              KID=$(echo "$RESP" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("eab_kid",""))')
+              HMAC=$(echo "$RESP" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("eab_hmac_key",""))')
+              [ -n "$KID" ] && [ -n "$HMAC" ] || { echo "::error::ZeroSSL EAB request failed: $RESP"; exit 1; }
+              EAB=(--eab-kid "$KID" --eab-hmac-key "$HMAC")
+            fi
+          else
+            SERVER="https://acme-v02.api.letsencrypt.org/directory"
+          fi
+          echo "CA: $CA  server: $SERVER"
           mkdir -p le
           certbot certonly \
             --non-interactive --agree-tos --email "$LE_EMAIL" \
+            --server "$SERVER" "${EAB[@]}" \
             --config-dir ./le --work-dir ./le/work --logs-dir ./le/logs \
             --manual --preferred-challenges dns \
             --manual-auth-hook    "$PWD/.github/scripts/acme-auth.sh" \
@@ -205,7 +247,7 @@ jobs:
             "commonName": "*.${CERT_DOMAIN}",
             "sans": "$SANS",
             "sha256": { "bundle": "$(sha256sum server.crt | cut -d' ' -f1)", "key": "$(sha256sum server.pem | cut -d' ' -f1)" },
-            "issuer": "letsencrypt",
+            "issuer": "$CA",
             "mode": "$DNS_MODE",
             "generatedBy": "certs.yml @ ${GITHUB_SHA}"
           }

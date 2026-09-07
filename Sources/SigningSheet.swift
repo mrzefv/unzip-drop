@@ -115,7 +115,10 @@ struct SigningSheet: View {
                     InstallPromptOverlay(
                         name: r.name, bundle: r.bundleID, version: r.version,
                         sizeBytes: lastSizeBytes, icon: iconPNG ?? meta.iconPNG,
-                        source: sourceLabel, entitlements: lastEntitlements,
+                        source: sourceLabel,
+                        mdid: CertificateStore.knownUDID(certName: certs.active?.name) ?? "",
+                        cert: certs.active?.name ?? "",
+                        entitlements: lastEntitlements,
                         onInstall: { showInstallPrompt = false; Task { await install(r) } },
                         onCancel: { showInstallPrompt = false }
                     )
@@ -321,10 +324,10 @@ struct SigningSheet: View {
     private func methodChip(_ id: String, _ title: String, _ icon: String) -> some View {
         Button { method = id } label: {
             VStack(spacing: 4) {
-                Image(systemName: icon).font(.system(size: 15))
-                Text(title).font(.system(size: 11, weight: .semibold))
+                Image(systemName: icon).font(.system(size: 13))
+                Text(title).font(.system(size: 10, weight: .semibold))
             }
-            .padding(.vertical, 10).frame(maxWidth: .infinity)
+            .padding(.vertical, 8).frame(maxWidth: .infinity)
             .background(method == id ? methodAccent.opacity(0.18) : Color(white: 0.1))
             .foregroundStyle(method == id ? methodAccent : Theme.subtle)
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(method == id ? methodAccent : Theme.stroke, lineWidth: 1))
@@ -337,10 +340,10 @@ struct SigningSheet: View {
         if let c = certs.active {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(blue).font(.system(size: 18)).padding(.top, 2)
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(blue).font(.system(size: 15)).padding(.top, 2)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("USING YOUR SAVED CERTIFICATE").font(.system(size: 9, weight: .heavy)).kerning(0.7).foregroundStyle(blue)
-                        Text(c.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                        Text(c.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
                         Text(certSubtitle(c)).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
                     }
                     Spacer(minLength: 0)
@@ -350,7 +353,7 @@ struct SigningSheet: View {
                 HStack(alignment: .top, spacing: 0) {
                     VStack(alignment: .leading, spacing: 4) {
                         Label("DISTRIBUTED IDENTITY", systemImage: "globe").font(.system(size: 9, weight: .heavy)).kerning(0.5).foregroundStyle(blue)
-                        Text(ServerConfig.installHost).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(ServerConfig.installHost).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
                         Text(ServerConfig.certMode == "local" ? "Local root CA · offline" : "Public URL for OTA").font(.system(size: 10)).foregroundStyle(Theme.subtle)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -415,7 +418,7 @@ struct SigningSheet: View {
                 HStack(spacing: 16) {
                     iconThumb(iconPNG ?? meta.iconPNG, side: 72)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(iconPNG == nil ? "Replace app icon" : "Icon replaced").font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
+                        Text(iconPNG == nil ? "Replace app icon" : "Icon replaced").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
                         Text("PNG/JPEG — auto-resized to required sizes").font(.system(size: 13)).foregroundStyle(Theme.subtle)
                     }
                     Spacer()
@@ -454,7 +457,7 @@ struct SigningSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(label).font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.subtle)
                 TextField(label, text: text)
-                    .font(.system(size: 17, design: mono ? .monospaced : .default)).foregroundStyle(.white)
+                    .font(.system(size: 15, design: mono ? .monospaced : .default)).foregroundStyle(.white)
                     .autocorrectionDisabled().textInputAutocapitalization(.never)
             }
         }
@@ -794,9 +797,14 @@ struct SigningSheet: View {
     }
 
     private func install(_ r: SignedEntry) async {
-        installing = true; error = nil
-        do { try await OTAInstaller.shared.install(r) } catch { self.error = error.localizedDescription }
-        installing = false
+        error = nil
+        do {
+            try await OTAInstaller.shared.install(r)
+        } catch {
+            self.error = error.localizedDescription
+            // Bubble the reason into the terminal log too, so it's visible.
+            log.append("error: install failed — \(error.localizedDescription)")
+        }
     }
 }
 
@@ -835,7 +843,6 @@ struct SigningTerminalView: View {
     var onInstall: (SignedEntry) -> Void
     var onExit: () -> Void
 
-    @State private var installing = false
     private let accent = Color(red: 1.0, green: 0.60, blue: 0.10)   // MRZefv orange
     private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
 
@@ -932,17 +939,16 @@ struct SigningTerminalView: View {
                 .frame(maxWidth: .infinity)
 
                 Button {
-                    guard let r = result, !installing else { return }
-                    installing = true; onInstall(r)
+                    guard let r = result else { return }
+                    onInstall(r)
                 } label: {
                     VStack(spacing: 4) {
-                        if installing { ProgressView().tint(blue).frame(height: 26) }
-                        else { Image(systemName: "signature").font(.system(size: 26)) }
+                        Image(systemName: "signature").font(.system(size: 26))
                         Text(result == nil ? "Sign IPA" : "Install").font(.system(size: 13, weight: .semibold))
                     }
                     .foregroundStyle(result == nil ? Color.white.opacity(0.35) : blue).frame(maxWidth: .infinity)
                 }
-                .disabled(result == nil || installing)
+                .disabled(result == nil)
             }
             .padding(.top, 12).padding(.bottom, 6)
             .background(Color(white: 0.06))
@@ -1000,6 +1006,8 @@ struct InstallPromptOverlay: View {
     let sizeBytes: Int64
     let icon: Data?
     let source: String
+    var mdid: String = ""
+    var cert: String = ""
     let entitlements: [String: String]
     var onInstall: () -> Void
     var onCancel: () -> Void
@@ -1056,23 +1064,24 @@ struct InstallPromptOverlay: View {
                         Text("\(source) | ᴍʀZefv").font(.system(size: 12, weight: .semibold)).foregroundStyle(blue).padding(.vertical, 12)
                     }
                 }
+                .frame(maxHeight: 520)
                 Divider().overlay(Color.white.opacity(0.10))
                 HStack(spacing: 0) {
-                    Button(action: onCancel) { Text("Cancel").font(.system(size: 17)).foregroundStyle(blue).frame(maxWidth: .infinity).padding(.vertical, 16) }
+                    Button(action: onCancel) { Text("Cancel").font(.system(size: 16)).foregroundStyle(blue).frame(maxWidth: .infinity).padding(.vertical, 14) }
                     Rectangle().fill(Color.white.opacity(0.10)).frame(width: 1)
-                    Button(action: onInstall) { Text("Install").font(.system(size: 17, weight: .bold)).foregroundStyle(blue).frame(maxWidth: .infinity).padding(.vertical, 16) }
+                    Button(action: onInstall) { Text("Install").font(.system(size: 16, weight: .bold)).foregroundStyle(blue).frame(maxWidth: .infinity).padding(.vertical, 14) }
                 }
             }
             .background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .frame(maxWidth: 400, maxHeight: 640)
-            .padding(20)
+            .frame(maxWidth: 360)
+            .padding(24)
         }
     }
 
     private var header: some View {
         VStack(spacing: 8) {
             iconThumb(64)
-            Text(name).font(.system(size: 17, weight: .bold)).foregroundStyle(.white).multilineTextAlignment(.center).lineLimit(2)
+            Text(name).font(.system(size: 16, weight: .bold)).foregroundStyle(.white).multilineTextAlignment(.center).lineLimit(2)
         }
         .padding(.top, 20).padding(.bottom, 12)
     }
@@ -1099,6 +1108,8 @@ struct InstallPromptOverlay: View {
                 }.buttonStyle(.plain)
             }
             .padding(.horizontal, 16).padding(.vertical, 6)
+            if !mdid.isEmpty { row("MDID", mdid) }
+            if !cert.isEmpty { row("Cert", cert) }
         }
         .padding(.vertical, 6)
     }
@@ -1106,7 +1117,7 @@ struct InstallPromptOverlay: View {
     private func row(_ k: String, _ v: String) -> some View {
         HStack(alignment: .top, spacing: 4) {
             Text(k + ":").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.5)).frame(width: 72, alignment: .leading)
-            Text(v).font(.system(size: 13, design: .monospaced)).foregroundStyle(.white.opacity(0.9)).textSelection(.enabled)
+            Text(v).font(.system(size: 12, design: .monospaced)).foregroundStyle(.white.opacity(0.9)).textSelection(.enabled)
             Spacer()
         }
         .padding(.horizontal, 16).padding(.vertical, 6)
@@ -1116,7 +1127,7 @@ struct InstallPromptOverlay: View {
         Divider().overlay(Color.white.opacity(0.08))
         Button { withAnimation { open.wrappedValue.toggle() } } label: {
             HStack {
-                Text(title).font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+                Text(title).font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                 Spacer()
                 Image(systemName: "chevron.down").font(.system(size: 13, weight: .bold)).foregroundStyle(.white.opacity(0.5)).rotationEffect(.degrees(open.wrappedValue ? 180 : 0))
             }

@@ -13,6 +13,7 @@ struct SignedView: View {
     @State private var share: URLItem?
     @State private var error: String?
     @State private var search = ""
+    @State private var sheetEntry: SignedEntry?
 
     private var entries: [SignedEntry] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -65,6 +66,26 @@ struct SignedView: View {
             }
         }
         .sheet(item: $share) { ShareSheet(items: [$0.url]) }
+        .sheet(item: $sheetEntry) { e in
+            AppActionSheet(
+                name: e.name, bundle: e.bundleID,
+                icon: e.iconURL.flatMap { try? Data(contentsOf: $0) },
+                actions: [
+                    .init(title: "Install App", icon: "square.and.arrow.down", role: .normal) {
+                        sheetEntry = nil; Task { await install(e) }
+                    },
+                    .init(title: "Re-Sign App", icon: "checkmark.seal", role: .normal) {
+                        sheetEntry = nil; SignQueue.shared.enqueue(e.ipaURL)
+                    },
+                    .init(title: "Delete", icon: "trash", role: .destructive) {
+                        sheetEntry = nil; signed.delete(e)
+                    },
+                ]
+            )
+            .presentationDetents([.height(340)])
+            .presentationDragIndicator(.visible)
+            .preferredColorScheme(.dark)
+        }
     }
 
     private func row(_ e: SignedEntry) -> some View {
@@ -76,19 +97,16 @@ struct SignedView: View {
                 Text("\(e.certName) · \(e.signedAt.formatted(date: .abbreviated, time: .shortened))").font(.caption2).foregroundStyle(Theme.subtle)
             }
             Spacer()
-            Button { Task { await install(e) } } label: {
-                if installing == e.id { ProgressView().tint(Theme.accent) }
-                else { Image(systemName: "arrow.down.app.fill").font(.system(size: 22)).foregroundStyle(.green) }
+            if installing == e.id { ProgressView().tint(Theme.accent) }
+            else {
+                Image(systemName: "arrow.up.forward").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent)
             }
-            .disabled(installing != nil)
-            Menu {
-                Button { share = URLItem(url: e.ipaURL) } label: { Label("Share IPA", systemImage: "square.and.arrow.up") }
-                Button(role: .destructive) { signed.delete(e) } label: { Label("Delete", systemImage: "trash") }
-            } label: { Image(systemName: "ellipsis.circle").foregroundStyle(Theme.subtle) }
         }
         .padding(12).background(Theme.card)
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(Rectangle())
+        .onTapGesture { sheetEntry = e }
     }
 
     private func icon(_ data: Data?) -> some View {
@@ -103,5 +121,76 @@ struct SignedView: View {
         installing = e.id; error = nil
         do { try await OTAInstaller.shared.install(e) } catch { self.error = error.localizedDescription }
         installing = nil
+    }
+}
+
+// MARK: - Bottom action sheet (mSign-style: icon + bundle header, rows, footer)
+
+struct AppActionSheet: View {
+    struct Action: Identifiable {
+        enum Role { case normal, destructive }
+        let id = UUID()
+        let title: String
+        let icon: String
+        let role: Role
+        let run: () -> Void
+    }
+
+    let name: String
+    let bundle: String
+    let icon: Data?
+    let actions: [Action]
+
+    private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header: icon · name+bundle · (drag indicator handles dismiss)
+            HStack(spacing: 12) {
+                iconThumb(52)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(name).font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                    Text(bundle).font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.subtle).lineLimit(1)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 16)
+
+            VStack(spacing: 12) {
+                ForEach(actions) { a in
+                    Button(action: a.run) {
+                        HStack(spacing: 12) {
+                            Image(systemName: a.icon).font(.system(size: 18))
+                                .foregroundStyle(a.role == .destructive ? .red : blue)
+                            Text(a.title).font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(a.role == .destructive ? .red : Theme.text)
+                            Spacer()
+                            Image(systemName: "arrow.up.forward").font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(a.role == .destructive ? .red : blue)
+                        }
+                        .padding(.vertical, 15).padding(.horizontal, 16)
+                        .background(Color(white: 0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 20)
+
+            Text("Made by ᴹᴿZEFv").font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.subtle).padding(.top, 18).padding(.bottom, 8)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+        .background(Theme.bg.ignoresSafeArea())
+    }
+
+    private func iconThumb(_ side: CGFloat) -> some View {
+        Group {
+            if let icon, let img = UIImage(data: icon) { Image(uiImage: img).resizable().scaledToFill() }
+            else { RoundedRectangle(cornerRadius: side * 0.22).fill(Theme.accent.opacity(0.15)).overlay(Image(systemName: "app.fill").foregroundStyle(Theme.accent)) }
+        }
+        .frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: side * 0.22, style: .continuous))
     }
 }

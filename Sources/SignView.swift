@@ -10,6 +10,7 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct SignView: View {
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var certs  = CertificateStore.shared
     @ObservedObject private var signed = SignedStore.shared
     @ObservedObject private var queue  = SignQueue.shared
@@ -36,9 +37,13 @@ struct SignView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack {
-                        Text("Library").font(.title2.bold()).foregroundStyle(Theme.text)
+                        Text("Sign").font(.title2.bold()).foregroundStyle(Theme.text)
                         Spacer()
                         certPill
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.text)
+                                .frame(width: 30, height: 30).background(Theme.card).clipShape(Circle())
+                        }.padding(.leading, 8)
                     }
                     sourceCard
                     if meta != nil { overridesCard; actionCard }

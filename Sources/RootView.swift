@@ -11,13 +11,14 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject var session: Session
     @ObservedObject private var signQueue = SignQueue.shared
+    @State private var showSign = false
     @ObservedObject private var hub = GitHubHub.shared
     @State private var tab = 0
 
     var body: some View {
         ZStack {
             switch tab {
-            case 0: SignView()
+            case 0: LibraryView()
             case 1: SourcesView()
             case 2: SignedView()
             default: SettingsView()
@@ -29,8 +30,10 @@ struct RootView: View {
         }
         .background(Color.black.ignoresSafeArea())
         .onChange(of: signQueue.requestedTab) { t in
-            if let t { tab = t; signQueue.requestedTab = nil }
+            // Signing is a flow, not a tab: present SignView over whatever's showing.
+            if t != nil { showSign = true; signQueue.requestedTab = nil }
         }
+        .fullScreenCover(isPresented: $showSign) { SignView().preferredColorScheme(.dark) }
         .fullScreenCover(isPresented: $hub.isPresented) {
             GitHubHubScreen()
                 .environmentObject(session)

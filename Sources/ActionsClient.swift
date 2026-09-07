@@ -196,6 +196,26 @@ struct ActionsClient {
         return keys
     }
 
+    /// Raw log text for one job (GitHub redirects to blob storage; URLSession follows it).
+    func jobLog(jobID: Int) async throws -> String {
+        var req = request("\(repoPath)/actions/jobs/\(jobID)/logs")
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        let (d, resp) = try await URLSession.shared.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200...299).contains(code) else { throw Self.explain(code, "log fetch failed") }
+        return String(data: d, encoding: .utf8) ?? String(decoding: d, as: UTF8.self)
+    }
+
+    /// Most recent run of a given workflow path, with its jobs.
+    func latestRun(workflowPath: String) async throws -> (run: WorkflowRun, jobs: [WorkflowJob])? {
+        let wfs = try await workflows()
+        guard let wf = wfs.first(where: { $0.path == workflowPath }) else { return nil }
+        let all = try await runs(perPage: 30)
+        guard let run = all.first(where: { $0.workflowID == wf.id }) else { return nil }
+        let js = try await jobs(runID: run.id)
+        return (run, js)
+    }
+
     func cancel(runID: Int) async throws {
         _ = try await json("\(repoPath)/actions/runs/\(runID)/cancel", method: "POST")
     }

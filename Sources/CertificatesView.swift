@@ -20,12 +20,14 @@ struct CertificatesScreen: View {
     @State private var showPassword = false
     @State private var error: String?
     @State private var importing = false
+    @State private var udidText = UserDefaults.standard.string(forKey: "uzd_device_udid") ?? ""
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 14) {
+                    deviceCard
                     addCard
                     if store.certificates.isEmpty {
                         Card {
@@ -126,6 +128,36 @@ struct CertificatesScreen: View {
         }
     }
 
+    /// Lets the user pin their UDID so every profile can be checked definitively.
+    private var deviceCard: some View {
+        let known = CertificateStore.knownUDID(certName: store.active?.name)
+        return Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("This device", systemImage: "iphone.gen3").font(.headline).foregroundStyle(Theme.text)
+                Text("Development/ad-hoc profiles only install on devices listed inside them. Enter your UDID once and every profile below shows whether it includes this device. (If your cert is named after your UDID, it's detected automatically.)")
+                    .font(.caption).foregroundStyle(Theme.subtle)
+                HStack(spacing: 8) {
+                    TextField(known ?? "00008110-000209003C60E01E", text: $udidText)
+                        .font(.system(size: 13, design: .monospaced)).autocorrectionDisabled().textInputAutocapitalization(.characters)
+                        .padding(10).background(Theme.bg).foregroundStyle(Theme.text)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
+                    Button {
+                        CertificateStore.setKnownUDID(udidText)
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    } label: {
+                        Text("Save").font(.caption.weight(.semibold)).foregroundStyle(.black)
+                            .padding(.horizontal, 14).padding(.vertical, 11).background(Theme.accent).clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    .disabled(udidText.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                if let k = known {
+                    Text("Using: \(k)").font(.caption2.monospaced()).foregroundStyle(Theme.accent)
+                }
+            }
+        }
+    }
+
     private var canImport: Bool { p12Data != nil && provData != nil }
 
     private func fileRow(icon: String, title: String, picked: String, action: @escaping () -> Void) -> some View {
@@ -144,6 +176,23 @@ struct CertificatesScreen: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
+    }
+
+    private func deviceLine(_ info: ProfileInfo, certName: String) -> some View {
+        let udid = CertificateStore.knownUDID(certName: certName)
+        let r = CertificateStore.profileIncludesDevice(info, udid: udid)
+        let (icon, text, color): (String, String, Color) = {
+            if info.udids.isEmpty { return ("building.2", "No device list (enterprise/in-house)", Theme.subtle) }
+            switch r {
+            case .some(true):  return ("checkmark.seal.fill", "This device is in the profile (\(info.udids.count) devices)", .green)
+            case .some(false): return ("xmark.octagon.fill", "This device is NOT in the profile (\(info.udids.count) devices) — won't install", .orange)
+            case .none:        return ("questionmark.circle", "\(info.udids.count) devices — enter your UDID above to check", Theme.subtle)
+            }
+        }()
+        return HStack(spacing: 5) {
+            Image(systemName: icon).font(.caption2).foregroundStyle(color)
+            Text(text).font(.caption2).foregroundStyle(color).lineLimit(2)
+        }
     }
 
     private func doImport() {
@@ -173,6 +222,7 @@ struct CertificatesScreen: View {
                     Text((expired ? "Expired " : "Expires ") + e.formatted(date: .abbreviated, time: .omitted))
                         .font(.caption2).foregroundStyle(expired ? .orange : Theme.subtle)
                 }
+                deviceLine(info, certName: c.name)
             }
             Spacer()
             if active {

@@ -15,14 +15,26 @@
 
 import Foundation
 import UIKit
+import ZIPFoundation
 
 @MainActor
-final class OTAInstaller {
+final class OTAInstaller: ObservableObject {
     static let shared = OTAInstaller()
     private init() {}
 
     private var current: LocalOTAServer?
     private var bgTask: UIBackgroundTaskIdentifier = .invalid
+
+    /// Result of the last install attempt, filled ~25s after the sheet opens.
+    struct Report: Identifiable, Sendable {
+        let id = UUID()
+        let requests: [OTATrace.Entry]
+        let diagnosis: String
+        let profileNote: String?
+        var delivered: Bool { requests.contains { $0.path.hasSuffix(".ipa") } }
+    }
+    @Published var lastReport: Report?
+    @Published var tracing = false
 
     enum InstallError: LocalizedError {
         case ipaMissing, openFailed
@@ -95,13 +107,63 @@ final class OTAInstaller {
             self?.tearDown()
         }
 
+        lastReport = nil; tracing = true
         let opened = await UIApplication.shared.open(server.itmsServicesURL)
-        guard opened else { tearDown(); throw InstallError.openFailed }
+        guard opened else { tearDown(); tracing = false; throw InstallError.openFailed }
 
+        let ipaSize = (try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int64) ?? 0
+        let activeCertName = CertificateStore.shared.active?.name
+        let profileNote = Self.profileNote(ipaURL: ipaURL, certName: activeCertName)
+
+        // Give installd time to fetch manifest + IPA, then report what it did.
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 25 * 1_000_000_000)
+            guard let self else { return }
+            let t = OTATrace.shared
+            self.lastReport = Report(requests: t.all, diagnosis: t.diagnosis(ipaSize: ipaSize), profileNote: profileNote)
+            self.tracing = false
+        }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 90 * 1_000_000_000)
             if let self, self.current === server { self.tearDown() }
         }
+    }
+
+    /// Reads embedded.mobileprovision out of the signed IPA and reports the facts
+    /// that most often cause "Unable to Install": device count, expiry, team, entitlements.
+    private static func profileNote(ipaURL: URL, certName: String?) -> String? {
+        let fm = FileManager.default
+        let work = fm.temporaryDirectory.appendingPathComponent("prof-" + UUID().uuidString, isDirectory: true)
+        defer { try? fm.removeItem(at: work) }
+        do {
+            try fm.createDirectory(at: work, withIntermediateDirectories: true)
+            try fm.unzipItem(at: ipaURL, to: work)
+            let payload = work.appendingPathComponent("Payload", isDirectory: true)
+            guard let app = try fm.contentsOfDirectory(at: payload, includingPropertiesForKeys: nil).first(where: { $0.pathExtension == "app" }) else { return nil }
+            let prov = app.appendingPathComponent("embedded.mobileprovision")
+            guard let data = try? Data(contentsOf: prov) else { return "No embedded.mobileprovision in the signed app — installd will refuse it." }
+            let info = CertificateStore.profileInfo(data)
+            var parts: [String] = []
+            if let n = info.name { parts.append("Profile: \(n)") }
+            if let t = info.team { parts.append("Team: \(t)") }
+            if let e = info.expires {
+                let d = Calendar.current.dateComponents([.day], from: Date(), to: e).day ?? 0
+                parts.append(d < 0 ? "⚠️ Profile EXPIRED \(-d)d ago" : "Profile expires in \(d)d")
+            }
+            if info.udids.isEmpty {
+                parts.append("Profile has no device list → Enterprise/in-house (any device OK, needs 'trust developer' in Settings) — or a broken profile.")
+            } else {
+                let udid = CertificateStore.knownUDID(certName: certName)
+                switch CertificateStore.profileIncludesDevice(info, udid: udid) {
+                case .some(true):  parts.append("✅ This device (\(udid!)) IS in the profile's \(info.udids.count) device(s). UDID is not the problem.")
+                case .some(false): parts.append("❌ This device (\(udid!)) is NOT in the profile's \(info.udids.count) device(s) — that's the install failure. Regenerate the profile with this UDID on the developer portal and re-import it.")
+                case .none:        parts.append("Profile lists \(info.udids.count) device(s). Enter your UDID in Settings › Certificates to check it definitively.")
+                }
+            }
+            let bundleID = NSDictionary(contentsOf: app.appendingPathComponent("Info.plist"))?["CFBundleIdentifier"] as? String ?? "?"
+            parts.append("Signed bundle ID: \(bundleID). If any app with this ID is already installed from a different team, delete it first.")
+            return parts.joined(separator: "\n")
+        } catch { return nil }
     }
 
     private func tearDown() {

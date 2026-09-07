@@ -625,6 +625,10 @@ private struct OTADomainScreen: View {
     @State private var error: String?
     @State private var note: String?
     @State private var probe: ZefvCert.BranchProbe?
+    @State private var lastRun: WorkflowRun?
+    @State private var lastJobs: [WorkflowJob] = []
+    @State private var runLogTail: String?
+    @State private var loadingRun = false
 
     @State private var board: AcmeBoard?
     @State private var dnsSeen: [String: Bool] = [:]
@@ -659,6 +663,7 @@ private struct OTADomainScreen: View {
             if mode == "public" { hostCard
             if let board, !board.records.isEmpty || renewing { challengeCard(board) }
             certCard
+            lastRunCard
             sourceCard
             } else {
                 localModeCard
@@ -1060,6 +1065,94 @@ private struct OTADomainScreen: View {
                     .font(.caption2).foregroundStyle(Theme.subtle)
             }
         }
+    }
+
+    /// Pulls the most recent certs.yml run and, if it failed, the failing step's log tail —
+    /// so the real reason is on this screen instead of behind a GitHub login.
+    private var lastRunCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("Last certs run", systemImage: "clock.arrow.circlepath").font(.headline).foregroundStyle(Theme.text)
+                    Spacer()
+                    if loadingRun { ProgressView().tint(Theme.accent) }
+                    Button { Task { await loadLastRun() } } label: { Image(systemName: "arrow.clockwise").foregroundStyle(Theme.accent) }
+                }
+                if let r = lastRun {
+                    HStack(spacing: 8) {
+                        runPill(r)
+                        Text("#\(r.runNumber) · \(r.headBranch) · \(r.event)").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
+                        Spacer()
+                        if let u = URL(string: r.htmlURL) { Link("Open", destination: u).font(.caption.weight(.semibold)).foregroundStyle(Theme.accent) }
+                    }
+                    ForEach(lastJobs) { job in
+                        ForEach(job.steps) { st in
+                            HStack(spacing: 8) {
+                                Image(systemName: stepIcon(st)).foregroundStyle(stepColor(st)).font(.caption)
+                                Text(st.name).font(.caption).foregroundStyle(st.conclusion == "failure" ? .orange : Theme.subtle).lineLimit(1)
+                                Spacer()
+                            }
+                        }
+                    }
+                    if let tail = runLogTail {
+                        Text("FAILED STEP LOG").font(.system(size: 10, weight: .bold)).kerning(1).foregroundStyle(.orange)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            Text(tail).font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.text).textSelection(.enabled)
+                        }
+                        .frame(maxHeight: 220)
+                        .padding(8).background(Theme.bg).clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                } else if !loadingRun {
+                    Text("No certs.yml run found yet, or the token can't read Actions.").font(.caption).foregroundStyle(Theme.subtle)
+                }
+            }
+        }
+    }
+
+    private func runPill(_ r: WorkflowRun) -> some View {
+        let (t, c): (String, Color) = r.isActive ? ("RUNNING", .yellow) : (r.conclusion == "success" ? ("SUCCESS", .green) : ("\((r.conclusion ?? "?").uppercased())", .orange))
+        return Text(t).font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(0.5)
+            .padding(.horizontal, 7).padding(.vertical, 3).background(c.opacity(0.18)).foregroundStyle(c).clipShape(Capsule())
+    }
+    private func stepIcon(_ s: WorkflowStep) -> String {
+        s.status != "completed" ? (s.status == "in_progress" ? "circle.dotted" : "circle") : (s.conclusion == "success" ? "checkmark.circle.fill" : (s.conclusion == "skipped" ? "arrow.right.circle" : "xmark.octagon.fill"))
+    }
+    private func stepColor(_ s: WorkflowStep) -> Color {
+        s.status != "completed" ? Theme.subtle : (s.conclusion == "success" ? .green : (s.conclusion == "skipped" ? Theme.subtle : .orange))
+    }
+
+    private func loadLastRun() async {
+        guard config.hasToken else { return }
+        loadingRun = true; runLogTail = nil
+        let client = ActionsClient(owner: ServerConfig.certRepoOwner, repo: ServerConfig.certRepoName, token: config.token)
+        do {
+            guard let (run, jobs) = try await client.latestRun(workflowPath: ServerConfig.certWorkflowPath) else { lastRun = nil; loadingRun = false; return }
+            lastRun = run; lastJobs = jobs
+            // If something failed, fetch that job's log and keep the part around the failure.
+            if let failedJob = jobs.first(where: { $0.steps.contains { $0.conclusion == "failure" } }),
+               let failedStep = failedJob.steps.first(where: { $0.conclusion == "failure" }) {
+                let log = try await client.jobLog(jobID: failedJob.id)
+                runLogTail = Self.extract(log: log, stepName: failedStep.name)
+            }
+        } catch { self.error = error.localizedDescription }
+        loadingRun = false
+    }
+
+    /// Keep the failing step's section (GitHub groups steps with ##[group] markers) and the
+    /// last ~40 lines, stripping timestamps and ANSI so it fits on a phone.
+    private static func extract(log: String, stepName: String) -> String {
+        var lines = log.components(separatedBy: "\n").map { line -> String in
+            var l = line
+            if let r = l.range(of: "^[0-9T:.-]+Z ", options: .regularExpression) { l.removeSubrange(r) }   // ISO timestamp prefix
+            l = l.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+            return l
+        }
+        if let idx = lines.lastIndex(where: { $0.contains("##[group]") && $0.contains(stepName) }) {
+            lines = Array(lines[idx...])
+        }
+        let errors = lines.filter { $0.contains("::error") || $0.contains("error:") || $0.contains("fatal:") || $0.contains("rejected") }
+        let tail = lines.suffix(40)
+        return (errors.isEmpty ? "" : "— errors —\n" + errors.joined(separator: "\n") + "\n\n— tail —\n") + tail.joined(separator: "\n")
     }
 
     private var sourceCard: some View {

@@ -18,6 +18,7 @@ struct SigningSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var certs = CertificateStore.shared
+    @ObservedObject private var ota = OTAInstaller.shared
 
     // identity
     @State private var name: String
@@ -75,6 +76,8 @@ struct SigningSheet: View {
                     if !log.isEmpty { logCard }
                     if let error { Text(error).font(.caption).foregroundStyle(.orange).padding(.horizontal, 4) }
                     if let r = result { signedCard(r) }
+                    if ota.tracing { tracingCard }
+                    if let rep = ota.lastReport { reportCard(rep) }
                     Spacer(minLength: 20)
                 }
                 .padding(16)
@@ -153,10 +156,10 @@ struct SigningSheet: View {
     }
 
     private func certSubtitle(_ c: Certificate) -> String {
-        let info = (try? Data(contentsOf: c.provisionURL)).map(CertificateStore.profileInfo) ?? ProfileInfo()
+        let info = (try? Data(contentsOf: c.provisionURL)).map(CertificateStore.profileInfo)
         var parts: [String] = []
-        if let t = info.team { parts.append("Team \(t)") }
-        if let e = info.expires { parts.append("Expires " + e.formatted(date: .abbreviated, time: .omitted)) }
+        if let t = info??.team { parts.append("Team \(t)") }
+        if let e = info??.expires { parts.append("Expires " + e.formatted(date: .abbreviated, time: .omitted)) }
         return parts.isEmpty ? "On-device certificate" : parts.joined(separator: " · ")
     }
 
@@ -431,6 +434,47 @@ struct SigningSheet: View {
                 HStack { if installing { ProgressView().tint(.black) } else { Image(systemName: "arrow.down.app.fill") }; Text("Install").fontWeight(.bold) }
                     .padding(.horizontal, 16).padding(.vertical, 10).background(Color.green).foregroundStyle(.black).clipShape(Capsule())
             }.disabled(installing)
+        }
+        .padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    // MARK: Install report (what installd actually did)
+
+    private var tracingCard: some View {
+        HStack(spacing: 10) {
+            ProgressView().tint(blue)
+            Text("Watching installd… tap Install in the iOS sheet. Report in ~25s.").font(.caption).foregroundStyle(Theme.subtle)
+        }
+        .padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func reportCard(_ r: OTAInstaller.Report) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Install trace", systemImage: "waveform.path.ecg").font(.headline).foregroundStyle(.white)
+                Spacer()
+                Text(r.delivered ? "IPA DELIVERED" : "NOT DELIVERED")
+                    .font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(0.5)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background((r.delivered ? Color.green : Color.orange).opacity(0.18))
+                    .foregroundStyle(r.delivered ? .green : .orange).clipShape(Capsule())
+            }
+            if r.requests.isEmpty {
+                Text("installd made no requests.").font(.caption).foregroundStyle(.orange)
+            } else {
+                ForEach(r.requests) { e in
+                    HStack(spacing: 8) {
+                        Image(systemName: e.status == 200 ? "checkmark.circle.fill" : "xmark.circle").foregroundStyle(e.status == 200 ? .green : .orange).font(.caption)
+                        Text(e.path).font(.system(size: 11, design: .monospaced)).foregroundStyle(.white).lineLimit(1).truncationMode(.middle)
+                        Spacer()
+                        Text(ByteCountFormatter.string(fromByteCount: e.bytes, countStyle: .file)).font(.caption2.monospaced()).foregroundStyle(Theme.subtle)
+                    }
+                }
+            }
+            Text(r.diagnosis).font(.system(size: 13)).foregroundStyle(.white)
+            if let p = r.profileNote {
+                Text(p).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.subtle)
+            }
         }
         .padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 14))
     }

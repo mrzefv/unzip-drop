@@ -553,6 +553,45 @@ extension ZefvCert {
     }
 }
 
+// MARK: - Install trace (what installd actually fetched)
+
+/// Every request the OTA server answered during an install, so a failure can be
+/// diagnosed: no requests = TLS/DNS; manifest only = IPA fetch failed; both =
+/// installd rejected the package (signing/provisioning/bundle-id).
+nonisolated final class OTATrace: @unchecked Sendable {
+    static let shared = OTATrace()
+    struct Entry: Sendable, Identifiable { let id = UUID(); let at: Date; let path: String; let status: Int; let bytes: Int64 }
+    private var entries: [Entry] = []
+    private let lock = NSLock()
+
+    func reset() { lock.lock(); entries.removeAll(); lock.unlock() }
+    func add(_ path: String, status: Int, bytes: Int64) {
+        lock.lock(); entries.append(Entry(at: Date(), path: path, status: status, bytes: bytes)); lock.unlock()
+    }
+    var all: [Entry] { lock.lock(); defer { lock.unlock() }; return entries }
+
+    var manifestFetched: Bool { all.contains { $0.path.hasSuffix(".plist") && $0.status == 200 } }
+    var ipaFetched: Bool { all.contains { $0.path.hasSuffix(".ipa") && $0.status == 200 } }
+    var ipaBytes: Int64 { all.filter { $0.path.hasSuffix(".ipa") }.map(\.bytes).max() ?? 0 }
+
+    /// Plain-English diagnosis of the last install attempt.
+    func diagnosis(ipaSize: Int64) -> String {
+        if all.isEmpty {
+            return "installd never connected. iOS showed the sheet but couldn't reach https://\(ServerConfig.installHost) — usually TLS: the cert isn't trusted by installd (Certificate Trust Settings toggle off), or the host isn't resolving to 127.0.0.1 from installd's resolver."
+        }
+        if !manifestFetched {
+            return "installd connected but never got the manifest. Check the OTA host matches the cert SANs exactly (see Certificate inspector)."
+        }
+        if !ipaFetched {
+            return "Manifest delivered but the IPA was never downloaded. installd rejected the manifest — bundle-identifier / bundle-version mismatch with the IPA, or the display-image PNG failed."
+        }
+        if ipaBytes < ipaSize {
+            return "IPA download was cut short (\(ByteCountFormatter.string(fromByteCount: ipaBytes, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: ipaSize, countStyle: .file))). The server was torn down too early or the app was backgrounded mid-download."
+        }
+        return "installd downloaded the full IPA and then refused to install it. That is a signing/provisioning problem, not a delivery problem: (1) this device's UDID isn't in the .mobileprovision, (2) the profile or cert is expired/revoked, (3) an app with the same bundle ID is already installed from a different team — delete it first, or change the bundle ID in the sign sheet, or (4) the entitlements don't match the profile (try Strip content › remove extensions, or disable App Groups/iCloud in the profile)."
+    }
+}
+
 // MARK: - Vapor HTTPS server
 
 nonisolated struct InstallAppData: Sendable {
@@ -614,19 +653,29 @@ nonisolated final class LocalOTAServer: Identifiable, @unchecked Sendable {
         ]
         let manifestData = (try? PropertyListSerialization.data(fromPropertyList: manifest, format: .xml, options: .zero)) ?? Data()
 
+        let ipaSize = (try? FileManager.default.attributesOfItem(atPath: package.path)[.size] as? Int64) ?? 0
+        OTATrace.shared.reset()
         app.get("*") { req -> Response in
-            switch req.url.path {
+            let path = req.url.path
+            switch path {
             case "/ping":
+                OTATrace.shared.add(path, status: 200, bytes: 4)
                 return Response(status: .ok, body: .init(string: "pong"))
             case "/\(ident).plist":
+                OTATrace.shared.add(path, status: 200, bytes: Int64(manifestData.count))
                 return Response(status: .ok, version: req.version, headers: ["Content-Type": "text/xml"], body: .init(data: manifestData))
             case "/app57x57.png":
+                OTATrace.shared.add(path, status: 200, bytes: Int64(imgS.count))
                 return Response(status: .ok, version: req.version, headers: ["Content-Type": "image/png"], body: .init(data: imgS))
             case "/app512x512.png":
+                OTATrace.shared.add(path, status: 200, bytes: Int64(imgL.count))
                 return Response(status: .ok, version: req.version, headers: ["Content-Type": "image/png"], body: .init(data: imgL))
             case "/\(ident).ipa":
+                // Range requests are how installd resumes; record whatever it asked for.
+                OTATrace.shared.add(path, status: 200, bytes: ipaSize)
                 return req.fileio.streamFile(at: pkg.path)
             default:
+                OTATrace.shared.add(path, status: 404, bytes: 0)
                 return Response(status: .notFound)
             }
         }

@@ -11,8 +11,20 @@
       "force": false,
       "updatedAt": "2026-09-07T00:20:18Z",
       "lastCheck": {}
+    },
+    {
+      "domain": "zefv.dev",
+      "name": "_acme-challenge.zefv.dev",
+      "type": "TXT",
+      "value": "guAnS5mNU2d8yj42bTP4CssABbJsDfPRb3O9-gf7OeU",
+      "step": 2,
+      "of": 2,
+      "status": "pending",
+      "force": false,
+      "updatedAt": "2026-09-07T00:20:27Z",
+      "lastCheck": {}
     }
   ],
-  "updatedAt": "2026-09-07T00:20:18Z",
+  "updatedAt": "2026-09-07T00:20:27Z",
   "instructions": "Add a TXT record at _acme-challenge.zefv.dev with each pending value (keep both). Gate = the zone's authoritative nameservers; public resolvers may lag. Use Force continue in the app if you're sure the record is saved."
 }

@@ -12,7 +12,19 @@
       "force": true,
       "updatedAt": "2026-09-07T01:35:29Z",
       "lastCheck": {}
+    },
+    {
+      "domain": "sentry.mba",
+      "name": "_acme-challenge.sentry.mba",
+      "type": "TXT",
+      "value": "cJcFqnxeZYTIhPxOhF7gNmaBpje0kRYAWqBlpl-jur0",
+      "step": 2,
+      "of": 2,
+      "status": "pending",
+      "force": false,
+      "updatedAt": "2026-09-07T01:35:59Z",
+      "lastCheck": {}
     }
   ],
-  "updatedAt": "2026-09-07T01:35:29Z"
+  "updatedAt": "2026-09-07T01:35:59Z"
 }

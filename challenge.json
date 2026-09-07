@@ -19,9 +19,9 @@
       "value": "RX0XtxHgr76J2LNIppFykAQwmwEG3eqv8JK04cQ3aV0",
       "step": 2,
       "of": 2,
-      "status": "timeout",
+      "status": "validated",
       "force": false,
-      "updatedAt": "2026-09-07T03:57:17Z",
+      "updatedAt": "2026-09-07T03:57:20Z",
       "lastCheck": {}
     }
   ],

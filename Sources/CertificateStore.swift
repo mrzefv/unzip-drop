@@ -41,6 +41,11 @@ struct SignedEntry: Codable, Identifiable, Equatable, Sendable {
 
     var ipaURL: URL { AppPaths.documents.appendingPathComponent(ipaRelPath) }
     var iconURL: URL? { iconRelPath.map { AppPaths.documents.appendingPathComponent($0) } }
+    /// On-disk size of the signed IPA, formatted (empty if the file is gone).
+    var sizeString: String {
+        guard let n = try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int64, n > 0 else { return "" }
+        return ByteCountFormatter.string(fromByteCount: n, countStyle: .file)
+    }
 }
 
 nonisolated enum AppPaths {
@@ -153,25 +158,6 @@ final class CertificateStore: ObservableObject {
         let team = (plist["TeamName"] as? String) ?? (plist["TeamIdentifier"] as? [String])?.first
         return ProfileInfo(name: plist["Name"] as? String, team: team, expires: plist["ExpirationDate"] as? Date,
                            udids: plist["ProvisionedDevices"] as? [String] ?? [])
-    }
-
-    // MARK: Device ↔ profile check
-
-    /// The device UDID we know about: a saved value, else a cert name that looks like one
-    /// (registration-service certs are named after the UDID, e.g. 00008110-000209003C60E01E).
-    nonisolated static func knownUDID(certName: String? = nil) -> String? {
-        if let saved = UserDefaults.standard.string(forKey: "uzd_device_udid"), !saved.isEmpty { return saved }
-        if let n = certName, n.range(of: #"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}$"#, options: .regularExpression) != nil { return n.uppercased() }
-        return nil
-    }
-    nonisolated static func setKnownUDID(_ u: String) {
-        UserDefaults.standard.set(u.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(), forKey: "uzd_device_udid")
-    }
-
-    /// nil = unknown UDID; true/false = definitive.
-    nonisolated static func profileIncludesDevice(_ info: ProfileInfo, udid: String?) -> Bool? {
-        guard let u = udid?.uppercased(), !u.isEmpty else { return nil }
-        return info.udids.contains { $0.uppercased() == u }
     }
 
     nonisolated static func p12IsValid(_ data: Data, password: String) -> Bool {

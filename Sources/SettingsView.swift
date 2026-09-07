@@ -625,6 +625,9 @@ private struct OTADomainScreen: View {
     @State private var error: String?
     @State private var note: String?
     @State private var probe: ZefvCert.BranchProbe?
+    @State private var readiness: ZefvCert.DNSReadiness?
+    @State private var checkingReady = false
+    @State private var proceedAnyway = false
     @State private var lastRun: WorkflowRun?
     @State private var lastJobs: [WorkflowJob] = []
     @State private var runLogTail: String?
@@ -663,6 +666,7 @@ private struct OTADomainScreen: View {
             if mode == "public" { hostCard
             if let board, !board.records.isEmpty || renewing { challengeCard(board) }
             certCard
+            dnsReadinessCard
             lastRunCard
             sourceCard
             } else {
@@ -1067,6 +1071,50 @@ private struct OTADomainScreen: View {
         }
     }
 
+    /// Pre-issuance DNS check for Public/ACME so you don't dispatch a run that
+    /// can't validate. Verifies the wildcard A record points at loopback and the
+    /// domain's nameservers are reachable (so certbot's TXT will be seen).
+    private var dnsReadinessCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("DNS readiness", systemImage: "checkmark.shield").font(.headline).foregroundStyle(Theme.text)
+                    Spacer()
+                    if checkingReady { ProgressView().tint(Theme.accent) }
+                    Button { Task { await checkReady() } } label: { Image(systemName: "arrow.clockwise").foregroundStyle(Theme.accent) }
+                }
+                if let r = readiness {
+                    readyRow(r.wildcardLoopback == true, "*.\(ServerConfig.certDomain) → 127.0.0.1",
+                             fail: "Add a wildcard A record (Subdomain: *, or just leave label blank per Dynadot) → 127.0.0.1")
+                    readyRow(!r.nameservers.isEmpty, "Nameservers reachable" + (r.nameservers.isEmpty ? "" : ": \(r.nameservers.prefix(2).joined(separator: ", "))"),
+                             fail: "Domain's nameservers didn't answer — check the zone is active at your registrar.")
+                    if !r.ready {
+                        Text("Renew is disabled until these pass, so you don't burn a certbot attempt. Tap Force check to override.")
+                            .font(.caption2).foregroundStyle(.orange)
+                    }
+                } else if !checkingReady {
+                    Text("Not checked yet.").font(.caption).foregroundStyle(Theme.subtle)
+                }
+            }
+        }
+    }
+
+    private func readyRow(_ ok: Bool, _ text: String, fail: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Image(systemName: ok ? "checkmark.circle.fill" : "xmark.octagon.fill").foregroundStyle(ok ? .green : .orange)
+                Text(text).font(.caption).foregroundStyle(ok ? Theme.text : .orange)
+            }
+            if !ok { Text(fail).font(.caption2).foregroundStyle(Theme.subtle) }
+        }
+    }
+
+    private func checkReady() async {
+        checkingReady = true
+        readiness = await ZefvCert.dnsReadiness(domain: ServerConfig.certDomain)
+        checkingReady = false
+    }
+
     /// Pulls the most recent certs.yml run and, if it failed, the failing step's log tail —
     /// so the real reason is on this screen instead of behind a GitHub login.
     private var lastRunCard: some View {
@@ -1290,6 +1338,21 @@ private struct OTADomainScreen: View {
     }
 
     private func renew() async {
+        // Pre-issuance DNS gate (skippable). Avoids dispatching a run that can't validate.
+        if !proceedAnyway {
+            checkingReady = true
+            let r = await ZefvCert.dnsReadiness(domain: ServerConfig.certDomain)
+            readiness = r; checkingReady = false
+            if !r.ready {
+                error = "DNS isn't ready for \(ServerConfig.certDomain): " +
+                    ([r.wildcardLoopback == true ? nil : "wildcard A → 127.0.0.1 missing",
+                      r.nameservers.isEmpty ? "nameservers unreachable" : nil].compactMap { $0 }.joined(separator: "; ")) +
+                    ". Fix at your DNS host, or tap Renew again to force."
+                proceedAnyway = true   // next tap proceeds
+                return
+            }
+        }
+        proceedAnyway = false
         renewing = true; error = nil; note = nil
         let client = ActionsClient(owner: ServerConfig.certRepoOwner, repo: ServerConfig.certRepoName, token: config.token)
         do {

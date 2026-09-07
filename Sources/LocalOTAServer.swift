@@ -537,6 +537,44 @@ extension ZefvCert {
         return p
     }
 
+    /// Authoritative nameservers for a zone (walks up to the registrable domain).
+    static func nameservers(for domain: String) async -> [String] {
+        var zone = domain
+        while zone.contains(".") {
+            if let ns = await dohNS(zone), !ns.isEmpty { return ns }
+            let parts = zone.split(separator: ".")
+            if parts.count <= 2 { break }
+            zone = parts.dropFirst().joined(separator: ".")
+        }
+        return await dohNS(zone) ?? []
+    }
+    private static func dohNS(_ name: String) async -> [String]? {
+        guard let u = URL(string: "https://dns.google/resolve?name=\(name)&type=NS") else { return nil }
+        var req = URLRequest(url: u); req.setValue("application/dns-json", forHTTPHeaderField: "accept"); req.cachePolicy = .reloadIgnoringLocalCacheData
+        guard let (d, _) = try? await URLSession.shared.data(for: req),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let ans = j["Answer"] as? [[String: Any]] else { return nil }
+        let ns = ans.compactMap { ($0["data"] as? String)?.trimmingCharacters(in: CharacterSet(charactersIn: ".")) }
+        return ns.isEmpty ? nil : ns
+    }
+
+    /// Pre-issuance readiness for Public/ACME. Verifies the two DNS facts that
+    /// make or break a certbot run before we dispatch one.
+    struct DNSReadiness: Sendable {
+        var wildcardLoopback: Bool?     // *.domain (via ota-probe) → 127.0.0.1
+        var nameservers: [String]       // zone is delegated & reachable
+        var challengeResolvable: Bool?  // _acme-challenge.domain answers at all (no NXDOMAIN on the name)
+        var ready: Bool { wildcardLoopback == true && !nameservers.isEmpty }
+    }
+    static func dnsReadiness(domain: String) async -> DNSReadiness {
+        async let loop = resolvesToLoopback("ota-probe.\(domain)")
+        async let ns = nameservers(for: domain)
+        // _acme-challenge may legitimately be empty (no TXT yet) but the NAME's zone
+        // must be resolvable; reuse the NS presence as the signal.
+        let r = DNSReadiness(wildcardLoopback: await loop, nameservers: await ns, challengeResolvable: nil)
+        return r
+    }
+
     /// Live TXT lookup over DNS-over-HTTPS (same resolvers the hook polls).
     static func txtRecords(_ name: String) async -> [String] {
         var out = Set<String>()

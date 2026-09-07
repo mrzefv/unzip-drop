@@ -72,7 +72,7 @@ struct SignedView: View {
             icon(e.iconURL.flatMap { try? Data(contentsOf: $0) })
             VStack(alignment: .leading, spacing: 2) {
                 Text(e.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
-                Text("\(e.bundleID) · v\(e.version)").font(.caption.monospaced()).foregroundStyle(Theme.subtle).lineLimit(1)
+                Text("\(e.bundleID) · v\(e.version)\(e.sizeString.isEmpty ? "" : " · \(e.sizeString)")").font(.caption.monospaced()).foregroundStyle(Theme.subtle).lineLimit(1)
                 Text("\(e.certName) · \(e.signedAt.formatted(date: .abbreviated, time: .shortened))").font(.caption2).foregroundStyle(Theme.subtle)
             }
             Spacer()

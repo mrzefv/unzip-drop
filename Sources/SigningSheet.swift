@@ -39,6 +39,10 @@ struct SigningSheet: View {
     @State private var o = ExtraToggles()
     @State private var expanded: Set<String> = ["general"]
 
+    // binary analysis
+    @State private var macho: MachOReport?
+    @State private var machoError: String?
+
     // signing
     @State private var signing = false
     @State private var log: [String] = []
@@ -68,6 +72,7 @@ struct SigningSheet: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 22) {
                     signingMethod
+                    binaryCard
                     appIcon
                     identity
                     buildOptions
@@ -85,7 +90,10 @@ struct SigningSheet: View {
             .safeAreaInset(edge: .bottom, spacing: 0) { signBar.background(BarBlur()) }
         }
         .background(Color.black.ignoresSafeArea())
-        .task { machoDylibs = await currentDylibs() }
+        .task {
+            machoDylibs = await currentDylibs()
+            await analyzeBinary()
+        }
         .sheet(isPresented: $showDylibPicker) {
             DocPicker(types: [UTType(filenameExtension: "dylib") ?? .item, UTType(filenameExtension: "framework") ?? .item, UTType(filenameExtension: "deb") ?? .item]) { urls in
                 for u in urls { dylibs.append(DylibItem(url: u)) }
@@ -127,6 +135,96 @@ struct SigningSheet: View {
         .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
     }
 
+    // MARK: Binary analysis (hand-rolled Mach-O reader)
+
+    private var binaryCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("BINARY")
+            if let r = macho {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: r.encrypted ? "lock.fill" : "lock.open.fill").foregroundStyle(r.encrypted ? .red : .green)
+                        Text(r.encrypted ? "FairPlay ENCRYPTED — will not run after re-sign" : "Decrypted — safe to re-sign")
+                            .font(.system(size: 15, weight: .bold)).foregroundStyle(r.encrypted ? .red : .green)
+                        Spacer()
+                        Text(r.isFat ? "FAT" : "THIN").font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(0.5)
+                            .padding(.horizontal, 6).padding(.vertical, 3).background(Color(white: 0.16)).foregroundStyle(Theme.subtle).clipShape(Capsule())
+                    }
+                    ForEach(r.slices) { sl in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                Text(sl.arch).font(.system(size: 13, weight: .bold, design: .monospaced)).foregroundStyle(blue)
+                                Text(sl.fileType).font(.caption).foregroundStyle(Theme.subtle)
+                                if sl.pie { tagSmall("PIE") }
+                                if sl.hasCodeSignature { tagSmall("SIGNED \(ByteCountFormatter.string(fromByteCount: Int64(sl.codeSignatureSize), countStyle: .file))") }
+                                Spacer()
+                            }
+                            kvSmall("Min OS", (sl.platform ?? "") + " " + (sl.minOS ?? "—") + (sl.sdk.map { " · SDK \($0)" } ?? ""))
+                            kvSmall("Encryption", sl.encrypted ? "cryptid=\(sl.cryptID) (ENCRYPTED)" : "cryptid=0 (clear)")
+                            kvSmall("Links", "\(sl.dylibs.count) dylibs · \(sl.weakDylibs.count) weak · \(sl.rpaths.count) rpaths")
+                            if !sl.dylibs.isEmpty {
+                                DisclosureGroup {
+                                    ForEach(sl.dylibs + sl.weakDylibs.map { "(weak) " + $0 }, id: \.self) { d in
+                                        Text(d).font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
+                                    }
+                                } label: { Text("Show load commands").font(.caption).foregroundStyle(blue) }
+                                .tint(blue)
+                            }
+                        }
+                        .padding(10).background(Color(white: 0.06)).clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    ForEach(r.warnings, id: \.self) { w in
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                            Text(w).font(.caption).foregroundStyle(.orange)
+                        }
+                    }
+                }
+                .padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(r.encrypted ? Color.red.opacity(0.6) : Color.clear, lineWidth: 1.5))
+            } else if let e = machoError {
+                Text(e).font(.caption).foregroundStyle(.orange).padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 16))
+            } else {
+                HStack(spacing: 10) { ProgressView().tint(blue); Text("Reading Mach-O headers…").font(.caption).foregroundStyle(Theme.subtle) }
+                    .padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 16))
+            }
+        }
+    }
+
+    private func tagSmall(_ s: String) -> some View {
+        Text(s).font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(0.5)
+            .padding(.horizontal, 6).padding(.vertical, 3).background(blue.opacity(0.15)).foregroundStyle(blue).clipShape(Capsule())
+    }
+    private func kvSmall(_ k: String, _ v: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(k).font(.caption2).foregroundStyle(Theme.subtle).frame(width: 70, alignment: .leading)
+            Text(v).font(.system(size: 11, design: .monospaced)).foregroundStyle(.white)
+        }
+    }
+
+    private func analyzeBinary() async {
+        let url = ipaURL
+        // Return only Sendable values across the detached boundary (Result<_, Error>
+        // is not Sendable under strict concurrency).
+        let outcome: (report: MachOReport?, error: String?) = await Task.detached {
+            let fm = FileManager.default
+            let work = fm.temporaryDirectory.appendingPathComponent("macho-" + UUID().uuidString, isDirectory: true)
+            defer { try? fm.removeItem(at: work) }
+            do {
+                try fm.createDirectory(at: work, withIntermediateDirectories: true)
+                try fm.unzipItem(at: url, to: work)
+                let payload = work.appendingPathComponent("Payload", isDirectory: true)
+                guard let app = try fm.contentsOfDirectory(at: payload, includingPropertiesForKeys: nil).first(where: { $0.pathExtension == "app" }) else {
+                    return (nil, "No .app inside the IPA.")
+                }
+                return (try MachOInspector.inspect(appBundle: app), nil)
+            } catch {
+                return (nil, "Couldn't analyze binary: \(error.localizedDescription)")
+            }
+        }.value
+        if let r = outcome.report { macho = r } else { machoError = outcome.error }
+    }
+
     // MARK: Signing method
 
     private var signingMethod: some View {
@@ -156,10 +254,10 @@ struct SigningSheet: View {
     }
 
     private func certSubtitle(_ c: Certificate) -> String {
-        let info = (try? Data(contentsOf: c.provisionURL)).map(CertificateStore.profileInfo)
+        let info = (try? Data(contentsOf: c.provisionURL)).map(CertificateStore.profileInfo) ?? ProfileInfo()
         var parts: [String] = []
-        if let t = info??.team { parts.append("Team \(t)") }
-        if let e = info??.expires { parts.append("Expires " + e.formatted(date: .abbreviated, time: .omitted)) }
+        if let t = info.team { parts.append("Team \(t)") }
+        if let e = info.expires { parts.append("Expires " + e.formatted(date: .abbreviated, time: .omitted)) }
         return parts.isEmpty ? "On-device certificate" : parts.joined(separator: " · ")
     }
 
@@ -488,10 +586,10 @@ struct SigningSheet: View {
                 Text(signing ? "Signing…" : "Sign IPA").font(.system(size: 18, weight: .bold))
             }
             .frame(maxWidth: .infinity).padding(.vertical, 16)
-            .background(certs.active == nil ? Theme.subtle : blue).foregroundStyle(.white)
+            .background(certs.active == nil || macho?.encrypted == true ? Theme.subtle : blue).foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
-        .disabled(signing || certs.active == nil)
+        .disabled(signing || certs.active == nil || macho?.encrypted == true)
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
     }
 
@@ -551,6 +649,11 @@ struct SigningSheet: View {
     }
 
     private func sign() async {
+        if let r = macho, r.encrypted {
+            error = "This IPA is still FairPlay-encrypted (cryptid ≠ 0). Signing it will produce an app that crashes at launch. Get a decrypted IPA first."
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            return
+        }
         guard let material = try? certs.activeMaterial() else { error = "No active certificate."; return }
         signing = true; error = nil; result = nil
         log = [">>> Signing \(name) with \(material.name)"]

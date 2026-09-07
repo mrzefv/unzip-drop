@@ -54,11 +54,12 @@ struct RootView: View {
         // etc.) can cover it because this overlay is applied last. ───
         .overlay(
             GeometryReader { proxy in
-                // TabBar is 50pt content + 8pt top padding = 58pt tall, plus
-                // it lives INSIDE the bottom safe area. Rails must stop right
-                // at the TabBar's top edge (which has its own 2px accent line).
+                // AccentTopBar is: 10pt padding + ~28pt title + 10pt padding + 2pt border ≈ 50pt.
+                // With a subtitle add ~14pt. Use 66 so the rails clear both.
+                // TabBar is 50pt content + 8pt top padding = 58pt, plus bottom safe area.
                 AccentFrame(
                     color: theme.accent,
+                    topInset: proxy.safeAreaInsets.top + 66,
                     bottomInset: 58 + proxy.safeAreaInsets.bottom
                 )
                 .allowsHitTesting(false)
@@ -114,32 +115,38 @@ private struct TabBar: View {
 }
 
 // MARK: - Accent frame around the app content
-// Two 2px vertical rails on the left and right edges of the screen. The rails
-// span from the very top of the display down to the top of the TabBar (they
-// stop exactly at the TabBar's 2px accent top border, forming a continuous
-// closed rectangle around the tab content). Per-tab headers provide their
-// own accent bottom borders (see AccentTopBar in ThemeKit).
+// Two 2px vertical rails on the left and right edges of the tab content
+// area. The rails start exactly at the AccentTopBar's bottom border (so they
+// don't run up through the status bar / notch / topbar) and end at the
+// TabBar's 2px accent top border — forming a closed accent-tinted rectangle
+// that hugs the actual scrolling content on every tab.
 
 private struct AccentFrame: View {
     var color: Color
-    /// Height the rails stop above (matches the TabBar height including its
-    /// bottom safe area). The rails end at the TabBar's top accent line so
-    /// the frame reads as a single, closed rectangle.
+    /// Distance from the top of the screen where the rails BEGIN. Matches the
+    /// safe-area top inset (status bar / notch / Dynamic Island) plus the
+    /// AccentTopBar height, so the rails visually connect to the bottom edge
+    /// of the topbar's 2px accent bottom border.
+    var topInset: CGFloat
+    /// Distance from the bottom of the screen where the rails END. Matches
+    /// the TabBar height (58pt) plus the bottom safe-area inset, so the
+    /// rails visually connect to the TabBar's 2px accent top border.
     var bottomInset: CGFloat
 
     var body: some View {
         GeometryReader { geo in
-            ZStack(alignment: .top) {
+            let railHeight = max(0, geo.size.height - topInset - bottomInset)
+            ZStack(alignment: .topLeading) {
                 // Left rail
                 Rectangle().fill(color)
-                    .frame(width: 2, height: geo.size.height - bottomInset)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(width: 2, height: railHeight)
+                    .offset(x: 0, y: topInset)
                 // Right rail
                 Rectangle().fill(color)
-                    .frame(width: 2, height: geo.size.height - bottomInset)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .frame(width: 2, height: railHeight)
+                    .offset(x: geo.size.width - 2, y: topInset)
             }
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
         .ignoresSafeArea()
     }

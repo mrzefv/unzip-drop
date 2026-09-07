@@ -522,6 +522,20 @@ struct ConfettiField: View {
 // bottom border that connects to the AccentFrame's side rails, forming a
 // closed accent-tinted "window" around the tab content.
 
+/// Accent-tinted frosted background: system blur (like the TabBar) with an
+/// accent-colored wash on top so headers read as tinted glass, not flat fill.
+struct AccentBarBlur: View {
+    @ObservedObject private var theme = ThemeManager.shared
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial)
+            Color(white: 0.06).opacity(0.55)
+            theme.accent.opacity(0.28)
+        }
+        .ignoresSafeArea()
+    }
+}
+
 struct AccentTopBar<Trailing: View>: View {
     var title: String
     var subtitle: String? = nil
@@ -546,7 +560,9 @@ struct AccentTopBar<Trailing: View>: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(theme.accent.opacity(0.06))
+            // Frosted material (like the TabBar) with an accent-colored tint
+            // pushed over it — echoes the bottom TabBar's look but colored.
+            .background(AccentBarBlur())
             // 2px accent bottom border — meets the AccentFrame's left/right rails
             Rectangle().fill(theme.accent).frame(height: 2)
         }

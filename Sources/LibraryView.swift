@@ -33,7 +33,11 @@ struct LibraryView: View {
     @State private var selecting = false
     @State private var selected: Set<String> = []
 
-    private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
+    // Direct-to-SigningSheet state (bypasses SignView)
+    @State private var pendingSignURL: URL?
+    @State private var pendingSignMeta: IPAMeta?
+    @State private var showSigningSheet = false
+
     private var inbox: URL { AppPaths.dir("inbox") }
 
     private var filtered: [LibraryItem] {
@@ -89,7 +93,7 @@ struct LibraryView: View {
                         sheetItem = nil; Task { await install(it) }
                     },
                     .init(title: "Sign", icon: "checkmark.seal", role: .normal) {
-                        sheetItem = nil; SignQueue.shared.enqueue(it.url)
+                        sheetItem = nil; presentSigningSheet(for: it.url)
                     },
                     .init(title: "Delete", icon: "trash", role: .destructive) {
                         sheetItem = nil; delete(it)
@@ -99,6 +103,33 @@ struct LibraryView: View {
             .presentationDetents([.height(340)])
             .presentationDragIndicator(.visible)
             .preferredColorScheme(.dark)
+        }
+        .fullScreenCover(isPresented: $showSigningSheet) {
+            if let u = pendingSignURL, let m = pendingSignMeta {
+                SigningSheet(ipaURL: u, meta: m) { entry in
+                    SigningHistory.shared.record(
+                        bundleID: entry.bundleID,
+                        certName: entry.certName ?? "certificate"
+                    )
+                }
+                .preferredColorScheme(.dark)
+            }
+        }
+    }
+
+    /// Read IPA meta then present SigningSheet directly (bypass SignView).
+    private func presentSigningSheet(for url: URL) {
+        Task {
+            do {
+                let m = try await Task.detached { try IPAMeta.read(url) }.value
+                await MainActor.run {
+                    pendingSignURL = url
+                    pendingSignMeta = m
+                    showSigningSheet = true
+                }
+            } catch {
+                await MainActor.run { self.error = "Couldn't read IPA: \(error.localizedDescription)" }
+            }
         }
     }
 
@@ -138,7 +169,7 @@ struct LibraryView: View {
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
-            .background(Theme.accent.opacity(0.06))
+            .background(AccentBarBlur())
             Rectangle().fill(Theme.accent).frame(height: 2)
         }
     }

@@ -387,7 +387,7 @@ private struct SourceDetailScreen: View {
         .task { await load() }
         .sheet(item: $openGroup) { g in
             AppDetailSheet(source: current, group: g)
-                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(0)   // flat top, matches the AccentTopBar look
                 .preferredColorScheme(.dark)
         }
     }
@@ -418,7 +418,7 @@ private struct SourceDetailScreen: View {
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(Theme.accent.opacity(0.06))
+            .background(AccentBarBlur())
             // 2px accent bottom border — bar sits just under the OS status bar
             Rectangle().fill(Theme.accent).frame(height: 2)
         }
@@ -436,7 +436,7 @@ private struct SourceDetailScreen: View {
                 .foregroundStyle(Theme.accent).lineLimit(1)
             }
             .padding(.horizontal, 16).padding(.vertical, 8)
-            .background(Theme.accent.opacity(0.06))
+            .background(AccentBarBlur())
             // 2px accent bottom border — matches the AccentTopBar style, meets the frame rails
             Rectangle().fill(Theme.accent).frame(height: 2)
         }
@@ -661,11 +661,16 @@ struct AppDetailSheet: View {
     @State private var onDevice = false
     @State private var error: String?
 
-    private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
+    // Direct-to-SigningSheet state (bypasses SignView)
+    @State private var pendingSignURL: URL?
+    @State private var pendingSignMeta: IPAMeta?
+    @State private var showSigningSheet = false
+
+    private var blue: Color { Theme.accent }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Title bar
+            // Title bar — accent-tinted background, 2px accent bottom border
             ZStack {
                 HStack(spacing: 8) {
                     SourceIcon(url: source.iconURL, side: 22, fallback: source.name)
@@ -680,8 +685,9 @@ struct AppDetailSheet: View {
                 }
             }
             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 10)
-            .background(BarBlur())
-            .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
+            .frame(maxWidth: .infinity)
+            .background(AccentBarBlur())
+            .overlay(Rectangle().fill(Theme.accent).frame(height: 2), alignment: .bottom)
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
@@ -719,6 +725,19 @@ struct AppDetailSheet: View {
         .background(Color.clear.ignoresSafeArea())
         .onAppear { selectedID = group.latest.id; refreshDevice() }
         .onChange(of: selectedID) { _ in refreshDevice() }
+        .fullScreenCover(isPresented: $showSigningSheet) {
+            if let u = pendingSignURL, let m = pendingSignMeta {
+                SigningSheet(ipaURL: u, meta: m) { entry in
+                    // Persist signing history so a later re-visit can show
+                    // "previously signed with X" even after the app is deleted.
+                    SigningHistory.shared.record(
+                        bundleID: entry.bundleID,
+                        certName: entry.certName ?? "certificate"
+                    )
+                }
+                .preferredColorScheme(.dark)
+            }
+        }
     }
 
     private func refreshDevice() {
@@ -726,36 +745,65 @@ struct AppDetailSheet: View {
     }
 
     private var infoCard: some View {
-        HStack(alignment: .top, spacing: 14) {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top, spacing: 16) {
-                    SourceIcon(url: app.iconURL, side: 64, fallback: app.name)
-                        .shadow(color: blue.opacity(0.55), radius: 12)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(app.name).font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text).lineLimit(2).minimumScaleFactor(0.8)
-                        Text(app.subtitle.isEmpty ? (source.url.host ?? "") : app.subtitle)
-                            .font(.system(size: 12, design: .monospaced)).foregroundStyle(blue).lineLimit(1)
-                        Text(app.bundle).font(.system(size: 10, design: .monospaced)).foregroundStyle(blue.opacity(0.8)).lineLimit(1).truncationMode(.middle)
-                    }
+        VStack(alignment: .leading, spacing: 16) {
+            // Top: icon + name/subtitle/bundle — spans full width
+            HStack(alignment: .top, spacing: 16) {
+                SourceIcon(url: app.iconURL, side: 64, fallback: app.name)
+                    .shadow(color: Theme.accent.opacity(0.55), radius: 12)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(app.name).font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text).lineLimit(2).minimumScaleFactor(0.8)
+                    Text(app.subtitle.isEmpty ? (source.url.host ?? "") : app.subtitle)
+                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.accent).lineLimit(1)
+                    Text(app.bundle).font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.accent.opacity(0.8)).lineLimit(1).truncationMode(.middle)
                 }
+                Spacer(minLength: 0)
+            }
+            // Bottom row: description card LEFT (grows to match stats column), stats column RIGHT
+            HStack(alignment: .top, spacing: 14) {
+                // Description card — fills leading side, stretches to match stats height
                 VStack(alignment: .leading, spacing: 10) {
-                    Text((source.author ?? "MRzefv").uppercased() + " EDITION").font(.system(size: 12, weight: .bold)).kerning(1).foregroundStyle(blue)
+                    Text((source.author ?? "MRzefv").uppercased() + " EDITION")
+                        .font(.system(size: 12, weight: .bold)).kerning(1).foregroundStyle(Theme.accent)
                     HStack(alignment: .top, spacing: 6) {
-                        Text("•").font(.system(size: 13)).foregroundStyle(blue)
-                        Text(app.description.isEmpty ? "No description." : app.description).font(.system(size: 13)).foregroundStyle(Theme.text)
+                        Text("•").font(.system(size: 13)).foregroundStyle(Theme.accent)
+                        Text(app.description.isEmpty ? "No description." : app.description)
+                            .font(.system(size: 13)).foregroundStyle(Theme.text)
                     }
+                    // History pill — shown if we've previously signed this bundle on this device
+                    if let history = SigningHistory.shared.entry(for: app.bundle) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.system(size: 10)).foregroundStyle(Theme.accent)
+                            Text("Previously signed w/ \(history.certName)")
+                                .font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.subtle)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                        }
+                        if history.rootCAInstalled {
+                            HStack(spacing: 6) {
+                                Image(systemName: "lock.shield.fill")
+                                    .font(.system(size: 10)).foregroundStyle(Theme.accent)
+                                Text("Root CA still trusted on this device")
+                                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.subtle)
+                                    .lineLimit(1).minimumScaleFactor(0.7)
+                            }
+                        }
+                    }
+                    Spacer(minLength: 0)   // pushes visible content up so card's bottom stretches
                 }
-                .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(Color.white.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 14))
+                // Stats stack — RIGHT column
+                VStack(spacing: 6) {
+                    stat("v\(app.version)", "VERSION")
+                    stat(app.sizeMB, "SIZE")
+                    stat(updatedText, "UPDATED")
+                    stat(app.downloads, "DOWNLOADS")
+                    stat(signed.entries.filter { $0.bundleID == app.bundle }.count.description, "SIGNED")
+                }
+                .frame(width: 74)
+                .fixedSize(horizontal: false, vertical: true)   // stats define the row height
             }
-            VStack(spacing: 6) {
-                stat("v\(app.version)", "VERSION")
-                stat(app.sizeMB, "SIZE")
-                stat(updatedText, "UPDATED")
-                stat(app.downloads, "DOWNLOADS")
-                stat(signed.entries.filter { $0.bundleID == app.bundle }.count.description, "SIGNED")
-            }
-            .frame(width: 74)
         }
         .padding(10)
         .background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -796,7 +844,7 @@ struct AppDetailSheet: View {
                 if sel { Image(systemName: "checkmark").font(.system(size: 16, weight: .bold)).foregroundStyle(blue) }
             }
             .padding(12)
-            .background(sel ? Color(red: 0.06, green: 0.09, blue: 0.16) : Color(white: 0.09))
+            .background(sel ? Theme.accent.opacity(0.12) : Color(white: 0.09))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(sel ? blue.opacity(0.35) : Theme.stroke, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
@@ -843,13 +891,14 @@ struct AppDetailSheet: View {
             .disabled(downloading || app.downloadURL == nil)
             Spacer()
             VStack(spacing: 2) {
-                Text("MRZefv").font(.system(size: 14, weight: .bold)).foregroundStyle(.orange).lineLimit(1)
+                Text("MRZefv").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.accent).lineLimit(1)
                 Text("Powered by \((source.url.host ?? source.name).uppercased())").font(.system(size: 9, weight: .semibold)).foregroundStyle(blue).lineLimit(1).minimumScaleFactor(0.7)
             }
             .frame(maxWidth: .infinity)
             Spacer()
             Button {
-                dismiss(); SignQueue.shared.enqueue(IPAInbox.url(for: app))
+                // Skip the SignView intermediate — go straight to SigningSheet.
+                openSigningSheet()
             } label: {
                 VStack(spacing: 4) {
                     Image(systemName: "signature").font(.system(size: 26))
@@ -861,6 +910,25 @@ struct AppDetailSheet: View {
         }
         .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
         .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .top)
+    }
+
+    /// Read the IPA meta and present SigningSheet without going through SignView.
+    private func openSigningSheet() {
+        let url = IPAInbox.url(for: app)
+        Task {
+            do {
+                let m = try await Task.detached { try IPAMeta.read(url) }.value
+                await MainActor.run {
+                    pendingSignURL = url
+                    pendingSignMeta = m
+                    showSigningSheet = true
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = "Couldn't read IPA: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
     private func download() async {

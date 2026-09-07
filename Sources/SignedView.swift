@@ -17,6 +17,11 @@ struct SignedView: View {
     @State private var selecting = false
     @State private var selected: Set<String> = []
 
+    // Direct-to-SigningSheet state (bypasses SignView)
+    @State private var pendingSignURL: URL?
+    @State private var pendingSignMeta: IPAMeta?
+    @State private var showSigningSheet = false
+
     private var entries: [SignedEntry] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         return q.isEmpty ? signed.entries : signed.entries.filter { $0.name.lowercased().contains(q) || $0.bundleID.lowercased().contains(q) }
@@ -56,7 +61,7 @@ struct SignedView: View {
                         }
                     }
                     .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(Theme.accent.opacity(0.06))
+                    .background(AccentBarBlur())
                     Rectangle().fill(Theme.accent).frame(height: 2)
                 }
 
@@ -95,7 +100,7 @@ struct SignedView: View {
                         sheetEntry = nil; Task { await install(e) }
                     },
                     .init(title: "Re-Sign App", icon: "checkmark.seal", role: .normal) {
-                        sheetEntry = nil; SignQueue.shared.enqueue(e.ipaURL)
+                        sheetEntry = nil; presentSigningSheet(for: e.ipaURL)
                     },
                     .init(title: "Delete", icon: "trash", role: .destructive) {
                         sheetEntry = nil; signed.delete(e)
@@ -105,6 +110,33 @@ struct SignedView: View {
             .presentationDetents([.height(340)])
             .presentationDragIndicator(.visible)
             .preferredColorScheme(.dark)
+        }
+        .fullScreenCover(isPresented: $showSigningSheet) {
+            if let u = pendingSignURL, let m = pendingSignMeta {
+                SigningSheet(ipaURL: u, meta: m) { entry in
+                    SigningHistory.shared.record(
+                        bundleID: entry.bundleID,
+                        certName: entry.certName ?? "certificate"
+                    )
+                }
+                .preferredColorScheme(.dark)
+            }
+        }
+    }
+
+    /// Read IPA meta then present SigningSheet directly (bypass SignView).
+    private func presentSigningSheet(for url: URL) {
+        Task {
+            do {
+                let m = try await Task.detached { try IPAMeta.read(url) }.value
+                await MainActor.run {
+                    pendingSignURL = url
+                    pendingSignMeta = m
+                    showSigningSheet = true
+                }
+            } catch {
+                await MainActor.run { self.error = "Couldn't read IPA: \(error.localizedDescription)" }
+            }
         }
     }
 
@@ -182,7 +214,7 @@ struct AppActionSheet: View {
     let icon: Data?
     let actions: [Action]
 
-    private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
+    private var blue: Color { Theme.accent }
 
     var body: some View {
         VStack(spacing: 0) {

@@ -13,13 +13,13 @@ import CryptoKit
 private enum Screen: Identifiable, Hashable {
     case about, repo, token
     case dylibTemplate, ipaTemplate
-    case certificates, otaDomain
+    case certificates, otaDomain, certInspector, transparency
     case tutorials
     var id: String {
         switch self {
         case .about: return "about"; case .repo: return "repo"; case .token: return "token"
         case .dylibTemplate: return "tpl-dylib"; case .ipaTemplate: return "tpl-ipa"
-        case .certificates: return "certs"; case .otaDomain: return "ota"
+        case .certificates: return "certs"; case .otaDomain: return "ota"; case .certInspector: return "inspect"; case .transparency: return "transparency"
         case .tutorials: return "tutorials"
         }
     }
@@ -71,6 +71,13 @@ struct SettingsView: View {
                                         subtitle: "\(ServerConfig.installHost) · certbot via Actions") { screen = .otaDomain }
                         }
 
+                        SettingsSection("Transparency") {
+                            SettingsRow(icon: "doc.text.magnifyingglass", title: "Certificate inspector",
+                                        subtitle: "Every cert the app can serve, field by field") { screen = .certInspector }
+                            SettingsRow(icon: "eye.trianglebadge.exclamationmark", title: "What leaves this device",
+                                        subtitle: "Endpoints, what's sent, and live self-checks") { screen = .transparency }
+                        }
+
                         SettingsSection("Templates") {
                             SettingsRow(icon: "puzzlepiece.extension.fill", title: "Dylib project",
                                         subtitle: "Theos · runtime swizzle · Actions build") { screen = .dylibTemplate }
@@ -107,6 +114,8 @@ struct SettingsView: View {
                 case .token: TokenScreen()
                 case .certificates:  CertificatesScreen()
                 case .otaDomain:     OTADomainScreen()
+                case .certInspector: CertInspectorScreen()
+                case .transparency:  TransparencyScreen()
                 case .dylibTemplate: DylibTemplateScreen()
                 case .ipaTemplate:   IPATemplateScreen()
                 case .tutorials: TutorialsListScreen()
@@ -1397,6 +1406,159 @@ private struct ProfileInspector: View {
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle(".mobileconfig").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+        }
+    }
+}
+
+// MARK: - Certificate inspector (public vs local, same fields)
+
+private struct CertInspectorScreen: View {
+    @State private var publicChain: [CertFacts] = []
+    @State private var localLeaf: [CertFacts] = []
+    @State private var localRoot: [CertFacts] = []
+
+    var body: some View {
+        DetailScreen(title: "Certificate inspector") {
+            Card {
+                Text("Same parser, same fields, for every certificate this app can present to iOS. Compare what a public CA issued against what this phone issued. Active mode: \(ServerConfig.certMode == "local" ? "Fully local" : "Public (ACME)").")
+                    .font(.caption).foregroundStyle(Theme.subtle)
+            }
+            chainSection("PUBLIC (ACME) CERT", publicChain, empty: "No public cert loaded.")
+            chainSection("LOCAL CA — LEAF", localLeaf, empty: "No local leaf issued.")
+            chainSection("LOCAL CA — ROOT", localRoot, empty: "No local root created.")
+        }
+        .onAppear(perform: load)
+    }
+
+    private func load() {
+        if let u = ZefvCert.crtURL { publicChain = CertInspector.inspect(fileURL: u) }
+        localLeaf = CertInspector.inspect(fileURL: LocalCAManager.leafCertURL)
+        localRoot = CertInspector.inspect(fileURL: LocalCAManager.rootCertURL)
+    }
+
+    @ViewBuilder
+    private func chainSection(_ title: String, _ chain: [CertFacts], empty: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 12, weight: .semibold)).kerning(1.1).foregroundStyle(Theme.subtle)
+            if chain.isEmpty {
+                Card { Text(empty).font(.caption).foregroundStyle(Theme.subtle) }
+            } else {
+                ForEach(chain) { certCard($0) }
+            }
+        }
+    }
+
+    private func certCard(_ c: CertFacts) -> some View {
+        let days = c.daysLeft ?? -1
+        let color: Color = days < 0 ? .red : (days < 21 ? .orange : .green)
+        return Card {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(c.label).font(.headline).foregroundStyle(Theme.text)
+                    if c.isCA { tag("CA", Theme.accent) }
+                    if c.selfSigned { tag("SELF-SIGNED", .orange) }
+                    Spacer()
+                    tag(days < 0 ? "EXPIRED" : "\(days)D LEFT", color)
+                }
+                row("Subject", c.subjectCN + (c.subjectO.isEmpty ? "" : " · \(c.subjectO)"))
+                row("Issuer", c.issuerCN + (c.issuerO.isEmpty ? "" : " · \(c.issuerO)"))
+                row("Covers", c.sans.isEmpty ? "— (no SANs)" : c.sans.joined(separator: ", "))
+                row("Valid", "\(fmt(c.notBefore)) → \(fmt(c.notAfter))")
+                row("Key", c.keyType)
+                row("Serial", c.serialHex)
+                row("SHA-256", c.sha256)
+            }
+        }
+    }
+
+    private func fmt(_ d: Date?) -> String { d?.formatted(date: .abbreviated, time: .omitted) ?? "—" }
+    private func tag(_ s: String, _ c: Color) -> some View {
+        Text(s).font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(0.5)
+            .padding(.horizontal, 6).padding(.vertical, 3).background(c.opacity(0.18)).foregroundStyle(c).clipShape(Capsule())
+    }
+    private func row(_ k: String, _ v: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(k).font(.caption).foregroundStyle(Theme.subtle)
+            Text(v).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.text).textSelection(.enabled)
+        }
+    }
+}
+
+// MARK: - What leaves this device
+
+private struct TransparencyScreen: View {
+    @State private var checks: [TransparencyReport.Check] = []
+    @State private var running = false
+
+    var body: some View {
+        DetailScreen(title: "What leaves this device") {
+            Card {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Self-check", systemImage: "checkmark.shield").font(.headline).foregroundStyle(Theme.text)
+                    Text("The app verifies its own privacy claims at runtime instead of asserting them. Run it any time.")
+                        .font(.caption).foregroundStyle(Theme.subtle)
+                    ForEach(checks) { c in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: c.pass ? "checkmark.circle.fill" : "xmark.octagon.fill").foregroundStyle(c.pass ? .green : .red)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(c.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                                Text(c.detail).font(.caption2).foregroundStyle(Theme.subtle)
+                            }
+                        }
+                    }
+                    Button { run() } label: {
+                        HStack { if running { ProgressView().tint(.black) } else { Image(systemName: "arrow.clockwise") }; Text("Run self-check").fontWeight(.semibold); Spacer() }
+                            .padding(.vertical, 12).padding(.horizontal, 14)
+                            .background(Theme.accent).foregroundStyle(.black).clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .disabled(running)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("NEVER SENT ANYWHERE").font(.system(size: 12, weight: .semibold)).kerning(1.1).foregroundStyle(Theme.subtle)
+                Card {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(TransparencyReport.neverSent, id: \.self) { line in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "lock.fill").font(.caption).foregroundStyle(.green)
+                                Text(line).font(.caption).foregroundStyle(Theme.text)
+                            }
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("EVERY ENDPOINT THIS APP CAN CONTACT").font(.system(size: 12, weight: .semibold)).kerning(1.1).foregroundStyle(Theme.subtle)
+                ForEach(TransparencyReport.endpoints) { e in
+                    Card {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(e.host).font(.system(size: 13, weight: .bold, design: .monospaced)).foregroundStyle(Theme.accent)
+                            Text(e.purpose).font(.subheadline).foregroundStyle(Theme.text)
+                            kv("Sends", e.sends)
+                            kv("When", e.when)
+                        }
+                    }
+                }
+                Text("This list is declared in source (TransparencyReport.endpoints) and shipped with the app — if the app talked to anything not on it, that would be a bug you could diff.")
+                    .font(.caption2).foregroundStyle(Theme.subtle)
+            }
+        }
+        .onAppear(perform: run)
+    }
+
+    private func run() {
+        running = true
+        let r = TransparencyReport.selfCheck()
+        checks = r
+        running = false
+    }
+
+    private func kv(_ k: String, _ v: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(k).font(.caption2.weight(.semibold)).foregroundStyle(Theme.subtle)
+            Text(v).font(.caption).foregroundStyle(Theme.text)
         }
     }
 }

@@ -19,12 +19,12 @@
       "value": "RX0XtxHgr76J2LNIppFykAQwmwEG3eqv8JK04cQ3aV0",
       "step": 2,
       "of": 2,
-      "status": "pending",
+      "status": "timeout",
       "force": false,
-      "updatedAt": "2026-09-07T03:56:47Z",
+      "updatedAt": "2026-09-07T03:57:17Z",
       "lastCheck": {}
     }
   ],
-  "updatedAt": "2026-09-07T03:56:47Z",
+  "updatedAt": "2026-09-07T03:57:17Z",
   "instructions": "Add a TXT record at _acme-challenge.sentry.mba with each pending value (keep both). Gate = the zone's authoritative nameservers; public resolvers may lag. Use Force continue in the app if you're sure the record is saved."
 }

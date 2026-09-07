@@ -1180,6 +1180,8 @@ private struct LocalCAScreen: View {
     @State private var showProfileText = false
     @State private var share: URLItem?
     @State private var refresh = 0            // bump to re-read files
+    @State private var dnsLoopback: Bool?
+    @State private var dnsChecking = false
 
     private var hasRoot: Bool { _ = refresh; return LocalCAManager.hasRoot }
     private var hasLeaf: Bool { _ = refresh; return LocalCAManager.hasLeaf }
@@ -1199,8 +1201,19 @@ private struct LocalCAScreen: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Host", systemImage: "network").font(.headline).foregroundStyle(Theme.text)
                     Field(label: "OTA host", text: $host, placeholder: "mr.zefv.dev")
-                    Text("The leaf covers this host and *.<host>. Any name that resolves to 127.0.0.1 works (e.g. an A record, or a *.nip.io name).")
+                    Text("The leaf covers this host and *.<host>. This is separate from trust: the host must ALSO resolve to 127.0.0.1 via a real DNS A record (or use a free *.nip.io / *.sslip.io name, e.g. 127-0-0-1.nip.io) — iOS silently drops the install prompt if it doesn't, with no error.")
                         .font(.caption2).foregroundStyle(Theme.subtle)
+                    HStack(spacing: 8) {
+                        Image(systemName: dnsChecking ? "hourglass" : (dnsLoopback == true ? "checkmark.circle.fill" : (dnsLoopback == false ? "xmark.octagon.fill" : "questionmark.circle")))
+                            .foregroundStyle(dnsLoopback == true ? .green : (dnsLoopback == false ? .red : Theme.subtle))
+                        Text(dnsChecking ? "Resolving \(host)…"
+                             : dnsLoopback == true ? "\(host) → 127.0.0.1 ✓"
+                             : dnsLoopback == false ? "\(host) does NOT resolve to 127.0.0.1 — install sheet will not appear"
+                             : "DNS not checked yet")
+                            .font(.caption).foregroundStyle(Theme.subtle)
+                        Spacer()
+                        Button { Task { await checkDNS() } } label: { Text("Check").font(.caption.weight(.semibold)).foregroundStyle(Theme.accent) }
+                    }
                     accentButton(working ? "Working…" : (hasLeaf ? "Re-issue leaf for host" : "Create CA & issue leaf"), "checkmark.seal.fill", busy: working) {
                         Task { await issue() }
                     }
@@ -1223,6 +1236,7 @@ private struct LocalCAScreen: View {
         }
         .sheet(item: $share) { ShareSheet(items: [$0.url]) }
         .sheet(isPresented: $showProfileText) { ProfileInspector(text: profileXML) }
+        .task { await checkDNS() }
     }
 
     // MARK: Root details
@@ -1298,6 +1312,13 @@ private struct LocalCAScreen: View {
 
     private func bump() { refresh += 1 }
 
+    private func checkDNS() async {
+        dnsChecking = true
+        let h = Config.clean(host).replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "*.", with: "")
+        dnsLoopback = await ZefvCert.resolvesToLoopback(h)
+        dnsChecking = false
+    }
+
     private func issue() async {
         working = true; error = nil; note = nil
         let h = Config.clean(host).replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "*.", with: "")
@@ -1307,7 +1328,12 @@ private struct LocalCAScreen: View {
             ServerConfig.setInstallHost(h)
             ServerConfig.setCertMode("local")
             bump()
-            note = "Root + leaf ready for \(h). Cert mode set to local. Install the profile, then Sign & Install."
+            await checkDNS()
+            if dnsLoopback == false {
+                note = "Root + leaf ready for \(h) — but that host does NOT resolve to 127.0.0.1, so the install sheet won't appear. Point an A record at 127.0.0.1, or use a free name like 127-0-0-1.nip.io."
+            } else {
+                note = "Root + leaf ready for \(h). Cert mode set to local. Install the profile, then Sign & Install."
+            }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch { self.error = error.localizedDescription }
         working = false

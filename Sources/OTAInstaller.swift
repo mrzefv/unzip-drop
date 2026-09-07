@@ -28,6 +28,7 @@ final class OTAInstaller {
         case ipaMissing, openFailed
         case hostNotCovered(host: String, mode: String, sans: [String])
         case noLocalLeaf(host: String)
+        case hostNotLoopback(host: String)
 
         var errorDescription: String? {
             switch self {
@@ -39,6 +40,8 @@ final class OTAInstaller {
                 return "The loaded ACME cert covers \(covering) — not \(h). Set the OTA domain to match, or renew a cert for it in Settings › OTA Domain. Or switch Cert mode to Fully local."
             case .noLocalLeaf(let h):
                 return "Cert mode is Fully local but no leaf has been issued yet. Settings › Local CA: create the CA and issue a leaf for \(h)."
+            case .hostNotLoopback(let h):
+                return "\(h) doesn't resolve to 127.0.0.1, so iOS silently drops the install prompt — there's no error dialog for this, it just never appears. Point a DNS A record for \(h) at 127.0.0.1, or use a free loopback name (e.g. 127-0-0-1.nip.io). Check it in Settings › Local CA / OTA Domain."
             case .ipaMissing: return "Signed IPA not found on disk."
             case .openFailed:
                 return "iOS refused the itms-services URL. Check the OTA host resolves to 127.0.0.1 and matches the active cert (see Settings › OTA Domain — Active cert)."
@@ -56,6 +59,13 @@ final class OTAInstaller {
 
         let host = ServerConfig.installHost
         let mode = ServerConfig.certMode
+
+        // Loopback DNS is required in BOTH modes — iOS shows no error, it just
+        // silently drops the install prompt if the host can't be resolved to
+        // 127.0.0.1. Check it up front so the failure is at least explainable.
+        if let loop = await ZefvCert.resolvesToLoopback(host), loop == false {
+            throw InstallError.hostNotLoopback(host: host)
+        }
 
         if mode == "local" {
             guard LocalCAManager.hasLeaf else { throw InstallError.noLocalLeaf(host: host) }

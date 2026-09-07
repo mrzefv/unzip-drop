@@ -623,6 +623,8 @@ private struct OTADomainScreen: View {
     @State private var boardTimer: Timer?
     @State private var copied: String?
     @State private var forcing: String?
+    @State private var forceOverride: AcmeChallenge?     // TXT not visible yet — ask before forcing
+    @State private var forceVerify: [String: String] = [:] // value → last verification summary
 
     private var clean: String {
         host.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -663,6 +665,13 @@ private struct OTADomainScreen: View {
             }
         }
         .fullScreenCover(isPresented: $showLocalCA) { LocalCAScreen().environmentObject(config).preferredColorScheme(.dark) }
+        .alert("TXT record not visible yet", isPresented: Binding(get: { forceOverride != nil }, set: { if !$0 { forceOverride = nil } })) {
+            Button("Re-check") { if let r = forceOverride { forceOverride = nil; Task { await force(r) } } }
+            Button("Force anyway", role: .destructive) { if let r = forceOverride { forceOverride = nil; Task { await force(r, override: true) } } }
+            Button("Cancel", role: .cancel) { forceOverride = nil }
+        } message: {
+            Text((forceOverride.flatMap { forceVerify[$0.value] } ?? "The record wasn't found.") + "\n\nForcing now tells certbot to ask Let's Encrypt immediately. If the record really isn't live, that attempt fails and counts against the rate limit. Wait a minute and Re-check, or Force anyway if you're sure it's saved.")
+        }
         .onChange(of: host) { _ in saved = false }
         .onChange(of: domain) { _ in saved = false; dnsLoopback = nil }
         .onChange(of: certOwner) { _ in sourceSaved = false }
@@ -708,6 +717,13 @@ private struct OTADomainScreen: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                             }
                             .disabled(forcing != nil || r.force == true || !config.hasToken)
+                            if let v = forceVerify[r.value] {
+                                HStack(alignment: .top, spacing: 6) {
+                                    Image(systemName: dnsSeen[r.value] == true ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                        .foregroundStyle(dnsSeen[r.value] == true ? .green : .orange)
+                                    Text(v).font(.caption2).foregroundStyle(Theme.subtle)
+                                }
+                            }
                         }
                     }
                     .padding(10).background(Theme.bg)
@@ -760,11 +776,27 @@ private struct OTADomainScreen: View {
         .padding(.top, 2)
     }
 
-    private func force(_ r: AcmeChallenge) async {
+    /// Force continue — but VERIFY first. Queries the record over DNS-over-HTTPS
+    /// (Cloudflare + Google + Quad9) and only forces when the exact TXT value is
+    /// visible. If it isn't, asks for an explicit override instead of silently
+    /// handing Let's Encrypt a record that isn't there (which burns an attempt).
+    private func force(_ r: AcmeChallenge, override: Bool = false) async {
         forcing = r.value; error = nil
+        let txts = await ZefvCert.txtRecords(r.name)
+        let seen = txts.contains(r.value)
+        dnsSeen[r.value] = seen
+        forceVerify[r.value] = seen
+            ? "Verified: \(r.name) returns the exact value (\(txts.count) TXT record\(txts.count == 1 ? "" : "s") found)."
+            : (txts.isEmpty ? "No TXT records at \(r.name) yet." : "\(txts.count) TXT record\(txts.count == 1 ? "" : "s") at \(r.name), but none match this value.")
+        if !seen && !override {
+            forcing = nil
+            forceOverride = r          // show confirm sheet
+            return
+        }
         do {
             try await ZefvCert.forceChallenge(value: r.value, token: config.token)
-            note = "Force sent — the workflow picks it up on its next poll (≤ 20s) and validates."
+            note = (seen ? "TXT verified from the phone. " : "Forced without verification. ")
+                 + "Force sent — the workflow picks it up on its next poll (≤ 20s) and validates."
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             await loadBoard()
         } catch { self.error = error.localizedDescription }
@@ -1156,12 +1188,24 @@ private struct OTADomainScreen: View {
             }
             let email = UserDefaults.standard.string(forKey: "uzd_le_email") ?? ""
             guard !email.isEmpty else { throw GitHubError.badConfig("Enter a Let's Encrypt email in the Cert repo card and save.") }
-            var inputs = ["domain": ServerConfig.certDomain, "email": email, "ca": ServerConfig.certCA, "force": "true"]
+            // Send only inputs the workflow on main actually declares — GitHub
+            // rejects the whole dispatch (422) on any unexpected key, e.g. when
+            // an older certs.yml without `ca`/`email` is still on main.
+            var wanted = ["domain": ServerConfig.certDomain, "email": email, "ca": ServerConfig.certCA, "force": "true"]
             if ServerConfig.certCA == "zerossl" {
-                if !ServerConfig.eabKID.isEmpty { inputs["eab_kid"] = ServerConfig.eabKID }
-                if !ServerConfig.eabHMAC.isEmpty { inputs["eab_hmac"] = ServerConfig.eabHMAC }
+                if !ServerConfig.eabKID.isEmpty { wanted["eab_kid"] = ServerConfig.eabKID }
+                if !ServerConfig.eabHMAC.isEmpty { wanted["eab_hmac"] = ServerConfig.eabHMAC }
+            }
+            let declared = await client.workflowInputs(path: ServerConfig.certWorkflowPath)
+            let inputs = declared.isEmpty ? wanted : wanted.filter { declared.contains($0.key) }
+            let dropped = Set(wanted.keys).subtracting(inputs.keys)
+            if dropped.contains("email") {
+                throw GitHubError.badConfig("The certs.yml on main is an old version with no `email` input — push the latest workflow (Link repo re-installs it) before renewing.")
             }
             try await client.dispatch(workflowID: wf.id, ref: "main", inputs: inputs)
+            if !dropped.isEmpty {
+                note = "Note: workflow on main doesn't declare \(dropped.sorted().joined(separator: ", ")) — sent without them. Push the latest certs.yml to enable them."
+            }
             note = "certbot run dispatched for *.\(ServerConfig.certDomain) — TXT values appear above within ~1 min. Add them at your DNS host; the run finishes on its own. Then Pull latest."
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch { self.error = error.localizedDescription }

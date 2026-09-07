@@ -163,6 +163,39 @@ struct ActionsClient {
         _ = try await json("\(repoPath)/actions/workflows/\(workflowID)/dispatches", method: "POST", body: body)
     }
 
+    /// Declared `workflow_dispatch.inputs` keys for a workflow file on `ref`.
+    /// We only send inputs the workflow on main actually accepts — GitHub 422s
+    /// the whole dispatch on any unexpected key.
+    func workflowInputs(path: String, ref: String = "main") async -> Set<String> {
+        var c = URLComponents(string: base + repoPath + "/contents/" + path)!
+        c.queryItems = [URLQueryItem(name: "ref", value: ref)]
+        var req = URLRequest(url: c.url!)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/vnd.github.raw+json", forHTTPHeaderField: "Accept")
+        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        guard let (d, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode ?? 0 < 400,
+              let yml = String(data: d, encoding: .utf8) else { return [] }
+        guard let wd = yml.range(of: "workflow_dispatch:") else { return [] }
+        let after = yml[wd.upperBound...]
+        guard let ir = after.range(of: "inputs:") else { return [] }
+        var keys = Set<String>()
+        var baseIndent: Int? = nil
+        for raw in after[ir.upperBound...].split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty || t.hasPrefix("#") { continue }
+            let indent = line.prefix { $0 == " " }.count
+            if baseIndent == nil { baseIndent = indent }
+            guard let b = baseIndent else { break }
+            if indent < b { break }
+            if indent == b, t.hasSuffix(":") { keys.insert(String(t.dropLast())) }
+        }
+        return keys
+    }
+
     func cancel(runID: Int) async throws {
         _ = try await json("\(repoPath)/actions/runs/\(runID)/cancel", method: "POST")
     }

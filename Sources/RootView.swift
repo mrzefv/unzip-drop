@@ -18,6 +18,10 @@ struct RootView: View {
     @ObservedObject private var themePanel = ThemePanelState.shared
     @State private var wheelExpanded = true
     @State private var bgExpanded = false
+    /// Read via PreferenceKey from whichever screen is on top — lets detail
+    /// screens (like SourceDetailScreen) push the rails down past their
+    /// taller topbar stacks. Defaults to 66pt (single AccentTopBar height).
+    @State private var railTopInset: CGFloat = 66
 
     var body: some View {
         ZStack {
@@ -54,17 +58,19 @@ struct RootView: View {
         // etc.) can cover it because this overlay is applied last. ───
         .overlay(
             GeometryReader { proxy in
-                // AccentTopBar is: 10pt padding + ~28pt title + 10pt padding + 2pt border ≈ 50pt.
-                // With a subtitle add ~14pt. Use 66 so the rails clear both.
+                // AccentTopBar height default; screens with taller topbar
+                // stacks (SourceDetailScreen = header + countBar) push
+                // railTopInset up via .accentFrameTopInset(...).
                 // TabBar is 50pt content + 8pt top padding = 58pt, plus bottom safe area.
                 AccentFrame(
                     color: theme.accent,
-                    topInset: proxy.safeAreaInsets.top + 66,
+                    topInset: proxy.safeAreaInsets.top + railTopInset,
                     bottomInset: 58 + proxy.safeAreaInsets.bottom
                 )
                 .allowsHitTesting(false)
             }
         )
+        .onPreferenceChange(AccentFrameTopInsetKey.self) { railTopInset = $0 }
         .tint(theme.accent)
         .preferredColorScheme(theme.darkMode ? .dark : .light)
         .onChange(of: signQueue.requestedTab) { t in

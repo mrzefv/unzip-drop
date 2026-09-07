@@ -116,7 +116,7 @@ struct SignedView: View {
                 SigningSheet(ipaURL: u, meta: m) { entry in
                     SigningHistory.shared.record(
                         bundleID: entry.bundleID,
-                        certName: entry.certName ?? "certificate"
+                        certName: entry.certName
                     )
                 }
                 .preferredColorScheme(.dark)

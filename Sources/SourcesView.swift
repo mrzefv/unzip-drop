@@ -380,48 +380,57 @@ private struct SourceDetailScreen: View {
                         .padding(.horizontal, 16).padding(.vertical, 8)
                 }
             }
-            .background(BarBlur())
-            .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
+            // No outer background/border here — each of header + countBar
+            // provides its own transparent AccentBarBlur so particles show
+            // through, and the countBar owns the single 2px accent border
+            // that connects to the AccentFrame's rails.
         }
         .background(Color.clear.ignoresSafeArea())
+        // Header (~48pt) + countBar (~40pt) — push AccentFrame's rails down
+        // to start at the countBar's bottom border, not up in the header area.
+        .accentFrameTopInset(showSearch ? 138 : 90)
         .task { await load() }
         .sheet(item: $openGroup) { g in
-            AppDetailSheet(source: current, group: g)
-                .presentationCornerRadius(0)   // flat top, matches the AccentTopBar look
-                .preferredColorScheme(.dark)
+            Group {
+                if #available(iOS 16.4, *) {
+                    AppDetailSheet(source: current, group: g)
+                        .presentationCornerRadius(0)   // flat top, matches the AccentTopBar look
+                } else {
+                    AppDetailSheet(source: current, group: g)
+                }
+            }
+            .preferredColorScheme(.dark)
         }
     }
 
     // Header: back · icon + NAME · search · sort
+    // NOTE: no bottom border here — the countBar (below) provides the single
+    // 2px accent bottom border that closes the combined header+countBar zone.
     private var header: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
-                }
-                Spacer()
-                HStack(spacing: 10) {
-                    SourceIcon(url: current.iconURL, side: 24, fallback: current.name)
-                    Text(current.name.uppercased()).font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
-                }
-                Spacer()
-                Button { withAnimation { showSearch.toggle() } } label: {
-                    Image(systemName: "magnifyingglass").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
-                }
-                Menu {
-                    ForEach(Sort.allCases, id: \.self) { s in Button(s.rawValue) { sort = s } }
-                    Divider()
-                    Button { Task { await load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                    Link(destination: current.url) { Label("Open repo.json", systemImage: "safari") }
-                } label: {
-                    Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 20, weight: .medium)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
-                }
+        HStack(spacing: 12) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
             }
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(AccentBarBlur())
-            // 2px accent bottom border — bar sits just under the OS status bar
-            Rectangle().fill(Theme.accent).frame(height: 2)
+            Spacer()
+            HStack(spacing: 10) {
+                SourceIcon(url: current.iconURL, side: 24, fallback: current.name)
+                Text(current.name.uppercased()).font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
+            }
+            Spacer()
+            Button { withAnimation { showSearch.toggle() } } label: {
+                Image(systemName: "magnifyingglass").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
+            }
+            Menu {
+                ForEach(Sort.allCases, id: \.self) { s in Button(s.rawValue) { sort = s } }
+                Divider()
+                Button { Task { await load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                Link(destination: current.url) { Label("Open repo.json", systemImage: "safari") }
+            } label: {
+                Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 20, weight: .medium)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
+            }
         }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(AccentBarBlur())
     }
 
     private var countBar: some View {
@@ -732,7 +741,7 @@ struct AppDetailSheet: View {
                     // "previously signed with X" even after the app is deleted.
                     SigningHistory.shared.record(
                         bundleID: entry.bundleID,
-                        certName: entry.certName ?? "certificate"
+                        certName: entry.certName
                     )
                 }
                 .preferredColorScheme(.dark)

@@ -524,15 +524,43 @@ struct ConfettiField: View {
 
 /// Accent-tinted frosted background: system blur (like the TabBar) with an
 /// accent-colored wash on top so headers read as tinted glass, not flat fill.
+/// Kept transparent enough that the dynamic ParticleBackground behind it
+/// remains visible through the topbar.
 struct AccentBarBlur: View {
     @ObservedObject private var theme = ThemeManager.shared
     var body: some View {
         ZStack {
-            Rectangle().fill(.ultraThinMaterial)
-            Color(white: 0.06).opacity(0.55)
-            theme.accent.opacity(0.28)
+            // Subtle frosted-glass layer — thin enough to see particles through
+            Rectangle().fill(.ultraThinMaterial).opacity(0.55)
+            // Light accent wash for tinting (transparent — particles still visible)
+            theme.accent.opacity(0.18)
         }
         .ignoresSafeArea()
+    }
+}
+
+// MARK: - AccentFrame top-inset override (per-screen)
+//
+// The global AccentFrame in RootView assumes a single-height AccentTopBar
+// (~66pt below the safe area). Screens with a taller topbar stack (e.g.
+// SourceDetailScreen: header + countBar) push down where the rails start
+// by writing this preference. RootView listens with .onPreferenceChange.
+
+struct AccentFrameTopInsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 66
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        // Prefer the largest child's request — a nested view with a taller
+        // topbar wins over the default.
+        let next = nextValue()
+        if next > value { value = next }
+    }
+}
+
+extension View {
+    /// Push the AccentFrame's rails down by this many points below the safe
+    /// area top. Use to make rails clear a taller topbar stack in this screen.
+    func accentFrameTopInset(_ inset: CGFloat) -> some View {
+        preference(key: AccentFrameTopInsetKey.self, value: inset)
     }
 }
 

@@ -58,6 +58,7 @@ struct SigningSheet: View {
     @State private var lastEntitlements: [String: String] = [:]
     @State private var lastSizeBytes: Int64 = 0
     @State private var showInstallPrompt = false
+    @State private var sentToHome = false
     @State private var error: String?
     @State private var result: SignedEntry?
     @State private var installing = false
@@ -110,6 +111,12 @@ struct SigningSheet: View {
                 onExit: { showTerminal = false }
             )
             .preferredColorScheme(.dark)
+            .overlay {
+                if sentToHome {
+                    SentToHomeOverlay(name: name, icon: iconPNG ?? meta.iconPNG, host: ServerConfig.installHost)
+                        .transition(.opacity)
+                }
+            }
             .overlay {
                 if showInstallPrompt, let r = result {
                     InstallPromptOverlay(
@@ -771,6 +778,9 @@ struct SigningSheet: View {
 
     private func sign() async {
         showTerminal = true
+        // Let the terminal cover paint before the blocking zsign work begins — no lag.
+        await Task.yield()
+        try? await Task.sleep(nanoseconds: 60_000_000)   // ~1 frame
         if let r = macho, r.encrypted {
             error = "This IPA is still FairPlay-encrypted (cryptid ≠ 0). Signing it will produce an app that crashes at launch. Get a decrypted IPA first."
             UINotificationFeedbackGenerator().notificationOccurred(.error)
@@ -800,9 +810,12 @@ struct SigningSheet: View {
         error = nil
         do {
             try await OTAInstaller.shared.install(r)
+            log.append("✓ Install triggered — confirm on your home screen")
+            withAnimation { sentToHome = true }
+            try? await Task.sleep(nanoseconds: 2_600_000_000)
+            withAnimation { sentToHome = false }
         } catch {
             self.error = error.localizedDescription
-            // Bubble the reason into the terminal log too, so it's visible.
             log.append("error: install failed — \(error.localizedDescription)")
         }
     }
@@ -1154,5 +1167,59 @@ struct InstallPromptOverlay: View {
         }
         .frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 15).stroke(Color.white.opacity(0.08)))
+    }
+}
+
+// MARK: - "Sent to Home Screen" success overlay (mSign-style)
+
+struct SentToHomeOverlay: View {
+    let name: String
+    let icon: Data?
+    let host: String
+    @State private var progress: CGFloat = 0
+
+    private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.5).ignoresSafeArea()
+            VStack(spacing: 12) {
+                ZStack(alignment: .bottomTrailing) {
+                    iconThumb(78)
+                    ZStack {
+                        Circle().fill(Color.black).frame(width: 28, height: 28)
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 26))
+                            .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.45))
+                    }
+                    .offset(x: 6, y: 6)
+                }
+                Text(name).font(.system(size: 14)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                Text("Sent to Home Screen").font(.system(size: 26, weight: .bold)).foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                Text(host).font(.system(size: 15, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(Color(white: 0.18)).clipShape(Capsule())
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.12)).frame(height: 6)
+                        Capsule().fill(blue).frame(width: g.size.width * progress, height: 6)
+                    }
+                }
+                .frame(height: 6).padding(.horizontal, 24).padding(.top, 4)
+            }
+            .padding(.vertical, 28).padding(.horizontal, 28)
+            .frame(maxWidth: 320)
+            .background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .onAppear { withAnimation(.easeInOut(duration: 2.4)) { progress = 1 } }
+        }
+    }
+
+    private func iconThumb(_ side: CGFloat) -> some View {
+        Group {
+            if let icon, let img = UIImage(data: icon) { Image(uiImage: img).resizable().scaledToFill() }
+            else { RoundedRectangle(cornerRadius: side * 0.22).fill(blue.opacity(0.15)).overlay(Image(systemName: "app.fill").foregroundStyle(blue)) }
+        }
+        .frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: side * 0.22, style: .continuous))
     }
 }

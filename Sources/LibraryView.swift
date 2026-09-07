@@ -44,33 +44,35 @@ struct LibraryView: View {
     var body: some View {
         ZStack {
             Color.clear.ignoresSafeArea()
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 12) {
-                    header
-                    if showSearch && !items.isEmpty {
-                        TextField("Search", text: $search)
-                            .autocorrectionDisabled().textInputAutocapitalization(.never)
-                            .padding(10).background(Theme.card).foregroundStyle(Theme.text)
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) } }
-                    if loading {
-                        HStack { Spacer(); ProgressView().tint(Theme.accent); Spacer() }.padding(.top, 40)
-                    } else if items.isEmpty {
-                        Card { Text("No apps yet. Download one in Browse, or tap + to import an .ipa.").font(.caption).foregroundStyle(Theme.subtle) }
-                    } else {
-                        VStack(spacing: 0) {
-                            ForEach(filtered) { it in
-                                row(it)
-                                if it.id != filtered.last?.id {
-                                    Divider().overlay(Theme.stroke).padding(.leading, 84)
+            VStack(spacing: 0) {
+                header  // edge-to-edge, has its own accent bg + bottom border
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if showSearch && !items.isEmpty {
+                            TextField("Search", text: $search)
+                                .autocorrectionDisabled().textInputAutocapitalization(.never)
+                                .padding(10).background(Theme.card).foregroundStyle(Theme.text)
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) } }
+                        if loading {
+                            HStack { Spacer(); ProgressView().tint(Theme.accent); Spacer() }.padding(.top, 40)
+                        } else if items.isEmpty {
+                            Card { Text("No apps yet. Download one in Browse, or tap + to import an .ipa.").font(.caption).foregroundStyle(Theme.subtle) }
+                        } else {
+                            VStack(spacing: 0) {
+                                ForEach(filtered) { it in
+                                    row(it)
+                                    if it.id != filtered.last?.id {
+                                        Divider().overlay(Theme.stroke).padding(.leading, 84)
+                                    }
                                 }
                             }
                         }
                     }
+                    .padding(16)
                 }
-                .padding(16)
             }
         }
         .task { await reload() }
@@ -101,38 +103,43 @@ struct LibraryView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 14) {
-            Button { withAnimation { ThemePanelState.shared.open.toggle() } } label: {
-                Image(systemName: "paintpalette.fill").font(.system(size: 20)).foregroundStyle(blue)
-            }
-            Text("Library").font(.title2.bold()).foregroundStyle(Theme.text)
-            Spacer()
-            if selecting {
-                Text("\(selected.count) selected").font(.caption).foregroundStyle(Theme.subtle)
-            } else {
-                Text("\(items.count) Apps").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
-            }
-            Button { withAnimation { showSearch.toggle(); if !showSearch { search = "" } } } label: {
-                Image(systemName: "magnifyingglass").font(.system(size: 19, weight: .semibold)).foregroundStyle(blue)
-            }
-            Menu {
+        VStack(spacing: 0) {
+            HStack(spacing: 14) {
+                Button { withAnimation { ThemePanelState.shared.open.toggle() } } label: {
+                    Image(systemName: "paintpalette.fill").font(.system(size: 20)).foregroundStyle(Theme.accent)
+                }
+                Text("Library").font(.title2.bold()).foregroundStyle(Theme.text)
+                Spacer()
                 if selecting {
-                    Button { selectAll() } label: { Label("Select all", systemImage: "checkmark.circle") }
-                    Button(role: .destructive) { deleteSelected() } label: { Label("Delete selected", systemImage: "trash") }
-                    Button { updateSelected() } label: { Label("Update selected", systemImage: "arrow.down.circle") }
-                    Button { selecting = false; selected.removeAll() } label: { Label("Done", systemImage: "xmark") }
+                    Text("\(selected.count) selected").font(.caption).foregroundStyle(Theme.subtle)
                 } else {
-                    Button { selecting = true } label: { Label("Select", systemImage: "checkmark.circle") }
-                    Button { importing = true } label: { Label("Import IPA", systemImage: "plus") }
+                    Text("\(items.count) Apps").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
                 }
-            } label: {
-                Image(systemName: selecting ? "ellipsis.circle.fill" : "ellipsis.circle").font(.system(size: 19, weight: .semibold)).foregroundStyle(blue)
-            }
-            if !selecting {
-                Button { importing = true } label: {
-                    Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(blue)
+                Button { withAnimation { showSearch.toggle(); if !showSearch { search = "" } } } label: {
+                    Image(systemName: "magnifyingglass").font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.accent)
+                }
+                Menu {
+                    if selecting {
+                        Button { selectAll() } label: { Label("Select all", systemImage: "checkmark.circle") }
+                        Button(role: .destructive) { deleteSelected() } label: { Label("Delete selected", systemImage: "trash") }
+                        Button { updateSelected() } label: { Label("Update selected", systemImage: "arrow.down.circle") }
+                        Button { selecting = false; selected.removeAll() } label: { Label("Done", systemImage: "xmark") }
+                    } else {
+                        Button { selecting = true } label: { Label("Select", systemImage: "checkmark.circle") }
+                        Button { importing = true } label: { Label("Import IPA", systemImage: "plus") }
+                    }
+                } label: {
+                    Image(systemName: selecting ? "ellipsis.circle.fill" : "ellipsis.circle").font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.accent)
+                }
+                if !selecting {
+                    Button { importing = true } label: {
+                        Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accent)
+                    }
                 }
             }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .background(Theme.accent.opacity(0.06))
+            Rectangle().fill(Theme.accent).frame(height: 2)
         }
     }
 

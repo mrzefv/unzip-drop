@@ -240,9 +240,7 @@ struct SourcesView: View {
         ZStack {
             Color.clear.ignoresSafeArea()
             VStack(spacing: 0) {
-                HStack {
-                    Text("Sources").font(.title2.bold()).foregroundStyle(Theme.text)
-                    Spacer()
+                AccentTopBar(title: "Sources") {
                     Button(editing ? "Done" : "Edit") { withAnimation { editing.toggle() } }
                         .font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.accent)
                     Button { adding = true } label: {
@@ -250,7 +248,6 @@ struct SourcesView: View {
                     }
                     .padding(.leading, 14)
                 }
-                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
 
                 List {
                     ForEach(store.sources) { s in
@@ -397,43 +394,52 @@ private struct SourceDetailScreen: View {
 
     // Header: back · icon + NAME · search · sort
     private var header: some View {
-        HStack(spacing: 12) {
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
+                }
+                Spacer()
+                HStack(spacing: 10) {
+                    SourceIcon(url: current.iconURL, side: 24, fallback: current.name)
+                    Text(current.name.uppercased()).font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
+                }
+                Spacer()
+                Button { withAnimation { showSearch.toggle() } } label: {
+                    Image(systemName: "magnifyingglass").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
+                }
+                Menu {
+                    ForEach(Sort.allCases, id: \.self) { s in Button(s.rawValue) { sort = s } }
+                    Divider()
+                    Button { Task { await load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                    Link(destination: current.url) { Label("Open repo.json", systemImage: "safari") }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 20, weight: .medium)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
+                }
             }
-            Spacer()
-            HStack(spacing: 10) {
-                SourceIcon(url: current.iconURL, side: 24, fallback: current.name)
-                Text(current.name.uppercased()).font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
-            }
-            Spacer()
-            Button { withAnimation { showSearch.toggle() } } label: {
-                Image(systemName: "magnifyingglass").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
-            }
-            Menu {
-                ForEach(Sort.allCases, id: \.self) { s in Button(s.rawValue) { sort = s } }
-                Divider()
-                Button { Task { await load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                Link(destination: current.url) { Label("Open repo.json", systemImage: "safari") }
-            } label: {
-                Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 20, weight: .medium)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
-            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(Theme.accent.opacity(0.06))
+            // 2px accent bottom border — bar sits just under the OS status bar
+            Rectangle().fill(Theme.accent).frame(height: 2)
         }
-        .padding(.horizontal, 12).padding(.vertical, 6)
     }
 
     private var countBar: some View {
-        HStack {
-            Text("\(groups.count.formatted()) Apps").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
-            Spacer()
-            HStack(spacing: 6) {
-                Image(systemName: "signature.zh").font(.system(size: 15, weight: .bold))
-                Text("by MrZEfv").font(.system(size: 14, weight: .bold)).kerning(0.3)
+        VStack(spacing: 0) {
+            HStack {
+                Text("\(groups.count.formatted()) Apps").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: "signature.zh").font(.system(size: 15, weight: .bold))
+                    Text("by MrZEfv").font(.system(size: 14, weight: .bold)).kerning(0.3)
+                }
+                .foregroundStyle(Theme.accent).lineLimit(1)
             }
-            .foregroundStyle(Color(red: 0.95, green: 0.25, blue: 0.25)).lineLimit(1)
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(Theme.accent.opacity(0.06))
+            // 2px accent bottom border — matches the AccentTopBar style, meets the frame rails
+            Rectangle().fill(Theme.accent).frame(height: 2)
         }
-        .padding(.horizontal, 16).padding(.vertical, 6)
-        .background(Color.white.opacity(0.04))
     }
 
     private var newsSection: some View {

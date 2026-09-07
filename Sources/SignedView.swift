@@ -25,8 +25,9 @@ struct SignedView: View {
     var body: some View {
         ZStack {
             Color.clear.ignoresSafeArea()
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 12) {
+            VStack(spacing: 0) {
+                // Edge-to-edge header with accent tint + 2px accent bottom border
+                VStack(spacing: 0) {
                     HStack(spacing: 14) {
                         Button { withAnimation { ThemePanelState.shared.open.toggle() } } label: {
                             Image(systemName: "paintpalette.fill").font(.system(size: 20)).foregroundStyle(Theme.accent)
@@ -54,26 +55,34 @@ struct SignedView: View {
                             Image(systemName: selecting ? "ellipsis.circle.fill" : "ellipsis.circle").font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.accent)
                         }
                     }
-                    if signed.entries.isEmpty {
-                        Card { Text("Nothing signed yet. Library tab › pick an IPA › Sign.").font(.caption).foregroundStyle(Theme.subtle) }
-                    } else if showSearch {
-                        TextField("Search", text: $search)
-                            .autocorrectionDisabled().textInputAutocapitalization(.never)
-                            .padding(10).background(Theme.card).foregroundStyle(Theme.text)
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) } }
-                    VStack(spacing: 0) {
-                        ForEach(entries) { e in
-                            row(e)
-                            if e.id != entries.last?.id {
-                                Divider().overlay(Theme.stroke).padding(.leading, 84)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(Theme.accent.opacity(0.06))
+                    Rectangle().fill(Theme.accent).frame(height: 2)
+                }
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if signed.entries.isEmpty {
+                            Card { Text("Nothing signed yet. Library tab › pick an IPA › Sign.").font(.caption).foregroundStyle(Theme.subtle) }
+                        } else if showSearch {
+                            TextField("Search", text: $search)
+                                .autocorrectionDisabled().textInputAutocapitalization(.never)
+                                .padding(10).background(Theme.card).foregroundStyle(Theme.text)
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) } }
+                        VStack(spacing: 0) {
+                            ForEach(entries) { e in
+                                row(e)
+                                if e.id != entries.last?.id {
+                                    Divider().overlay(Theme.stroke).padding(.leading, 84)
+                                }
                             }
                         }
                     }
+                    .padding(16)
                 }
-                .padding(16)
             }
         }
         .sheet(item: $share) { ShareSheet(items: [$0.url]) }

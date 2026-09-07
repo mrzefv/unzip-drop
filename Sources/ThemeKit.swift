@@ -515,6 +515,68 @@ struct ConfettiField: View {
     }
 }
 
+// MARK: - Shared top-bar with accent bottom border
+//
+// A reusable header bar for tabs. Renders a title on the left and optional
+// trailing content (buttons, chips, etc.) on the right, with a 2px accent
+// bottom border that connects to the AccentFrame's side rails, forming a
+// closed accent-tinted "window" around the tab content.
+
+struct AccentTopBar<Trailing: View>: View {
+    var title: String
+    var subtitle: String? = nil
+    @ViewBuilder var trailing: () -> Trailing
+    @ObservedObject private var theme = ThemeManager.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(Theme.text)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.subtle)
+                    }
+                }
+                Spacer(minLength: 0)
+                trailing()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(theme.accent.opacity(0.06))
+            // 2px accent bottom border — meets the AccentFrame's left/right rails
+            Rectangle().fill(theme.accent).frame(height: 2)
+        }
+    }
+}
+
+extension AccentTopBar where Trailing == EmptyView {
+    init(title: String, subtitle: String? = nil) {
+        self.init(title: title, subtitle: subtitle) { EmptyView() }
+    }
+}
+
+// MARK: - Accent bottom-border strip
+//
+// A reusable strip used INSIDE a tab (below the top bar or between content
+// sections) that draws a 2px accent line at its bottom. Used for e.g. the
+// "0 Apps by MRZefv" counter row on SourceDetailScreen.
+
+struct AccentBottomBorder<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    @ObservedObject private var theme = ThemeManager.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            content()
+            Rectangle().fill(theme.accent).frame(height: 2)
+        }
+    }
+}
+
 // MARK: - Palette dropdown
 
 struct ThemePalettePanel: View {

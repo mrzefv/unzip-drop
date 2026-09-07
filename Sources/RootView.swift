@@ -53,8 +53,16 @@ struct RootView: View {
         // the TabBar. Nothing any tab draws (NavigationStack, List backgrounds,
         // etc.) can cover it because this overlay is applied last. ───
         .overlay(
-            AccentFrame(color: theme.accent)
+            GeometryReader { proxy in
+                // TabBar is 50pt content + 8pt top padding = 58pt tall, plus
+                // it lives INSIDE the bottom safe area. Rails must stop right
+                // at the TabBar's top edge (which has its own 2px accent line).
+                AccentFrame(
+                    color: theme.accent,
+                    bottomInset: 58 + proxy.safeAreaInsets.bottom
+                )
                 .allowsHitTesting(false)
+            }
         )
         .tint(theme.accent)
         .preferredColorScheme(theme.darkMode ? .dark : .light)
@@ -106,32 +114,32 @@ private struct TabBar: View {
 }
 
 // MARK: - Accent frame around the app content
-// 2px vertical rails on the left and right, plus a top border that visually
-// connects to the accent overlay on top of the TabBar. Everything is a
-// non-interactive overlay so it never intercepts touches.
+// Two 2px vertical rails on the left and right edges of the screen. The rails
+// span from the very top of the display down to the top of the TabBar (they
+// stop exactly at the TabBar's 2px accent top border, forming a continuous
+// closed rectangle around the tab content). Per-tab headers provide their
+// own accent bottom borders (see AccentTopBar in ThemeKit).
 
 private struct AccentFrame: View {
     var color: Color
+    /// Height the rails stop above (matches the TabBar height including its
+    /// bottom safe area). The rails end at the TabBar's top accent line so
+    /// the frame reads as a single, closed rectangle.
+    var bottomInset: CGFloat
+
     var body: some View {
         GeometryReader { geo in
-            ZStack {
-                // Left sidebar (2px) — full height incl. safe areas
+            ZStack(alignment: .top) {
+                // Left rail
                 Rectangle().fill(color)
-                    .frame(width: 2)
-                    .frame(maxHeight: .infinity, alignment: .leading)
+                    .frame(width: 2, height: geo.size.height - bottomInset)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                // Right sidebar (2px)
+                // Right rail
                 Rectangle().fill(color)
-                    .frame(width: 2)
-                    .frame(maxHeight: .infinity, alignment: .trailing)
+                    .frame(width: 2, height: geo.size.height - bottomInset)
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                // Top border (2px) — spans full width, meets both sidebars at corners
-                Rectangle().fill(color)
-                    .frame(height: 2)
-                    .frame(maxWidth: .infinity, alignment: .top)
-                    .frame(maxHeight: .infinity, alignment: .top)
             }
-            .frame(width: geo.size.width, height: geo.size.height)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
         }
         .ignoresSafeArea()
     }

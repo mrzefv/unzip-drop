@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-private struct Entry: Identifiable {
+private nonisolated struct Entry: Identifiable {
     let url: URL
     let isDir: Bool
     let size: Int64

@@ -1,13 +1,24 @@
 //
 //  OTAInstaller.swift
-//  Serves a locally-signed IPA over the on-device Vapor HTTPS server and hands
-//  iOS the itms-services URL. Keeps the server alive under a background task
-//  for the ~90s installd needs.
+//  Installs a locally-signed IPA over the air. Three cert/transport modes,
+//  selected by ServerConfig.certMode:
 //
-//  Cert source follows ServerConfig.certMode:
-//    "public" → the ACME (zefv.dev-style) cert, refreshed from the certs repo.
-//    "local"  → our own root CA's leaf (LocalCAManager) — no network needed,
-//               covers whatever host it was last issued for.
+//    "zefv"   → (DEFAULT) upload to the zefv.dev VPS via ZefvClient, then
+//               open the itms-services URL it hands back. The VPS presents
+//               its own *.zefv.dev Let's Encrypt cert; no cert material on
+//               the phone, no loopback DNS, works on cellular. Requires a
+//               zefv.dev account (Settings › zefv.dev Account).
+//
+//    "local"  → on-device Vapor HTTPS server using our own root CA's leaf
+//               (LocalCAManager). No network needed but the install host
+//               must resolve to 127.0.0.1 and the root profile must be
+//               trusted. Legacy path.
+//
+//    "public" → on-device Vapor HTTPS server using the ACME cert bundled
+//               from the certs branch. Also needs loopback DNS. Legacy —
+//               *.zefv.dev now resolves to the VPS, so this mode only works
+//               with a custom domain pointed at 127.0.0.1.
+//
 //  The "does this cert actually cover this host" check reads whichever cert
 //  is active for the current mode, so a public-cert host mismatch never gets
 //  reported while you're on Local, and vice versa.
@@ -25,22 +36,39 @@ final class OTAInstaller: ObservableObject {
     private var current: LocalOTAServer?
     private var bgTask: UIBackgroundTaskIdentifier = .invalid
 
-    /// Result of the last install attempt, filled ~25s after the sheet opens.
+    /// Result of the last install attempt, filled ~25s after the sheet opens
+    /// (local/public) or immediately after the upload completes (zefv).
     struct Report: Identifiable, Sendable {
         let id = UUID()
         let requests: [OTATrace.Entry]
         let diagnosis: String
         let profileNote: String?
-        var delivered: Bool { requests.contains { $0.path.hasSuffix(".ipa") } }
+        /// Local/public: did installd fetch the .ipa? zefv: did the upload succeed?
+        let delivered: Bool
+        /// zefv mode only — the public install URL the user can share.
+        let installURL: String?
+
+        init(requests: [OTATrace.Entry], diagnosis: String, profileNote: String?,
+             delivered: Bool? = nil, installURL: String? = nil) {
+            self.requests    = requests
+            self.diagnosis   = diagnosis
+            self.profileNote = profileNote
+            self.delivered   = delivered ?? requests.contains { $0.path.hasSuffix(".ipa") }
+            self.installURL  = installURL
+        }
     }
     @Published var lastReport: Report?
     @Published var tracing = false
+    /// 0…1 while a zefv upload is in flight; nil otherwise.
+    @Published var uploadProgress: Double?
 
     enum InstallError: LocalizedError {
         case ipaMissing, openFailed
         case hostNotCovered(host: String, mode: String, sans: [String])
         case noLocalLeaf(host: String)
         case hostNotLoopback(host: String)
+        case zefvNotSignedIn
+        case zefvUploadFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -49,14 +77,18 @@ final class OTAInstaller: ObservableObject {
                 if mode == "local" {
                     return "Your local leaf covers \(covering) — not \(h). Settings › Local CA: set host to \(h) and Re-issue leaf (instant, no profile needed again)."
                 }
-                return "The loaded ACME cert covers \(covering) — not \(h). Set the OTA domain to match, or renew a cert for it in Settings › OTA Domain. Or switch Cert mode to Fully local."
+                return "The loaded ACME cert covers \(covering) — not \(h). Set the OTA domain to match, or renew a cert for it in Settings › OTA Domain. Or switch Cert mode to zefv.dev."
             case .noLocalLeaf(let h):
                 return "Cert mode is Fully local but no leaf has been issued yet. Settings › Local CA: create the CA and issue a leaf for \(h)."
             case .hostNotLoopback(let h):
-                return "\(h) doesn't resolve to 127.0.0.1, so iOS silently drops the install prompt — there's no error dialog for this, it just never appears. Point a DNS A record for \(h) at 127.0.0.1, or use a free loopback name (e.g. 127-0-0-1.nip.io). Check it in Settings › Local CA / OTA Domain."
+                return "\(h) doesn't resolve to 127.0.0.1, so iOS silently drops the install prompt — there's no error dialog for this, it just never appears. Local/Public modes need loopback DNS. Switch Cert mode to zefv.dev (Settings › OTA Domain) to install through the VPS instead."
             case .ipaMissing: return "Signed IPA not found on disk."
             case .openFailed:
-                return "iOS refused the itms-services URL. Check the OTA host resolves to 127.0.0.1 and matches the active cert (see Settings › OTA Domain — Active cert)."
+                return "iOS refused the itms-services URL. Check the OTA host resolves correctly and matches the active cert (see Settings › OTA Domain — Active cert)."
+            case .zefvNotSignedIn:
+                return "Cert mode is zefv.dev but you're not signed in. Settings › zefv.dev Account: sign in or register, then try again. Or switch Cert mode to Fully local."
+            case .zefvUploadFailed(let msg):
+                return "Upload to zefv.dev failed: \(msg)"
             }
         }
     }
@@ -69,12 +101,70 @@ final class OTAInstaller: ObservableObject {
     func install(ipaURL: URL, bundleID: String, name: String, version: String, iconData: Data?) async throws {
         guard FileManager.default.fileExists(atPath: ipaURL.path) else { throw InstallError.ipaMissing }
 
-        let host = ServerConfig.installHost
         let mode = ServerConfig.certMode
+        if mode == "zefv" {
+            try await installViaZefv(ipaURL: ipaURL, bundleID: bundleID, name: name, version: version)
+        } else {
+            try await installViaLocalServer(ipaURL: ipaURL, bundleID: bundleID, name: name, version: version,
+                                            iconData: iconData, mode: mode)
+        }
+    }
 
-        // Loopback DNS is required in BOTH modes — iOS shows no error, it just
-        // silently drops the install prompt if the host can't be resolved to
-        // 127.0.0.1. Check it up front so the failure is at least explainable.
+    // MARK: - zefv.dev (VPS) path
+
+    private func installViaZefv(ipaURL: URL, bundleID: String, name: String, version: String) async throws {
+        let client = ZefvClient.shared
+        guard client.isAuthenticated else { throw InstallError.zefvNotSignedIn }
+
+        tearDown()                       // never leave a stale local server around
+        lastReport = nil
+        tracing = true
+        uploadProgress = 0
+        defer { uploadProgress = nil }
+
+        let result: ZefvUploadResult
+        do {
+            result = try await client.upload(
+                ipaURL: ipaURL, bundleID: bundleID, version: version, name: name,
+                onProgress: { [weak self] p in self?.uploadProgress = p }
+            )
+        } catch let e as ZefvError {
+            tracing = false
+            throw InstallError.zefvUploadFailed(e.message)
+        } catch {
+            tracing = false
+            throw InstallError.zefvUploadFailed(error.localizedDescription)
+        }
+
+        let activeCertName = CertificateStore.shared.active?.name
+        let profileNote = Self.profileNote(ipaURL: ipaURL, certName: activeCertName)
+
+        guard let url = URL(string: result.install_url) else {
+            tracing = false
+            throw InstallError.openFailed
+        }
+        let opened = await UIApplication.shared.open(url)
+        tracing = false
+        guard opened else { throw InstallError.openFailed }
+
+        lastReport = Report(
+            requests: [],
+            diagnosis: "Uploaded \(Self.byteString(result.size_bytes)) to \(result.user.username).zefv.dev. iOS is fetching the manifest + IPA from the VPS — the install prompt should be on your home screen. If nothing appears, check the profile note below.",
+            profileNote: profileNote,
+            delivered: true,
+            installURL: result.install_url
+        )
+    }
+
+    // MARK: - On-device Vapor path (local / public, legacy)
+
+    private func installViaLocalServer(ipaURL: URL, bundleID: String, name: String, version: String,
+                                       iconData: Data?, mode: String) async throws {
+        let host = ServerConfig.installHost
+
+        // Loopback DNS is required in BOTH legacy modes — iOS shows no error, it
+        // just silently drops the install prompt if the host can't be resolved
+        // to 127.0.0.1. Check it up front so the failure is at least explainable.
         if let loop = await ZefvCert.resolvesToLoopback(host), loop == false {
             throw InstallError.hostNotLoopback(host: host)
         }
@@ -131,6 +221,8 @@ final class OTAInstaller: ObservableObject {
         }
     }
 
+    // MARK: - Helpers
+
     /// Reads embedded.mobileprovision out of the signed IPA and reports the facts
     /// that most often cause "Unable to Install": device count, expiry, team, entitlements.
     private static func profileNote(ipaURL: URL, certName: String?) -> String? {
@@ -181,5 +273,12 @@ final class OTAInstaller: ObservableObject {
             ctx.fill(CGRect(origin: .zero, size: size))
             if let data, let img = UIImage(data: data) { img.draw(in: CGRect(origin: .zero, size: size)) }
         }.pngData() ?? Data()
+    }
+
+    private static func byteString(_ n: Int) -> String {
+        let units = ["B", "KB", "MB", "GB"]
+        var v = Double(n); var i = 0
+        while v >= 1024, i < units.count - 1 { v /= 1024; i += 1 }
+        return String(format: v < 10 && i > 0 ? "%.1f %@" : "%.0f %@", v, units[i])
     }
 }

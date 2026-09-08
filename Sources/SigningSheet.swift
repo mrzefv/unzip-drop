@@ -360,14 +360,14 @@ struct SigningSheet: View {
                 HStack(alignment: .top, spacing: 0) {
                     VStack(alignment: .leading, spacing: 4) {
                         Label("DISTRIBUTED IDENTITY", systemImage: "globe").font(.system(size: 9, weight: .heavy)).kerning(0.5).foregroundStyle(blue)
-                        Text(ServerConfig.installHost).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
-                        Text(ServerConfig.certMode == "local" ? "Local root CA · offline" : "Public URL for OTA").font(.system(size: 10)).foregroundStyle(Theme.subtle)
+                        Text(distributedHost).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(distributedSubtitle).font(.system(size: 10)).foregroundStyle(Theme.subtle)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     Rectangle().fill(Theme.stroke).frame(width: 1).padding(.horizontal, 10)
                     VStack(alignment: .leading, spacing: 4) {
                         Label("CERTIFICATE", systemImage: "lock.shield.fill").font(.system(size: 9, weight: .heavy)).kerning(0.5).foregroundStyle(.green)
-                        Text(ServerConfig.certMode == "local" ? "Local CA" : "Let's Encrypt").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                        Text(certModeLabel).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
                         if let d = certDaysLeft {
                             Text(d < 0 ? "EXPIRED" : "\(d) days left").font(.system(size: 10)).foregroundStyle(d < 21 ? .orange : .green)
                         }
@@ -406,8 +406,34 @@ struct SigningSheet: View {
     // MARK: Icon
 
     private var certDaysLeft: Int? {
-        if ServerConfig.certMode == "local" { return LocalCAManager.leafDaysLeft }
-        return ZefvCert.effectiveNotAfter.map { Calendar.current.dateComponents([.day], from: Date(), to: $0).day ?? 0 }
+        switch ServerConfig.certMode {
+        case "zefv":  return nil     // server-side cert, auto-renews — nothing to count down on-device
+        case "local": return LocalCAManager.leafDaysLeft
+        default:      return ZefvCert.effectiveNotAfter.map { Calendar.current.dateComponents([.day], from: Date(), to: $0).day ?? 0 }
+        }
+    }
+
+    /// What the "Distributed identity" column shows for the active cert mode.
+    private var distributedHost: String {
+        if ServerConfig.certMode == "zefv" {
+            if let u = ZefvClient.shared.currentUser { return "\(u.username).zefv.dev" }
+            return "zefv.dev (not signed in)"
+        }
+        return ServerConfig.installHost
+    }
+    private var distributedSubtitle: String {
+        switch ServerConfig.certMode {
+        case "zefv":  return ZefvClient.shared.isAuthenticated ? "VPS · works on cellular" : "Sign in: Settings › zefv.dev"
+        case "local": return "Local root CA · offline"
+        default:      return "Public URL for OTA"
+        }
+    }
+    private var certModeLabel: String {
+        switch ServerConfig.certMode {
+        case "zefv":  return "zefv.dev · LE"
+        case "local": return "Local CA"
+        default:      return "Let's Encrypt"
+        }
     }
 
     private func certSubtitle(_ c: Certificate) -> String {
@@ -665,8 +691,14 @@ struct SigningSheet: View {
 
     private var tracingCard: some View {
         HStack(spacing: 10) {
-            ProgressView().tint(blue)
-            Text("Watching installd… tap Install in the iOS sheet. Report in ~25s.").font(.caption).foregroundStyle(Theme.subtle)
+            if let p = ota.uploadProgress {
+                // zefv.dev mode — show real upload progress
+                ProgressView(value: p).tint(blue).frame(width: 90)
+                Text("Uploading to zefv.dev… \(Int(p * 100))%").font(.caption).foregroundStyle(Theme.subtle)
+            } else {
+                ProgressView().tint(blue)
+                Text("Watching installd… tap Install in the iOS sheet. Report in ~25s.").font(.caption).foregroundStyle(Theme.subtle)
+            }
         }
         .padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 14))
     }
@@ -674,15 +706,31 @@ struct SigningSheet: View {
     private func reportCard(_ r: OTAInstaller.Report) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Install trace", systemImage: "waveform.path.ecg").font(.headline).foregroundStyle(.white)
+                Label(r.installURL == nil ? "Install trace" : "zefv.dev install",
+                      systemImage: r.installURL == nil ? "waveform.path.ecg" : "arrow.up.right.circle.fill")
+                    .font(.headline).foregroundStyle(.white)
                 Spacer()
-                Text(r.delivered ? "IPA DELIVERED" : "NOT DELIVERED")
+                Text(r.delivered ? (r.installURL == nil ? "IPA DELIVERED" : "UPLOADED") : "NOT DELIVERED")
                     .font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(0.5)
                     .padding(.horizontal, 7).padding(.vertical, 3)
                     .background((r.delivered ? Color.green : Color.orange).opacity(0.18))
                     .foregroundStyle(r.delivered ? .green : .orange).clipShape(Capsule())
             }
-            if r.requests.isEmpty {
+            if let url = r.installURL {
+                // zefv.dev mode — surface the shareable install link
+                HStack(spacing: 8) {
+                    Image(systemName: "link").foregroundStyle(blue).font(.caption)
+                    Text(url.replacingOccurrences(of: "itms-services://?action=download-manifest&url=", with: ""))
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(.white)
+                        .lineLimit(2).truncationMode(.middle)
+                    Spacer()
+                    Button {
+                        UIPasteboard.general.string = url.replacingOccurrences(of: "itms-services://?action=download-manifest&url=", with: "")
+                    } label: {
+                        Image(systemName: "doc.on.doc").font(.caption).foregroundStyle(blue)
+                    }
+                }
+            } else if r.requests.isEmpty {
                 Text("installd made no requests.").font(.caption).foregroundStyle(.orange)
             } else {
                 ForEach(r.requests) { e in

@@ -72,8 +72,8 @@ struct SettingsView: View {
                         SettingsSection("Signing") {
                             SettingsRow(icon: "checkmark.seal.fill", title: "Certificates",
                                         subtitle: certs.active?.name ?? "No signing certificate") { screen = .certificates }
-                            SettingsRow(icon: "network", title: "On-Device OTA Domain",
-                                        subtitle: "\(ServerConfig.installHost) · certbot via Actions") { screen = .otaDomain }
+                            SettingsRow(icon: "network", title: "OTA Install Mode",
+                                        subtitle: otaModeSubtitle) { screen = .otaDomain }
                         }
 
                         SettingsSection("zefv.dev Account", trailing: zefv.currentUser?.rank_name.uppercased()) {
@@ -143,6 +143,14 @@ struct SettingsView: View {
     private var repoSubtitle: String {
         guard !config.owner.isEmpty, !config.repo.isEmpty else { return "Set owner, repo and branch" }
         return "\(config.owner)/\(config.repo) @ \(config.branch.isEmpty ? "main" : config.branch)"
+    }
+
+    private var otaModeSubtitle: String {
+        switch ServerConfig.certMode {
+        case "zefv":  return zefv.currentUser.map { "zefv.dev · \($0.username).zefv.dev" } ?? "zefv.dev · sign in to use"
+        case "local": return "Fully local · \(ServerConfig.installHost)"
+        default:      return "Public (ACME) · \(ServerConfig.installHost)"
+        }
     }
 
     private var zefvSubtitle: String {
@@ -690,7 +698,7 @@ private struct OTADomainScreen: View {
     }
 
     var body: some View {
-        DetailScreen(title: "On-Device OTA Domain") {
+        DetailScreen(title: "OTA Install Mode") {
             modeCard
             activeCertCard
             if mode == "public" { hostCard
@@ -961,14 +969,14 @@ private struct OTADomainScreen: View {
             VStack(alignment: .leading, spacing: 10) {
                 Label("Certificate mode", systemImage: "lock.rotation").font(.headline).foregroundStyle(Theme.text)
                 HStack(spacing: 8) {
-                    ForEach(["public": "Public (ACME)", "local": "Fully local"].sorted(by: { $0.key > $1.key }), id: \.key) { k, name in
+                    ForEach(Self.modeOptions, id: \.key) { k, name, icon in
                         Button {
                             mode = k; ServerConfig.setCertMode(k)
                             UINotificationFeedbackGenerator().notificationOccurred(.success)
                         } label: {
                             VStack(spacing: 3) {
-                                Image(systemName: k == "public" ? "globe" : "iphone").font(.system(size: 16))
-                                Text(name).font(.system(size: 12, weight: .semibold))
+                                Image(systemName: icon).font(.system(size: 16))
+                                Text(name).font(.system(size: 11, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
                             }
                             .padding(.vertical, 12).frame(maxWidth: .infinity)
                             .background(mode == k ? Theme.accent.opacity(0.18) : Theme.card)
@@ -979,11 +987,32 @@ private struct OTADomainScreen: View {
                         .buttonStyle(.plain)
                     }
                 }
-                Text(mode == "public"
-                     ? "Real ACME cert (Let's Encrypt/ZeroSSL), trusted by iOS out of the box. Needs the DNS TXT step, no profile."
-                     : "Your own root CA — no DNS, no external CA, instant and offline. iOS trusts it only after you install the root profile once (you can inspect it first).")
+                Text(modeDescription)
                     .font(.caption).foregroundStyle(Theme.subtle)
+                if mode == "zefv" && !ZefvClient.shared.isAuthenticated {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text("Not signed in — Settings › zefv.dev Account").font(.caption).foregroundStyle(.orange)
+                    }
+                }
             }
+        }
+    }
+
+    private static let modeOptions: [(key: String, name: String, icon: String)] = [
+        ("zefv",   "zefv.dev",    "cloud.fill"),
+        ("public", "Public",      "globe"),
+        ("local",  "Fully local", "iphone"),
+    ]
+
+    private var modeDescription: String {
+        switch mode {
+        case "zefv":
+            return "Recommended. Signed IPAs are uploaded to your username.zefv.dev subdomain and installed from there. The VPS holds the *.zefv.dev cert (auto-renews); nothing on the phone. Works on cellular, no DNS or profile setup."
+        case "local":
+            return "Your own root CA — no external CA, instant and offline. Needs the install host → 127.0.0.1 and the root profile trusted once."
+        default:
+            return "Legacy. Bundled ACME cert on the on-device server. Needs the install host → 127.0.0.1 — note *.zefv.dev now points at the VPS, so this only works with a custom domain."
         }
     }
 
@@ -1615,7 +1644,7 @@ private struct CertInspectorScreen: View {
     var body: some View {
         DetailScreen(title: "Certificate inspector") {
             Card {
-                Text("Same parser, same fields, for every certificate this app can present to iOS. Compare what a public CA issued against what this phone issued. Active mode: \(ServerConfig.certMode == "local" ? "Fully local" : "Public (ACME)").")
+                Text("Same parser, same fields, for every certificate this app can present to iOS. Compare what a public CA issued against what this phone issued. Active mode: \(ServerConfig.certMode == "zefv" ? "zefv.dev (VPS)" : ServerConfig.certMode == "local" ? "Fully local" : "Public (ACME)").")
                     .font(.caption).foregroundStyle(Theme.subtle)
             }
             chainSection("PUBLIC (ACME) CERT", publicChain, empty: "No public cert loaded.")

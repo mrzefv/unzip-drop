@@ -39,4 +39,4 @@ struct TopBar: View {
 }
 
 /// Identifiable URL wrapper for .sheet(item:).
-struct URLItem: Identifiable { let url: URL; var id: String { url.path } }
+nonisolated struct URLItem: Identifiable { let url: URL; var id: String { url.path } }

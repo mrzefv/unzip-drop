@@ -278,21 +278,20 @@ struct ZefvShareSheet: View {
                 version: version,
                 name: name,
                 onProgress: { p in
-                    Task { @MainActor in
-                        if phase == .prepping { phase = .uploading }
-                        progress = p
-                    }
+                    // Closure is @MainActor — direct @State mutation is safe.
+                    if phase == .prepping { phase = .uploading }
+                    progress = p
                 }
             )
-            await MainActor.run {
-                result = r
-                progress = 1
-                phase = .done
-            }
+            result = r
+            progress = 1
+            phase = .done
         } catch let e as ZefvError {
-            await MainActor.run { error = e.message; phase = .failed }
+            error = e.message
+            phase = .failed
         } catch {
-            await MainActor.run { self.error = error.localizedDescription; phase = .failed }
+            self.error = error.localizedDescription
+            phase = .failed
         }
     }
 }

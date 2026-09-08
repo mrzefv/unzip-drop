@@ -503,7 +503,12 @@ private struct RegisterForm: View {
     }
 
     private var canSubmit: Bool {
-        username.count >= 3 && password.count >= 8 && availability != .checking && availability != .unavailable(reason: "")
+        // Server enforces 5-char minimum at rank 0 (Rookie); mirror it here.
+        guard username.count >= 5, password.count >= 8 else { return false }
+        switch availability {
+        case .available, .idle:          return true   // .idle = check didn't run/failed — let server validate
+        case .checking, .unavailable:    return false
+        }
     }
 
     @ViewBuilder private var availabilityHint: some View {

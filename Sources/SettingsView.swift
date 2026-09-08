@@ -37,8 +37,10 @@ struct SettingsView: View {
     var body: some View {
         ZStack {
                 Color.clear.ignoresSafeArea()
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 0) {
+                VStack(spacing: 0) {
+                    AccentTopBar(title: "Settings", subtitle: "\(Theme.appName) \(Theme.appVersion)")
+                    ScrollView(showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 0) {
 
                         SettingsSection("General", trailing: "\(Theme.appName.uppercased()) \(Theme.appVersion)") {
                             SettingsRow(icon: "info.circle.fill", title: "About", subtitle: "App information and version") { screen = .about }
@@ -113,6 +115,7 @@ struct SettingsView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 6)
                     .padding(.bottom, 20)
+            }
             }
         }
         .fullScreenCover(item: $screen) { s in

@@ -547,8 +547,12 @@ struct AccentBarBlur: View {
 // by writing this preference. RootView listens with .onPreferenceChange.
 
 struct AccentFrameTopInsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 66
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    // PreferenceKey's requirements are nonisolated. Under the project's
+    // SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor these would otherwise be
+    // MainActor-isolated and fail to satisfy the protocol cleanly. A
+    // computed property (not stored) is required for `nonisolated`.
+    nonisolated static var defaultValue: CGFloat { 66 }
+    nonisolated static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         // Prefer the largest child's request — a nested view with a taller
         // topbar wins over the default.
         let next = nextValue()

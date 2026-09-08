@@ -20,7 +20,7 @@ import UIKit
 
 // MARK: - API models
 
-struct ZefvUser: Codable, Sendable, Equatable {
+nonisolated struct ZefvUser: Codable, Sendable, Equatable {
     let username:          String
     let display_name:      String?
     let xp:                Int
@@ -38,7 +38,7 @@ struct ZefvUser: Codable, Sendable, Equatable {
     var subdomainURL: URL? { URL(string: "https://\(username).zefv.dev/") }
 }
 
-struct ZefvStyle: Codable, Sendable, Equatable {
+nonisolated struct ZefvStyle: Codable, Sendable, Equatable {
     /// Solid hex like `#00d0aa` (ranks 0–2).
     let color:         String?
     /// Two+ hex stops for a linear gradient (rank 3).
@@ -53,7 +53,7 @@ struct ZefvStyle: Codable, Sendable, Equatable {
     let emoji_prefix:  String?
 }
 
-struct ZefvUploadResult: Codable, Sendable, Equatable {
+nonisolated struct ZefvUploadResult: Codable, Sendable, Equatable {
     let ipa_url:      String
     let plist_url:    String
     let install_url:  String     // itms-services://...
@@ -61,7 +61,7 @@ struct ZefvUploadResult: Codable, Sendable, Equatable {
     let user:         ZefvUser
 }
 
-struct ZefvUploadEntry: Codable, Sendable, Equatable, Identifiable {
+nonisolated struct ZefvUploadEntry: Codable, Sendable, Equatable, Identifiable {
     let filename:       String
     let bundle_id:      String
     let version:        String?
@@ -76,7 +76,7 @@ struct ZefvUploadEntry: Codable, Sendable, Equatable, Identifiable {
     var id: String { bundle_id }
 }
 
-struct ZefvRank: Codable, Sendable, Equatable, Identifiable {
+nonisolated struct ZefvRank: Codable, Sendable, Equatable, Identifiable {
     let rank:          Int
     let name:          String
     let min_level:     Int
@@ -87,7 +87,7 @@ struct ZefvRank: Codable, Sendable, Equatable, Identifiable {
     var id: Int { rank }
 }
 
-struct ZefvDevice: Codable, Sendable, Equatable, Identifiable {
+nonisolated struct ZefvDevice: Codable, Sendable, Equatable, Identifiable {
     let mdid:           String
     let device_name:    String?
     let first_seen_at:  Int
@@ -95,7 +95,7 @@ struct ZefvDevice: Codable, Sendable, Equatable, Identifiable {
     var id: String { mdid }
 }
 
-struct ZefvCheckUsername: Codable, Sendable {
+nonisolated struct ZefvCheckUsername: Codable, Sendable {
     let available:   Bool
     let reason:      String?
     let min_length:  Int?
@@ -103,7 +103,7 @@ struct ZefvCheckUsername: Codable, Sendable {
 
 // MARK: - Errors
 
-struct ZefvError: Error, LocalizedError {
+nonisolated struct ZefvError: Error, LocalizedError {
     let status:  Int
     let message: String
     var errorDescription: String? {
@@ -312,88 +312,102 @@ final class ZefvClient: ObservableObject {
     /// serves both files from `slug.zefv.dev/<safeBundle>.ipa|.plist`
     /// with a valid `*.zefv.dev` Let's Encrypt cert.
     ///
-    /// Progress reporting is optional. Call `open(URL(string: result.install_url)!)`
-    /// on completion — iOS Safari (via UIApplication.shared.open) will handle
-    /// the itms-services:// scheme and prompt the user to install.
+    /// The multipart body is assembled on a background task (a 200 MB IPA
+    /// would otherwise stall the main actor for seconds). `onProgress` is
+    /// always invoked on the main actor.
     func upload(ipaURL: URL,
                 bundleID: String,
                 version: String,
                 name: String,
-                onProgress: ((Double) -> Void)? = nil) async throws -> ZefvUploadResult {
+                onProgress: (@MainActor (Double) -> Void)? = nil) async throws -> ZefvUploadResult {
         guard let tok = token, !tok.isEmpty else {
             throw ZefvError(status: 401, message: "Not signed in")
         }
 
-        let url = Self.baseURL.appendingPathComponent("upload")
         let boundary = "----zefv-\(UUID().uuidString)"
+        let mdid     = MDID.current        // read on main actor before hopping off
 
-        // We build the request body on disk to avoid holding the full IPA
-        // in memory for large uploads.
-        let tmpBody = FileManager.default.temporaryDirectory
-            .appendingPathComponent("zefv-upload-\(UUID().uuidString).bin")
-        FileManager.default.createFile(atPath: tmpBody.path, contents: nil)
+        // Assemble the multipart body on disk, off the main actor.
+        let tmpBody = try await Task.detached(priority: .userInitiated) {
+            try Self.buildMultipartBody(
+                ipaURL: ipaURL, bundleID: bundleID, version: version, name: name,
+                boundary: boundary
+            ) { p in
+                // Hop back to main for UI progress. Fire-and-forget is fine —
+                // progress is advisory.
+                if let onProgress {
+                    Task { @MainActor in onProgress(p * 0.95) }   // reserve 5% for server ack
+                }
+            }
+        }.value
         defer { try? FileManager.default.removeItem(at: tmpBody) }
 
-        guard let handle = try? FileHandle(forWritingTo: tmpBody) else {
-            throw ZefvError(status: 0, message: "Couldn't create upload buffer")
-        }
-        defer { try? handle.close() }
-
-        func writeString(_ s: String) throws {
-            try handle.write(contentsOf: Data(s.utf8))
-        }
-        func writeField(_ fieldName: String, _ value: String) throws {
-            try writeString("--\(boundary)\r\n")
-            try writeString("Content-Disposition: form-data; name=\"\(fieldName)\"\r\n\r\n")
-            try writeString("\(value)\r\n")
-        }
-
-        try writeField("bundle_id", bundleID)
-        try writeField("version",   version)
-        try writeField("name",      name)
-
-        // File part
-        try writeString("--\(boundary)\r\n")
-        try writeString("Content-Disposition: form-data; name=\"ipa\"; filename=\"app.ipa\"\r\n")
-        try writeString("Content-Type: application/octet-stream\r\n\r\n")
-
-        // Stream the IPA in ~1 MB chunks so we don't blow memory.
-        guard let inHandle = try? FileHandle(forReadingFrom: ipaURL) else {
-            throw ZefvError(status: 0, message: "Couldn't open IPA at \(ipaURL.path)")
-        }
-        defer { try? inHandle.close() }
-
-        let ipaBytes = (try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int) ?? 0
-        var written = 0
-        let chunkSize = 1024 * 1024
-        while true {
-            guard let chunk = try? inHandle.read(upToCount: chunkSize), !chunk.isEmpty else { break }
-            try handle.write(contentsOf: chunk)
-            written += chunk.count
-            if ipaBytes > 0, let onProgress {
-                let p = min(1.0, Double(written) / Double(ipaBytes))
-                await MainActor.run { onProgress(p * 0.95) }   // reserve 5% for server ack
-            }
-        }
-
-        try writeString("\r\n--\(boundary)--\r\n")
-        try handle.synchronize()
-
-        var req = URLRequest(url: url)
+        var req = URLRequest(url: Self.baseURL.appendingPathComponent("upload"))
         req.httpMethod = "POST"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        req.setValue(tok, forHTTPHeaderField: "X-Auth-Token")
-        req.setValue(MDID.current, forHTTPHeaderField: "X-MDID")
+        req.setValue(tok,  forHTTPHeaderField: "X-Auth-Token")
+        req.setValue(mdid, forHTTPHeaderField: "X-MDID")
 
-        // uploadTask(fromFile:) streams from disk without loading into memory.
+        // upload(for:fromFile:) streams from disk without loading into memory.
         let (data, response) = try await session.upload(for: req, fromFile: tmpBody)
         try Self.throwIfErrorStatus(response, data: data)
 
-        if let onProgress { await MainActor.run { onProgress(1.0) } }
+        onProgress?(1.0)
 
         let result = try decoder.decode(ZefvUploadResult.self, from: data)
         self.currentUser = result.user   // XP was awarded — update in place
         return result
+    }
+
+    /// Writes a multipart/form-data body to a temp file and returns its URL.
+    /// Runs nonisolated so it can be called from a detached task. The IPA is
+    /// streamed in 1 MB chunks so memory stays flat regardless of IPA size.
+    nonisolated private static func buildMultipartBody(
+        ipaURL: URL, bundleID: String, version: String, name: String,
+        boundary: String,
+        onProgress: @escaping @Sendable (Double) -> Void
+    ) throws -> URL {
+        let tmpBody = FileManager.default.temporaryDirectory
+            .appendingPathComponent("zefv-upload-\(UUID().uuidString).bin")
+        FileManager.default.createFile(atPath: tmpBody.path, contents: nil)
+
+        guard let out = try? FileHandle(forWritingTo: tmpBody) else {
+            throw ZefvError(status: 0, message: "Couldn't create upload buffer")
+        }
+        defer { try? out.close() }
+
+        func write(_ s: String) throws { try out.write(contentsOf: Data(s.utf8)) }
+        func field(_ n: String, _ v: String) throws {
+            try write("--\(boundary)\r\n")
+            try write("Content-Disposition: form-data; name=\"\(n)\"\r\n\r\n")
+            try write("\(v)\r\n")
+        }
+
+        try field("bundle_id", bundleID)
+        try field("version",   version)
+        try field("name",      name)
+
+        try write("--\(boundary)\r\n")
+        try write("Content-Disposition: form-data; name=\"ipa\"; filename=\"app.ipa\"\r\n")
+        try write("Content-Type: application/octet-stream\r\n\r\n")
+
+        guard let inp = try? FileHandle(forReadingFrom: ipaURL) else {
+            throw ZefvError(status: 0, message: "Couldn't open IPA at \(ipaURL.path)")
+        }
+        defer { try? inp.close() }
+
+        let total = (try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int) ?? 0
+        var written = 0
+        let chunk = 1024 * 1024
+        while let d = try? inp.read(upToCount: chunk), !d.isEmpty {
+            try out.write(contentsOf: d)
+            written += d.count
+            if total > 0 { onProgress(min(1.0, Double(written) / Double(total))) }
+        }
+
+        try write("\r\n--\(boundary)--\r\n")
+        try out.synchronize()
+        return tmpBody
     }
 
     // MARK: - Convenience

@@ -5,7 +5,7 @@
 import Foundation
 import Security
 
-enum Keychain {
+nonisolated enum Keychain {
     private static let service = "unzip-drop"
 
     @discardableResult

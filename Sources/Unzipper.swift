@@ -5,7 +5,7 @@
 import Foundation
 import ZIPFoundation
 
-enum Unzipper {
+nonisolated enum Unzipper {
 
     enum Failure: LocalizedError {
         case notAZip

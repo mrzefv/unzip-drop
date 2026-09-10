@@ -38,16 +38,9 @@ nonisolated enum ServerConfig {
     ///   server.crt ← fullchain.pem   server.pem ← privkey.pem
     static let certResource = "server"
 
-    /// OTA transport + cert source:
-    ///   "zefv"   → (DEFAULT) upload to the zefv.dev VPS; it serves the IPA with its
-    ///              own *.zefv.dev cert. No cert material on the phone, no loopback DNS,
-    ///              works on cellular. Needs a zefv.dev account.
-    ///   "public" → on-device Vapor server with the bundled ACME cert. LEGACY —
-    ///              needs `installHost` → 127.0.0.1, and *.zefv.dev now resolves
-    ///              to the VPS, so only works with a custom domain.
-    ///   "local"  → on-device Vapor server with our own root CA. Needs loopback
-    ///              DNS + root profile trusted. Offline-capable.
-    static var certMode: String { UserDefaults.standard.string(forKey: "uzd_cert_mode") ?? "zefv" }
+    /// OTA TLS source: "public" (ACME/DNS cert, iOS-trusted, no profile) or
+    /// "local" (our own root CA — no DNS, but needs the root profile installed).
+    static var certMode: String { UserDefaults.standard.string(forKey: "uzd_cert_mode") ?? "public" }
     static func setCertMode(_ m: String) { UserDefaults.standard.set(m, forKey: "uzd_cert_mode") }
 
     /// Hand-rolled cert pipeline: .github/workflows/certs.yml runs certbot

@@ -14,71 +14,26 @@ struct RootView: View {
     @State private var showSign = false
     @ObservedObject private var hub = GitHubHub.shared
     @State private var tab = 0
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var themePanel = ThemePanelState.shared
-    @State private var wheelExpanded = true
-    @State private var bgExpanded = false
-    /// Read via PreferenceKey from whichever screen is on top — lets detail
-    /// screens (like SourceDetailScreen) push the rails down past their
-    /// taller topbar stacks. Defaults to 66pt (single AccentTopBar height).
-    @State private var railTopInset: CGFloat = 66
 
     var body: some View {
         ZStack {
-            // App-wide animated background — shows behind every tab, incl. Browse.
-            ParticleBackground(accent: theme.accent, style: theme.background)
-
-            ZStack {
-                switch tab {
-                case 0: LibraryView()
-                case 1: SourcesView()
-                case 2: SignedView()
-                default: SettingsView()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            if themePanel.open {
-                Color.black.opacity(0.25).ignoresSafeArea().onTapGesture { withAnimation { themePanel.open = false } }
-                VStack {
-                    ThemePalettePanel(expandedWheel: $wheelExpanded, expandedBackground: $bgExpanded) { themePanel.open = false }
-                        .padding(.top, 60)
-                    Spacer()
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .zIndex(2)
+            switch tab {
+            case 0: LibraryView()
+            case 1: SourcesView()
+            case 2: SignedView()
+            default: SettingsView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             TabBar(selected: $tab)
         }
-        // ─── Accent frame lives at the OUTERMOST level, above every tab AND
-        // the TabBar. Nothing any tab draws (NavigationStack, List backgrounds,
-        // etc.) can cover it because this overlay is applied last. ───
-        .overlay(
-            GeometryReader { proxy in
-                // AccentTopBar height default; screens with taller topbar
-                // stacks (SourceDetailScreen = header + countBar) push
-                // railTopInset up via .accentFrameTopInset(...).
-                // TabBar is 50pt content + 8pt top padding = 58pt, plus bottom safe area.
-                AccentFrame(
-                    color: theme.accent,
-                    topInset: proxy.safeAreaInsets.top + railTopInset,
-                    bottomInset: 58 + proxy.safeAreaInsets.bottom
-                )
-                .allowsHitTesting(false)
-            }
-        )
-        .onPreferenceChange(AccentFrameTopInsetKey.self) { railTopInset = $0 }
-        .tint(theme.accent)
-        .preferredColorScheme(theme.darkMode ? .dark : .light)
+        .background(Color.black.ignoresSafeArea())
         .onChange(of: signQueue.requestedTab) { t in
             // Signing is a flow, not a tab: present SignView over whatever's showing.
             if t != nil { showSign = true; signQueue.requestedTab = nil }
         }
         .fullScreenCover(isPresented: $showSign) { SignView().preferredColorScheme(.dark) }
-
         .fullScreenCover(isPresented: $hub.isPresented) {
             GitHubHubScreen()
                 .environmentObject(session)
@@ -116,45 +71,7 @@ private struct TabBar: View {
         .frame(height: 50)
         .padding(.top, 8)
         .background(BarBlur())
-        .overlay(Rectangle().fill(Theme.accent).frame(height: 2), alignment: .top)
-    }
-}
-
-// MARK: - Accent frame around the app content
-// Two 2px vertical rails on the left and right edges of the tab content
-// area. The rails start exactly at the AccentTopBar's bottom border (so they
-// don't run up through the status bar / notch / topbar) and end at the
-// TabBar's 2px accent top border — forming a closed accent-tinted rectangle
-// that hugs the actual scrolling content on every tab.
-
-private struct AccentFrame: View {
-    var color: Color
-    /// Distance from the top of the screen where the rails BEGIN. Matches the
-    /// safe-area top inset (status bar / notch / Dynamic Island) plus the
-    /// AccentTopBar height, so the rails visually connect to the bottom edge
-    /// of the topbar's 2px accent bottom border.
-    var topInset: CGFloat
-    /// Distance from the bottom of the screen where the rails END. Matches
-    /// the TabBar height (58pt) plus the bottom safe-area inset, so the
-    /// rails visually connect to the TabBar's 2px accent top border.
-    var bottomInset: CGFloat
-
-    var body: some View {
-        GeometryReader { geo in
-            let railHeight = max(0, geo.size.height - topInset - bottomInset)
-            ZStack(alignment: .topLeading) {
-                // Left rail
-                Rectangle().fill(color)
-                    .frame(width: 2, height: railHeight)
-                    .offset(x: 0, y: topInset)
-                // Right rail
-                Rectangle().fill(color)
-                    .frame(width: 2, height: railHeight)
-                    .offset(x: geo.size.width - 2, y: topInset)
-            }
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-        }
-        .ignoresSafeArea()
+        .overlay(Rectangle().fill(Theme.stroke).frame(height: 0.5), alignment: .top)
     }
 }
 

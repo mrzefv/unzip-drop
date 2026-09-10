@@ -120,15 +120,7 @@ final class CertificateStore: ObservableObject {
             try p12.write(to: AppPaths.documents.appendingPathComponent(p12Rel))
             try provision.write(to: AppPaths.documents.appendingPathComponent(provRel))
         } catch { throw CertError.importFailed }
-        // Local password (fast path)
         Keychain.set("cert-" + id, password)
-        // Durable copies in iCloud Keychain — survive app deletion so we can
-        // rehydrate everything on reinstall without the user re-typing
-        // password or re-importing files.
-        Keychain.setPersistent("uzd-cert-p12-" + id, p12)
-        Keychain.setPersistent("uzd-cert-mp-"  + id, provision)
-        Keychain.setPersistentString("uzd-cert-pw-"   + id, password)
-        Keychain.setPersistentString("uzd-cert-name-" + id, name.isEmpty ? "Certificate" : name)
         let cert = Certificate(id: id, name: name.isEmpty ? "Certificate" : name,
                                p12RelPath: p12Rel, provisionRelPath: provRel, addedAt: Date())
         certificates.append(cert)
@@ -141,12 +133,6 @@ final class CertificateStore: ObservableObject {
         try? FileManager.default.removeItem(at: cert.p12URL)
         try? FileManager.default.removeItem(at: cert.provisionURL)
         Keychain.set("cert-" + cert.id, "")
-        // Also wipe from persistent iCloud Keychain — explicit user delete
-        // should not resurrect on the next launch.
-        Keychain.setPersistent("uzd-cert-p12-" + cert.id, Data())
-        Keychain.setPersistent("uzd-cert-mp-"  + cert.id, Data())
-        Keychain.setPersistentString("uzd-cert-pw-"   + cert.id, "")
-        Keychain.setPersistentString("uzd-cert-name-" + cert.id, "")
         certificates.removeAll { $0.id == cert.id }
         if activeID == cert.id { activeID = certificates.first?.id }
         save()
@@ -200,70 +186,9 @@ final class CertificateStore: ObservableObject {
     }
 
     private func load() {
-        if let data = try? Data(contentsOf: indexURL),
-           let list = try? JSONDecoder().decode([Certificate].self, from: data), !list.isEmpty {
-            certificates = list
-            // Repair any on-disk files that got wiped but are still in iCloud
-            // Keychain (e.g. sandbox reset without full reinstall).
-            for c in certificates {
-                if !FileManager.default.fileExists(atPath: c.p12URL.path),
-                   let p12 = Keychain.getPersistent("uzd-cert-p12-" + c.id) {
-                    try? FileManager.default.createDirectory(at: c.p12URL.deletingLastPathComponent(),
-                                                              withIntermediateDirectories: true)
-                    try? p12.write(to: c.p12URL)
-                }
-                if !FileManager.default.fileExists(atPath: c.provisionURL.path),
-                   let mp = Keychain.getPersistent("uzd-cert-mp-" + c.id) {
-                    try? FileManager.default.createDirectory(at: c.provisionURL.deletingLastPathComponent(),
-                                                              withIntermediateDirectories: true)
-                    try? mp.write(to: c.provisionURL)
-                }
-                if Keychain.get("cert-" + c.id) == nil,
-                   let pw = Keychain.getPersistentString("uzd-cert-pw-" + c.id) {
-                    Keychain.set("cert-" + c.id, pw)
-                }
-            }
-            return
-        }
-        // Fresh install (no local index yet): rebuild from iCloud Keychain.
-        rehydrateFromKeychain()
-    }
-
-    /// First-launch recovery after app deletion: scan iCloud Keychain for
-    /// uzd-cert-p12-<id> entries and reconstitute the Documents/certs files
-    /// and index so the user doesn't have to re-import anything.
-    private func rehydrateFromKeychain() {
-        let keys = Keychain.allPersistentKeys()
-        let ids = Set(keys.compactMap { key -> String? in
-            guard key.hasPrefix("uzd-cert-p12-") else { return nil }
-            return String(key.dropFirst("uzd-cert-p12-".count))
-        })
-        var recovered: [Certificate] = []
-        for id in ids {
-            guard let p12 = Keychain.getPersistent("uzd-cert-p12-" + id),
-                  !p12.isEmpty,
-                  let mp = Keychain.getPersistent("uzd-cert-mp-" + id),
-                  !mp.isEmpty else { continue }
-            let pw   = Keychain.getPersistentString("uzd-cert-pw-"   + id) ?? ""
-            let name = Keychain.getPersistentString("uzd-cert-name-" + id) ?? "Certificate"
-            let p12Rel  = "certs/\(id).p12"
-            let provRel = "certs/\(id).mobileprovision"
-            let p12URL  = AppPaths.documents.appendingPathComponent(p12Rel)
-            let provURL = AppPaths.documents.appendingPathComponent(provRel)
-            try? FileManager.default.createDirectory(at: p12URL.deletingLastPathComponent(),
-                                                      withIntermediateDirectories: true)
-            try? p12.write(to: p12URL)
-            try? mp.write(to: provURL)
-            // Local (non-persistent) password mirror for fast reads
-            Keychain.set("cert-" + id, pw)
-            recovered.append(Certificate(id: id, name: name,
-                                          p12RelPath: p12Rel, provisionRelPath: provRel,
-                                          addedAt: Date()))
-        }
-        if !recovered.isEmpty {
-            certificates = recovered.sorted { $0.name < $1.name }
-            save()
-        }
+        guard let data = try? Data(contentsOf: indexURL),
+              let list = try? JSONDecoder().decode([Certificate].self, from: data) else { return }
+        certificates = list
     }
     private func save() { try? JSONEncoder().encode(certificates).write(to: indexURL) }
 }
@@ -297,11 +222,6 @@ final class SignedStore: ObservableObject {
         return e
     }
 
-    /// Delete a single signed entry — by its unique UUID `id`, NOT by
-    /// bundle ID. Two signed IPAs with the same bundle ID are separate
-    /// entries with separate ids and one delete never cascades to the
-    /// other. Two entries with the same display name but different
-    /// bundle IDs are likewise independent.
     func delete(_ e: SignedEntry) {
         try? FileManager.default.removeItem(at: e.ipaURL)
         if let u = e.iconURL { try? FileManager.default.removeItem(at: u) }
@@ -331,118 +251,5 @@ final class SignQueue: ObservableObject {
     func enqueue(_ url: URL, switchToSign: Bool = true) {
         pending = url
         if switchToSign { requestedTab = 0 }
-    }
-}
-
-// MARK: - Signing history (survives app deletion)
-//
-// Records `{bundleID -> certName, signedAt, rootCAFingerprint}` for every IPA
-// signed by this device. Persists to a JSON file under Application Support so
-// the record survives even after the signed .ipa is removed from the Library.
-//
-// Used by AppDetailSheet to show "Previously signed w/ X" and "Root CA still
-// trusted on this device" pills the next time the same bundle comes back up
-// in a repo listing — even if the user has deleted the signed copy.
-
-@MainActor
-final class SigningHistory: ObservableObject {
-    static let shared = SigningHistory()
-
-    struct Entry: Codable, Identifiable {
-        var id: String { bundleID }
-        var bundleID: String
-        var certName: String
-        var signedAt: Date
-        /// Whether the root CA (the ZefV/DELvEK CA the certs chain to) is
-        /// still installed & trusted in the device's Trust Store. Rechecked
-        /// lazily on read.
-        var rootCAInstalled: Bool
-    }
-
-    @Published private(set) var entries: [Entry] = []
-
-    private var indexURL: URL { AppPaths.dir("index").appendingPathComponent("sign-history.json") }
-
-    private init() { load() }
-
-    private static let persistentKey = "uzd-sign-history"
-
-    /// Called after a successful sign — persists the record durably.
-    /// Keyed by bundleID so multiple installs of the same app under different
-    /// bundle IDs (e.g. re-signed with a custom bundle) each get their own
-    /// history entry. Deleting one signed instance never affects the history
-    /// of another bundle.
-    func record(bundleID: String, certName: String) {
-        entries.removeAll { $0.bundleID == bundleID }
-        entries.insert(Entry(
-            bundleID: bundleID,
-            certName: certName,
-            signedAt: Date(),
-            rootCAInstalled: Self.isRootCATrusted()
-        ), at: 0)
-        save()
-    }
-
-    /// Explicitly forget history for a specific bundle. Called only when the
-    /// user explicitly asks (never on incidental app-record deletion) since
-    /// history is what makes reinstall painless.
-    func forget(bundleID: String) {
-        entries.removeAll { $0.bundleID == bundleID }
-        save()
-    }
-
-    /// Look up a bundle's signing history. The `rootCAInstalled` bit is
-    /// re-evaluated on every read so it reflects current device trust state.
-    func entry(for bundleID: String) -> Entry? {
-        guard var e = entries.first(where: { $0.bundleID == bundleID }) else { return nil }
-        e.rootCAInstalled = Self.isRootCATrusted()
-        return e
-    }
-
-    /// Best-effort trust check — enumerate the SecTrust store for a CN that
-    /// contains our known root CA marker. Returns true if the root cert is
-    /// present in the user's trust store (whether or not fully trusted for
-    /// all policies — this is a display hint, not a security decision).
-    static func isRootCATrusted() -> Bool {
-        // Anchor names the DELvEK / zefv.dev root CA has historically used.
-        let markers = ["DELvEK", "zefv.dev", "ZefV", "MRzefv", "MRvEK"]
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassCertificate,
-            kSecMatchLimit as String: kSecMatchLimitAll,
-            kSecReturnRef as String: true,
-        ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let certs = result as? [SecCertificate] else { return false }
-        for cert in certs {
-            let summary = SecCertificateCopySubjectSummary(cert) as String? ?? ""
-            if markers.contains(where: { summary.localizedCaseInsensitiveContains($0) }) { return true }
-        }
-        return false
-    }
-
-    private func load() {
-        // Prefer local index (fast path); fall back to iCloud Keychain (survives app deletion).
-        if let d = try? Data(contentsOf: indexURL),
-           let list = try? JSONDecoder().decode([Entry].self, from: d), !list.isEmpty {
-            entries = list
-            return
-        }
-        if let d = Keychain.getPersistent(Self.persistentKey),
-           let list = try? JSONDecoder().decode([Entry].self, from: d) {
-            entries = list
-            // Rewrite the local index for faster next-launch reads.
-            try? FileManager.default.createDirectory(at: indexURL.deletingLastPathComponent(),
-                                                      withIntermediateDirectories: true)
-            try? d.write(to: indexURL)
-        }
-    }
-    private func save() {
-        try? FileManager.default.createDirectory(at: indexURL.deletingLastPathComponent(),
-                                                  withIntermediateDirectories: true)
-        guard let d = try? JSONEncoder().encode(entries) else { return }
-        try? d.write(to: indexURL)
-        // Mirror to iCloud Keychain for post-deletion survival.
-        Keychain.setPersistent(Self.persistentKey, d)
     }
 }

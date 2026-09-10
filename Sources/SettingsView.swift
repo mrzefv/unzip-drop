@@ -15,14 +15,12 @@ private enum Screen: Identifiable, Hashable {
     case dylibTemplate, ipaTemplate
     case certificates, otaDomain, certInspector, transparency
     case tutorials
-    case zefvAccount
     var id: String {
         switch self {
         case .about: return "about"; case .repo: return "repo"; case .token: return "token"
         case .dylibTemplate: return "tpl-dylib"; case .ipaTemplate: return "tpl-ipa"
         case .certificates: return "certs"; case .otaDomain: return "ota"; case .certInspector: return "inspect"; case .transparency: return "transparency"
         case .tutorials: return "tutorials"
-        case .zefvAccount: return "zefv-account"
         }
     }
 }
@@ -31,16 +29,13 @@ struct SettingsView: View {
     @EnvironmentObject var config: Config
     @EnvironmentObject var session: Session
     @ObservedObject private var certs = CertificateStore.shared
-    @ObservedObject private var zefv  = ZefvClient.shared
     @State private var screen: Screen?
 
     var body: some View {
         ZStack {
-                Color.clear.ignoresSafeArea()
-                VStack(spacing: 0) {
-                    AccentTopBar(title: "Settings", subtitle: "\(Theme.appName) \(Theme.appVersion)")
-                    ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 0) {
+                Theme.bg.ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
 
                         SettingsSection("General", trailing: "\(Theme.appName.uppercased()) \(Theme.appVersion)") {
                             SettingsRow(icon: "info.circle.fill", title: "About", subtitle: "App information and version") { screen = .about }
@@ -72,14 +67,8 @@ struct SettingsView: View {
                         SettingsSection("Signing") {
                             SettingsRow(icon: "checkmark.seal.fill", title: "Certificates",
                                         subtitle: certs.active?.name ?? "No signing certificate") { screen = .certificates }
-                            SettingsRow(icon: "network", title: "OTA Install Mode",
-                                        subtitle: otaModeSubtitle) { screen = .otaDomain }
-                        }
-
-                        SettingsSection("zefv.dev Account", trailing: zefv.currentUser?.rank_name.uppercased()) {
-                            SettingsRow(icon: "person.crop.circle.badge.checkmark",
-                                        title: zefv.currentUser?.username ?? (zefv.isAuthenticated ? "Loading…" : "Sign in or register"),
-                                        subtitle: zefvSubtitle) { screen = .zefvAccount }
+                            SettingsRow(icon: "network", title: "On-Device OTA Domain",
+                                        subtitle: "\(ServerConfig.installHost) · certbot via Actions") { screen = .otaDomain }
                         }
 
                         SettingsSection("Transparency") {
@@ -116,7 +105,6 @@ struct SettingsView: View {
                     .padding(.top, 6)
                     .padding(.bottom, 20)
             }
-            }
         }
         .fullScreenCover(item: $screen) { s in
             Group {
@@ -131,7 +119,6 @@ struct SettingsView: View {
                 case .dylibTemplate: DylibTemplateScreen()
                 case .ipaTemplate:   IPATemplateScreen()
                 case .tutorials: TutorialsListScreen()
-                case .zefvAccount: ZefvAccountScreen()
                 }
             }
             .environmentObject(config)
@@ -143,31 +130,6 @@ struct SettingsView: View {
     private var repoSubtitle: String {
         guard !config.owner.isEmpty, !config.repo.isEmpty else { return "Set owner, repo and branch" }
         return "\(config.owner)/\(config.repo) @ \(config.branch.isEmpty ? "main" : config.branch)"
-    }
-
-    private var otaModeSubtitle: String {
-        switch ServerConfig.certMode {
-        case "zefv":  return zefv.currentUser.map { "zefv.dev · \($0.username).zefv.dev" } ?? "zefv.dev · sign in to use"
-        case "local": return "Fully local · \(ServerConfig.installHost)"
-        default:      return "Public (ACME) · \(ServerConfig.installHost)"
-        }
-    }
-
-    private var zefvSubtitle: String {
-        guard let u = zefv.currentUser else {
-            return zefv.isAuthenticated
-                ? "Signed in — refresh account"
-                : "Publish signed IPAs to your username.zefv.dev subdomain"
-        }
-        let quota = u.quota_bytes < 0 ? "unlimited" : byteString(u.quota_bytes)
-        return "\(u.username).zefv.dev · Level \(u.level) · \(byteString(u.bytes_used)) / \(quota)"
-    }
-
-    private func byteString(_ n: Int) -> String {
-        let units = ["B", "KB", "MB", "GB", "TB"]
-        var v = Double(n); var i = 0
-        while v >= 1024, i < units.count - 1 { v /= 1024; i += 1 }
-        return String(format: v < 10 && i > 0 ? "%.1f %@" : "%.0f %@", v, units[i])
     }
 }
 
@@ -350,7 +312,7 @@ private struct DetailScreen<Content: View>: View {
                     .padding(16)
             }
         }
-        .background(Color.clear.ignoresSafeArea())
+        .background(Theme.bg.ignoresSafeArea())
         .scrollDismissesKeyboard(.interactively)
     }
 }
@@ -698,7 +660,7 @@ private struct OTADomainScreen: View {
     }
 
     var body: some View {
-        DetailScreen(title: "OTA Install Mode") {
+        DetailScreen(title: "On-Device OTA Domain") {
             modeCard
             activeCertCard
             if mode == "public" { hostCard
@@ -969,14 +931,14 @@ private struct OTADomainScreen: View {
             VStack(alignment: .leading, spacing: 10) {
                 Label("Certificate mode", systemImage: "lock.rotation").font(.headline).foregroundStyle(Theme.text)
                 HStack(spacing: 8) {
-                    ForEach(Self.modeOptions, id: \.key) { k, name, icon in
+                    ForEach(["public": "Public (ACME)", "local": "Fully local"].sorted(by: { $0.key > $1.key }), id: \.key) { k, name in
                         Button {
                             mode = k; ServerConfig.setCertMode(k)
                             UINotificationFeedbackGenerator().notificationOccurred(.success)
                         } label: {
                             VStack(spacing: 3) {
-                                Image(systemName: icon).font(.system(size: 16))
-                                Text(name).font(.system(size: 11, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                                Image(systemName: k == "public" ? "globe" : "iphone").font(.system(size: 16))
+                                Text(name).font(.system(size: 12, weight: .semibold))
                             }
                             .padding(.vertical, 12).frame(maxWidth: .infinity)
                             .background(mode == k ? Theme.accent.opacity(0.18) : Theme.card)
@@ -987,32 +949,11 @@ private struct OTADomainScreen: View {
                         .buttonStyle(.plain)
                     }
                 }
-                Text(modeDescription)
+                Text(mode == "public"
+                     ? "Real ACME cert (Let's Encrypt/ZeroSSL), trusted by iOS out of the box. Needs the DNS TXT step, no profile."
+                     : "Your own root CA — no DNS, no external CA, instant and offline. iOS trusts it only after you install the root profile once (you can inspect it first).")
                     .font(.caption).foregroundStyle(Theme.subtle)
-                if mode == "zefv" && !ZefvClient.shared.isAuthenticated {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                        Text("Not signed in — Settings › zefv.dev Account").font(.caption).foregroundStyle(.orange)
-                    }
-                }
             }
-        }
-    }
-
-    private static let modeOptions: [(key: String, name: String, icon: String)] = [
-        ("zefv",   "zefv.dev",    "cloud.fill"),
-        ("public", "Public",      "globe"),
-        ("local",  "Fully local", "iphone"),
-    ]
-
-    private var modeDescription: String {
-        switch mode {
-        case "zefv":
-            return "Recommended. Signed IPAs are uploaded to your username.zefv.dev subdomain and installed from there. The VPS holds the *.zefv.dev cert (auto-renews); nothing on the phone. Works on cellular, no DNS or profile setup."
-        case "local":
-            return "Your own root CA — no external CA, instant and offline. Needs the install host → 127.0.0.1 and the root profile trusted once."
-        default:
-            return "Legacy. Bundled ACME cert on the on-device server. Needs the install host → 127.0.0.1 — note *.zefv.dev now points at the VPS, so this only works with a custom domain."
         }
     }
 
@@ -1627,7 +1568,7 @@ private struct ProfileInspector: View {
                 Text(text).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.text)
                     .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled).padding(16)
             }
-            .background(Color.clear.ignoresSafeArea())
+            .background(Theme.bg.ignoresSafeArea())
             .navigationTitle(".mobileconfig").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
@@ -1644,7 +1585,7 @@ private struct CertInspectorScreen: View {
     var body: some View {
         DetailScreen(title: "Certificate inspector") {
             Card {
-                Text("Same parser, same fields, for every certificate this app can present to iOS. Compare what a public CA issued against what this phone issued. Active mode: \(ServerConfig.certMode == "zefv" ? "zefv.dev (VPS)" : ServerConfig.certMode == "local" ? "Fully local" : "Public (ACME)").")
+                Text("Same parser, same fields, for every certificate this app can present to iOS. Compare what a public CA issued against what this phone issued. Active mode: \(ServerConfig.certMode == "local" ? "Fully local" : "Public (ACME)").")
                     .font(.caption).foregroundStyle(Theme.subtle)
             }
             chainSection("PUBLIC (ACME) CERT", publicChain, empty: "No public cert loaded.")

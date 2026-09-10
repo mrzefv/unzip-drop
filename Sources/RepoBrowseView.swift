@@ -40,7 +40,7 @@ struct GHAsset: Identifiable, Equatable {
     var isIPA: Bool { name.lowercased().hasSuffix(".ipa") }
 }
 
-nonisolated struct GHEntry: Identifiable, Equatable {
+struct GHEntry: Identifiable, Equatable {
     let path: String
     let name: String
     let type: String            // file | dir

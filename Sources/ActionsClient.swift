@@ -39,7 +39,7 @@ struct WorkflowJob: Identifiable, Equatable {
     let steps: [WorkflowStep]
 }
 
-nonisolated struct WorkflowStep: Identifiable, Equatable {
+struct WorkflowStep: Identifiable, Equatable {
     let number: Int
     let name: String
     let status: String

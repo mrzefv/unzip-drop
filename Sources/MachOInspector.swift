@@ -222,5 +222,5 @@ nonisolated enum MachOInspector {
 }
 
 private extension Array {
-    nonisolated subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
+    subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
 }

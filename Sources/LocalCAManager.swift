@@ -21,59 +21,21 @@ nonisolated enum LocalCAManager {
     private static let kRootKey = "localca-root-key"
     private static let kLeafKey = "localca-leaf-key"
 
-    // Persistent iCloud-Keychain mirrors. These survive app deletion so the
-    // user's root CA (and any trust they've installed on-device) is
-    // recoverable on reinstall without regenerating.
-    private static let kRootKeyPersistent  = "uzd-localca-root-key"
-    private static let kRootCertPersistent = "uzd-localca-root-cert"
-    private static let kLeafKeyPersistent  = "uzd-localca-leaf-key"
-    private static let kLeafCertPersistent = "uzd-localca-leaf-cert"
-    private static let kMetaPersistent     = "uzd-localca-meta"
-
     static let leafValidDays = 397   // iOS rejects TLS leaves valid > 398 days
 
     struct Meta: Codable, Sendable { var host: String; var rootCreated: Date; var leafIssued: Date; var validYears: Int; var validDays: Int? }
 
     static var meta: Meta? {
-        rehydrateIfNeeded()
         guard let d = try? Data(contentsOf: metaURL) else { return nil }
         let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
         return try? dec.decode(Meta.self, from: d)
     }
 
     static var hasRoot: Bool {
-        rehydrateIfNeeded()
-        return FileManager.default.fileExists(atPath: rootCertURL.path) && Keychain.getSecret(kRootKey) != nil
+        FileManager.default.fileExists(atPath: rootCertURL.path) && Keychain.getSecret(kRootKey) != nil
     }
     static var hasLeaf: Bool {
-        rehydrateIfNeeded()
-        return FileManager.default.fileExists(atPath: leafCertURL.path) && Keychain.getSecret(kLeafKey) != nil
-    }
-
-    /// Reconstitutes root/leaf cert files and Keychain private-key entries
-    /// from iCloud Keychain backup if the on-disk versions are missing (e.g.
-    /// fresh reinstall). Idempotent — checks each item independently.
-    private static func rehydrateIfNeeded() {
-        if !FileManager.default.fileExists(atPath: rootCertURL.path),
-           let cert = Keychain.getPersistent(kRootCertPersistent), !cert.isEmpty {
-            try? cert.write(to: rootCertURL, options: .atomic)
-        }
-        if Keychain.getSecret(kRootKey) == nil,
-           let key = Keychain.getPersistentString(kRootKeyPersistent), !key.isEmpty {
-            _ = Keychain.setSecret(kRootKey, key)
-        }
-        if !FileManager.default.fileExists(atPath: leafCertURL.path),
-           let cert = Keychain.getPersistent(kLeafCertPersistent), !cert.isEmpty {
-            try? cert.write(to: leafCertURL, options: .atomic)
-        }
-        if Keychain.getSecret(kLeafKey) == nil,
-           let key = Keychain.getPersistentString(kLeafKeyPersistent), !key.isEmpty {
-            _ = Keychain.setSecret(kLeafKey, key)
-        }
-        if !FileManager.default.fileExists(atPath: metaURL.path),
-           let m = Keychain.getPersistent(kMetaPersistent), !m.isEmpty {
-            try? m.write(to: metaURL, options: .atomic)
-        }
+        FileManager.default.fileExists(atPath: leafCertURL.path) && Keychain.getSecret(kLeafKey) != nil
     }
 
     enum CAError: LocalizedError {
@@ -91,16 +53,11 @@ nonisolated enum LocalCAManager {
     /// Create the root once (idempotent unless force). Key → Keychain only; cert → file.
     @discardableResult
     static func ensureRoot(commonName: String = "MRvEK Local Root CA", years: Int = 10, force: Bool = false) throws -> Bool {
-        rehydrateIfNeeded()
         if hasRoot && !force { return false }
         guard let pair = LocalCA.generateRootCA(withCommonName: commonName, validYears: Int32(years)),
               let cert = pair["cert"], let key = pair["key"] else { throw CAError.generateFailed }
-        let certData = cert.data(using: .utf8)!
-        try certData.write(to: rootCertURL, options: .atomic)
+        try cert.data(using: .utf8)!.write(to: rootCertURL, options: .atomic)
         guard Keychain.setSecret(kRootKey, key) else { throw CAError.keychainWriteFailed }
-        // Mirror to iCloud Keychain so a reinstall keeps the same root CA.
-        Keychain.setPersistent(kRootCertPersistent, certData)
-        Keychain.setPersistentString(kRootKeyPersistent, key)
         return true
     }
 
@@ -112,18 +69,11 @@ nonisolated enum LocalCAManager {
         let capped = min(max(days, 1), 397)
         guard let pair = LocalCA.issueLeaf(forHost: host, rootCertPEM: rootCert, rootKeyPEM: rootKey, validDays: Int32(capped)),
               let cert = pair["cert"], let key = pair["key"] else { throw CAError.issueFailed }
-        let certData = cert.data(using: .utf8)!
-        try certData.write(to: leafCertURL, options: .atomic)
+        try cert.data(using: .utf8)!.write(to: leafCertURL, options: .atomic)
         guard Keychain.setSecret(kLeafKey, key) else { throw CAError.keychainWriteFailed }
-        // Mirror to iCloud Keychain.
-        Keychain.setPersistent(kLeafCertPersistent, certData)
-        Keychain.setPersistentString(kLeafKeyPersistent, key)
         let m = Meta(host: host, rootCreated: rootCreatedDate(), leafIssued: Date(), validYears: 0, validDays: capped)
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
-        if let mData = try? enc.encode(m) {
-            try? mData.write(to: metaURL)
-            Keychain.setPersistent(kMetaPersistent, mData)
-        }
+        try? enc.encode(m).write(to: metaURL)
     }
 
     /// When the current leaf expires (nil if none).
@@ -149,13 +99,6 @@ nonisolated enum LocalCAManager {
         for u in [rootCertURL, leafCertURL, metaURL] { try? FileManager.default.removeItem(at: u) }
         Keychain.deleteSecret(kRootKey)
         Keychain.deleteSecret(kLeafKey)
-        // Also wipe iCloud Keychain mirrors — explicit user reset should not
-        // resurrect the CA on the next launch or on another device.
-        Keychain.setPersistent(kRootCertPersistent, Data())
-        Keychain.setPersistentString(kRootKeyPersistent, "")
-        Keychain.setPersistent(kLeafCertPersistent, Data())
-        Keychain.setPersistentString(kLeafKeyPersistent, "")
-        Keychain.setPersistent(kMetaPersistent, Data())
     }
 
     private static func rootCreatedDate() -> Date {

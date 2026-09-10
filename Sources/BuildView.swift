@@ -234,11 +234,8 @@ struct BuildView: View {
     private func startPolling() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { _ in
-            // Timer's block is @Sendable — hop to the main actor before touching @State.
-            Task { @MainActor in
-                guard runs.contains(where: \.isActive) else { return }
-                await load()
-            }
+            guard runs.contains(where: \.isActive) else { return }
+            Task { await load() }
         }
     }
 }
@@ -509,11 +506,8 @@ private struct RunDetailScreen: View {
     private func startTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            // Timer's block is @Sendable — hop to the main actor before touching @State.
-            Task { @MainActor in
-                now = Date()
-                if live.isActive, Int(now.timeIntervalSince1970) % 5 == 0 { await refresh() }
-            }
+            now = Date()
+            if live.isActive, Int(now.timeIntervalSince1970) % 5 == 0 { Task { await refresh() } }
         }
     }
 }

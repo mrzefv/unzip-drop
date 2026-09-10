@@ -11,6 +11,7 @@
 //
 
 import Foundation
+import Security
 
 nonisolated enum LocalCAManager {
     private static var docs: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
@@ -149,6 +150,37 @@ nonisolated enum LocalCAManager {
               let e = pem.range(of: "-----END CERTIFICATE-----") else { return nil }
         let body = pem[b.upperBound..<e.lowerBound].components(separatedBy: .whitespacesAndNewlines).joined()
         return Data(base64Encoded: body)
+    }
+
+    // MARK: Is the root actually trusted on this device?
+
+    /// True only when the root profile is installed AND enabled under
+    /// Settings › General › About › Certificate Trust Settings. Evaluates the
+    /// root itself against the system trust store, so it reflects exactly what
+    /// iOS will do when Safari hits the on-device HTTPS server.
+    static func isRootTrusted() -> Bool {
+        guard let der = rootDER(), let cert = SecCertificateCreateWithData(nil, der as CFData) else { return false }
+        var trust: SecTrust?
+        guard SecTrustCreateWithCertificates(cert, SecPolicyCreateBasicX509(), &trust) == errSecSuccess, let trust else { return false }
+        var err: CFError?
+        return SecTrustEvaluateWithError(trust, &err)
+    }
+
+    /// Same check for the issued leaf + host, i.e. "will https://<host> pass?"
+    static func leafTrusted(for host: String) -> Bool {
+        guard let pem = try? String(contentsOf: leafCertURL) else { return false }
+        var certs: [SecCertificate] = []
+        var s = pem[...]
+        while let b = s.range(of: "-----BEGIN CERTIFICATE-----"), let e = s.range(of: "-----END CERTIFICATE-----") {
+            let body = s[b.upperBound..<e.lowerBound].components(separatedBy: .whitespacesAndNewlines).joined()
+            if let d = Data(base64Encoded: body), let c = SecCertificateCreateWithData(nil, d as CFData) { certs.append(c) }
+            s = s[e.upperBound...]
+        }
+        guard !certs.isEmpty else { return false }
+        var trust: SecTrust?
+        guard SecTrustCreateWithCertificates(certs as CFArray, SecPolicyCreateSSL(true, host as CFString), &trust) == errSecSuccess, let trust else { return false }
+        var err: CFError?
+        return SecTrustEvaluateWithError(trust, &err)
     }
 
     // MARK: .mobileconfig (install the root as a trusted cert)

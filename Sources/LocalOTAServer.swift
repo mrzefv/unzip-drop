@@ -38,10 +38,29 @@ nonisolated enum ServerConfig {
     ///   server.crt ← fullchain.pem   server.pem ← privkey.pem
     static let certResource = "server"
 
-    /// OTA TLS source: "public" (ACME/DNS cert, iOS-trusted, no profile) or
-    /// "local" (our own root CA — no DNS, but needs the root profile installed).
+    /// OTA TLS source:
+    ///   "public" — the zefv.dev wildcard cert, issued and auto-renewed on the VPS
+    ///              (certbot + Cloudflare DNS-01) and pulled from api.zefv.dev.
+    ///   "custom" — the user's own cert + key for their own domain (imported PEM).
+    ///   "local"  — our own root CA (no DNS, needs the root profile installed).
     static var certMode: String { UserDefaults.standard.string(forKey: "uzd_cert_mode") ?? "public" }
     static func setCertMode(_ m: String) { UserDefaults.standard.set(m, forKey: "uzd_cert_mode") }
+    static let certModes = ["public", "custom", "local"]
+
+    /// Where the "public" cert comes from. The VPS serves the live wildcard pair
+    /// (fullchain + key, JSON) behind a shared token; certbot renews it there.
+    static let defaultCertSourceURL = "https://api.zefv.dev/ota/cert.php"
+    static var certSourceURL: String {
+        let v = UserDefaults.standard.string(forKey: "uzd_cert_source_url") ?? ""
+        return v.isEmpty ? defaultCertSourceURL : v
+    }
+    static func setCertSourceURL(_ u: String) { UserDefaults.standard.set(u, forKey: "uzd_cert_source_url") }
+    static let defaultCertSourceToken = "zefv-ota-2026"
+    static var certSourceToken: String {
+        let v = UserDefaults.standard.string(forKey: "uzd_cert_source_token") ?? ""
+        return v.isEmpty ? defaultCertSourceToken : v
+    }
+    static func setCertSourceToken(_ t: String) { UserDefaults.standard.set(t, forKey: "uzd_cert_source_token") }
 
     /// Hand-rolled cert pipeline: .github/workflows/certs.yml runs certbot
     /// (DNS-01) for *.zefv.dev and commits server.crt / server.pem / pack.json
@@ -87,9 +106,33 @@ nonisolated enum ZefvCert {
         let fm = FileManager.default
         return fm.fileExists(atPath: cachedCrt.path) && fm.fileExists(atPath: cachedKey.path)
     }
-    /// Refreshed copy wins over the bundle.
-    static var crtURL: URL? { hasCached ? cachedCrt : bundledCrt }
-    static var keyURL: URL? { hasCached ? cachedKey : bundledKey }
+
+    // Bring-your-own cert (mode "custom"): the user's fullchain + private key.
+    static var customCrt: URL { docs.appendingPathComponent("custom-server.crt") }
+    static var customKey: URL { docs.appendingPathComponent("custom-server.pem") }
+    static var customMetaURL: URL { docs.appendingPathComponent("custom-cert.json") }
+    static var hasCustom: Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: customCrt.path) && fm.fileExists(atPath: customKey.path)
+    }
+    static var customSANs: [String] {
+        guard let d = try? Data(contentsOf: customCrt) else { return [] }
+        return sans(fromPEM: d)
+    }
+    static var customNotAfter: Date? {
+        guard let d = try? Data(contentsOf: customCrt) else { return nil }
+        return notAfter(fromPEM: d)
+    }
+
+    /// Pair in effect: custom mode → imported pair; otherwise refreshed copy wins over the bundle.
+    static var crtURL: URL? {
+        if ServerConfig.certMode == "custom" { return hasCustom ? customCrt : nil }
+        return hasCached ? cachedCrt : bundledCrt
+    }
+    static var keyURL: URL? {
+        if ServerConfig.certMode == "custom" { return hasCustom ? customKey : nil }
+        return hasCached ? cachedKey : bundledKey
+    }
     static var isAvailable: Bool { crtURL != nil && keyURL != nil }
 
     /// SANs of the cert in effect (bundled or refreshed).
@@ -135,12 +178,14 @@ nonisolated enum ZefvCert {
 
     /// Expiry of whichever cert is in effect (bundled or refreshed).
     static var effectiveNotAfter: Date? {
+        if ServerConfig.certMode == "custom" { return customNotAfter }
         if hasCached, let m = meta?.notAfter { return m }
         if let u = crtURL, let d = try? Data(contentsOf: u) { return notAfter(fromPEM: d) }
         return nil
     }
 
     static var needsRefresh: Bool {
+        guard ServerConfig.certMode == "public" else { return false }
         guard let exp = effectiveNotAfter else { return true }
         return exp.timeIntervalSinceNow < TimeInterval(ServerConfig.refreshBufferDays * 86400)
     }
@@ -161,14 +206,89 @@ nonisolated enum ZefvCert {
         let expires: String?
     }
 
-    /// Pull a fresh chain + key. Primary: `certs` branch of the configured repo via the
-    /// GitHub Contents API (token optional for public repos). Fallback: mSign's pack.json.
+    /// Pull a fresh chain + key. Primary: the VPS endpoint (certbot + Cloudflare
+    /// auto-renews there, so this is always the live wildcard pair).
+    /// Fallback: mSign's pack.json. The `token` argument is kept for call-site
+    /// compatibility; the VPS uses its own shared token (ServerConfig.certSourceToken).
     static func fetch(token: String? = nil) async throws -> Meta {
-        do { return try await fetchFromGitHub(token: token) }
+        do { return try await fetchFromVPS() }
         catch let primary {
             do { return try await fetchFromURL(ServerConfig.refreshURL) }
             catch { throw primary }
         }
+    }
+
+    /// VPS JSON: { "cert": "<fullchain PEM>", "key": "<privkey PEM>", "not_after": "ISO8601", "sans": [...] }
+    private struct VPSPack: Decodable {
+        let cert: String
+        let key: String
+        let not_after: String?
+        let sans: [String]?
+    }
+
+    static func fetchFromVPS() async throws -> Meta {
+        guard let url = URL(string: ServerConfig.certSourceURL) else { throw CertError.badPack("bad cert source URL") }
+        var req = URLRequest(url: url)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.timeoutInterval = 20
+        req.setValue(ServerConfig.certSourceToken, forHTTPHeaderField: "X-OTA-Token")
+        req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard code < 400, !data.isEmpty else {
+            throw CertError.badPack("\(url.host ?? "VPS") → HTTP \(code). Check the cert source URL/token in Settings › On-Device OTA Domain.")
+        }
+        let pack: VPSPack
+        do { pack = try JSONDecoder().decode(VPSPack.self, from: data) } catch { throw CertError.badPack("VPS returned an unreadable cert pack") }
+        guard pack.cert.contains("BEGIN CERTIFICATE"), pack.key.contains("PRIVATE KEY") else {
+            throw CertError.badPack("VPS pack is missing the cert or key")
+        }
+        return try store(chain: Data(pack.cert.utf8), key: Data(pack.key.utf8), expires: pack.not_after)
+    }
+
+    // MARK: Bring-your-own cert (mode "custom")
+
+    /// Import the user's own TLS pair from any mix of files: a fullchain/cert PEM,
+    /// a key PEM, or one combined PEM. Validates with NIOSSL before saving.
+    static func importCustom(files: [URL]) throws {
+        var certPEM = "", keyPEM = ""
+        for f in files {
+            let scoped = f.startAccessingSecurityScopedResource()
+            defer { if scoped { f.stopAccessingSecurityScopedResource() } }
+            guard let text = try? String(contentsOf: f) else { continue }
+            certPEM += pemBlocks(in: text, containing: "CERTIFICATE").joined(separator: "\n")
+            if !certPEM.isEmpty { certPEM += "\n" }
+            let keys = pemBlocks(in: text, containing: "PRIVATE KEY")
+            if let k = keys.first { keyPEM = k + "\n" }
+        }
+        guard !certPEM.isEmpty else { throw CertError.badPack("No certificate found — pick your fullchain.pem / .crt (PEM).") }
+        guard !keyPEM.isEmpty  else { throw CertError.badPack("No private key found — pick your privkey.pem / .key (PEM, unencrypted).") }
+        _ = try NIOSSLCertificate.fromPEMBytes(Array(certPEM.utf8))
+        _ = try NIOSSLPrivateKey(bytes: Array(keyPEM.utf8), format: .pem)
+        try Data(certPEM.utf8).write(to: customCrt, options: .atomic)
+        try Data(keyPEM.utf8).write(to: customKey, options: .atomic)
+        let meta = Meta(notAfter: notAfter(fromPEM: Data(certPEM.utf8)), fetchedAt: Date())
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
+        try? enc.encode(meta).write(to: customMetaURL)
+    }
+
+    static func clearCustom() {
+        for u in [customCrt, customKey, customMetaURL] { try? FileManager.default.removeItem(at: u) }
+    }
+
+    /// All `-----BEGIN <X>-----` … `-----END <X>-----` blocks whose label contains `label`.
+    private static func pemBlocks(in text: String, containing label: String) -> [String] {
+        var out: [String] = []
+        var search = text.startIndex
+        while let b = text.range(of: "-----BEGIN ", range: search..<text.endIndex) {
+            guard let hdrEnd = text.range(of: "-----", range: b.upperBound..<text.endIndex) else { break }
+            let kind = String(text[b.upperBound..<hdrEnd.lowerBound])
+            let endMarker = "-----END \(kind)-----"
+            guard let e = text.range(of: endMarker, range: hdrEnd.upperBound..<text.endIndex) else { break }
+            if kind.contains(label) { out.append(String(text[b.lowerBound..<e.upperBound])) }
+            search = e.upperBound
+        }
+        return out
     }
 
     static func fetchFromGitHub(token: String?) async throws -> Meta {

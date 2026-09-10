@@ -86,9 +86,15 @@ final class OTAInstaller: ObservableObject {
             guard LocalCAManager.covers(host) else {
                 throw InstallError.hostNotCovered(host: host, mode: mode, sans: LocalCAManager.leafSANs())
             }
+        } else if mode == "custom" {
+            guard ZefvCert.hasCustom else { throw ZefvCert.CertError.badPack("No custom cert imported yet — Settings › On-Device OTA Domain › Own TLS cert.") }
+            let sans = ZefvCert.customSANs
+            guard ZefvCert.covers(host, sans: sans) else {
+                throw InstallError.hostNotCovered(host: host, mode: mode, sans: sans)
+            }
         } else {
-            // Near expiry: pull a fresh chain from the certs repo (no-op offline; bundled pair still works).
-            if ZefvCert.needsRefresh { await ZefvCert.refreshIfNeeded(token: Keychain.get("gh_token")) }
+            // Near expiry: pull the freshly renewed pair from the VPS (no-op offline; cached/bundled pair still works).
+            if ZefvCert.needsRefresh { await ZefvCert.refreshIfNeeded() }
             guard ZefvCert.isAvailable else { throw ZefvCert.CertError.unavailable }
             let sans = ZefvCert.effectiveSANs
             guard ZefvCert.covers(host, sans: sans) else {

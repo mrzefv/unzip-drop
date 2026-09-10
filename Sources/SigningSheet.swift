@@ -361,13 +361,13 @@ struct SigningSheet: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Label("DISTRIBUTED IDENTITY", systemImage: "globe").font(.system(size: 7, weight: .heavy)).kerning(0.5).foregroundStyle(blue)
                         Text(ServerConfig.installHost).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
-                        Text(ServerConfig.certMode == "local" ? "Local root CA · offline" : "Public URL for OTA").font(.system(size: 7.5)).foregroundStyle(Theme.subtle)
+                        Text(ServerConfig.certMode == "local" ? "Local root CA · offline" : (ServerConfig.certMode == "custom" ? "Your own TLS cert" : "zefv.dev · VPS auto-renew")).font(.system(size: 7.5)).foregroundStyle(Theme.subtle)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     Rectangle().fill(Theme.stroke).frame(width: 1).padding(.horizontal, 7.5)
                     VStack(alignment: .leading, spacing: 3) {
                         Label("CERTIFICATE", systemImage: "lock.shield.fill").font(.system(size: 7, weight: .heavy)).kerning(0.5).foregroundStyle(.green)
-                        Text(ServerConfig.certMode == "local" ? "Local CA" : "Let's Encrypt").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.white)
+                        Text(ServerConfig.certMode == "local" ? "Local CA" : (ServerConfig.certMode == "custom" ? "Own cert" : "Let's Encrypt")).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.white)
                         if let d = certDaysLeft {
                             Text(d < 0 ? "EXPIRED" : "\(d) days left").font(.system(size: 7.5)).foregroundStyle(d < 21 ? .orange : .green)
                         }

@@ -54,7 +54,7 @@ nonisolated enum LocalCAManager {
     /// Reconstitutes root/leaf cert files and Keychain private-key entries
     /// from iCloud Keychain backup if the on-disk versions are missing (e.g.
     /// fresh reinstall). Idempotent — checks each item independently.
-    private static func rehydrateIfNeeded() {
+    static func rehydrateIfNeeded() {
         if !FileManager.default.fileExists(atPath: rootCertURL.path),
            let cert = Keychain.getPersistent(kRootCertPersistent), !cert.isEmpty {
             try? cert.write(to: rootCertURL, options: .atomic)

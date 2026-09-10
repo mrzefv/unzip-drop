@@ -643,7 +643,7 @@ private struct OTADomainScreen: View {
         switch mode { case "local": return LocalCAManager.leafSANs(); case "custom": return customSANs; default: return sans }
     }
     private var certCoversHost: Bool {
-        let h = clean.isEmpty ? "mr.\(cleanDomain)" : clean
+        let h = probeHost
         return mode == "local" ? LocalCAManager.covers(h) : ZefvCert.covers(h, sans: liveSANs)
     }
 
@@ -651,7 +651,7 @@ private struct OTADomainScreen: View {
         DetailScreen(title: "On-Device OTA Domain") {
             modeCard
             activeCertCard
-            hostCard
+            if mode != "local" { hostCard }   // local mode sets its host in Local CA settings
             switch mode {
             case "local":  localModeCard
             case "custom": customCertCard
@@ -700,7 +700,7 @@ private struct OTADomainScreen: View {
                             if m.key == "public", cleanDomain != ServerConfig.defaultDomain || cleanDomain.isEmpty {
                                 // zefv.dev mode implies the zefv.dev domain.
                                 domain = ServerConfig.defaultDomain
-                                if !hostOK { host = "mr.\(ServerConfig.defaultDomain)" }
+                                if !hostOK { host = ServerConfig.defaultInstallHost }
                                 ServerConfig.setCertDomain(domain); ServerConfig.setInstallHost(host); saved = true
                             }
                             reload()
@@ -783,13 +783,13 @@ private struct OTADomainScreen: View {
             VStack(alignment: .leading, spacing: 12) {
                 Label("Domain & install host", systemImage: "network").font(.headline).foregroundStyle(Theme.text)
                 Text(mode == "public"
-                     ? "Installs run over an on-device Vapor HTTPS server. *.zefv.dev already points at 127.0.0.1 — just pick any label under it as your install host."
-                     : "Installs run over an on-device Vapor HTTPS server. Point `*.<domain>` (A record) at 127.0.0.1 — iOS silently drops the install prompt if the host doesn't resolve to loopback.")
+                     ? "Installs run over an on-device Vapor HTTPS server. On Cloudflare, *.zefv.dev points at the VPS (user subdomains), so the OTA host is the dedicated `mr.zefv.dev` label with its own A record → 127.0.0.1 (DNS only). One label under the wildcard, so the *.zefv.dev cert covers it."
+                     : "Installs run over an on-device Vapor HTTPS server. Point the install host (or `*.<domain>`) at 127.0.0.1 with an A record — iOS silently drops the install prompt if the host doesn't resolve to loopback.")
                     .font(.caption).foregroundStyle(Theme.subtle)
                 if mode != "public" {
                     Field(label: "Domain", text: $domain, placeholder: "example.com", keyboard: .URL)
                 }
-                Field(label: "Install host", text: $host, placeholder: "mr.\(cleanDomain.isEmpty ? ServerConfig.defaultDomain : cleanDomain)", keyboard: .URL)
+                Field(label: "Install host", text: $host, placeholder: cleanDomain == ServerConfig.defaultDomain || cleanDomain.isEmpty ? ServerConfig.defaultInstallHost : "mr.\(cleanDomain)", keyboard: .URL)
                 if !domainOK { Text("Enter a domain like example.com").font(.caption).foregroundStyle(.orange) }
                 else if !hostOK { Text("Host must be under \(cleanDomain).").font(.caption).foregroundStyle(.orange) }
                 else if !certCoversHost, !liveSANs.isEmpty {
@@ -798,9 +798,9 @@ private struct OTADomainScreen: View {
                 HStack(spacing: 8) {
                     Image(systemName: dnsChecking ? "hourglass" : (dnsLoopback == true ? "checkmark.circle.fill" : (dnsLoopback == false ? "xmark.octagon.fill" : "questionmark.circle")))
                         .foregroundStyle(dnsLoopback == true ? .green : (dnsLoopback == false ? .red : Theme.subtle))
-                    Text(dnsChecking ? "Resolving *.\(cleanDomain)…"
-                         : dnsLoopback == true ? "*.\(cleanDomain) → 127.0.0.1 ✓"
-                         : dnsLoopback == false ? "*.\(cleanDomain) does not resolve to 127.0.0.1 — add a wildcard A record"
+                    Text(dnsChecking ? "Resolving \(probeHost)…"
+                         : dnsLoopback == true ? "\(probeHost) → 127.0.0.1 ✓"
+                         : dnsLoopback == false ? "\(probeHost) does not resolve to 127.0.0.1 — add an A record for it (DNS only, not proxied)"
                          : "DNS not checked")
                         .font(.caption).foregroundStyle(Theme.subtle)
                     Spacer()
@@ -809,7 +809,7 @@ private struct OTADomainScreen: View {
                 }
                 accentButton(saved ? "Saved" : "Save", saved ? "checkmark.circle.fill" : "network", enabled: hostOK) {
                     ServerConfig.setCertDomain(cleanDomain)
-                    ServerConfig.setInstallHost(clean.isEmpty ? "mr.\(cleanDomain)" : clean)
+                    ServerConfig.setInstallHost(probeHost)
                     domain = ServerConfig.certDomain; host = ServerConfig.installHost; saved = true
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     Task { await checkLoopback() }
@@ -953,16 +953,22 @@ private struct OTADomainScreen: View {
     }
 
     private func reload() {
+        LocalCAManager.rehydrateIfNeeded()   // restore root/leaf from iCloud Keychain after a reinstall
+        host = ServerConfig.installHost
         expires = ZefvCert.effectiveNotAfter; cached = ZefvCert.hasCached; fetchedAt = ZefvCert.meta?.fetchedAt
         sans = mode == "custom" ? ZefvCert.customSANs : ZefvCert.effectiveSANs
         hasCustom = ZefvCert.hasCustom; customSANs = ZefvCert.customSANs; customExpires = ZefvCert.customNotAfter
         rootTrusted = LocalCAManager.isRootTrusted()
     }
 
+    private var probeHost: String {
+        clean.isEmpty ? (cleanDomain == ServerConfig.defaultDomain ? ServerConfig.defaultInstallHost : "mr.\(cleanDomain)") : clean
+    }
+
     private func checkLoopback() async {
         guard domainOK else { return }
         dnsChecking = true
-        dnsLoopback = await ZefvCert.resolvesToLoopback("ota-probe.\(cleanDomain)")
+        dnsLoopback = await ZefvCert.resolvesToLoopback(probeHost)
         dnsChecking = false
     }
 
@@ -1006,7 +1012,7 @@ private struct LocalCAScreen: View {
             Card {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Host", systemImage: "network").font(.headline).foregroundStyle(Theme.text)
-                    Field(label: "OTA host", text: $host, placeholder: "mr.zefv.dev")
+                    Field(label: "OTA host", text: $host, placeholder: ServerConfig.defaultInstallHost)
                     Text("The leaf covers this host and *.<host>. This is separate from trust: the host must ALSO resolve to 127.0.0.1 via a real DNS A record (or use a free *.nip.io / *.sslip.io name, e.g. 127-0-0-1.nip.io) — iOS silently drops the install prompt if it doesn't, with no error.")
                         .font(.caption2).foregroundStyle(Theme.subtle)
                     HStack(spacing: 8) {

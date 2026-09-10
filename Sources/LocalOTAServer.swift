@@ -29,8 +29,12 @@ nonisolated enum ServerConfig {
     static func setCertDomain(_ d: String) { UserDefaults.standard.set(d, forKey: "uzd_cert_domain") }
 
     /// SNI + manifest host. Must be under `certDomain` and covered by the cert's SANs.
+    /// Default `ota.zefv.dev`: on Cloudflare, `*.zefv.dev` points at the VPS (user
+    /// subdomains), so the OTA host is a dedicated label with its own A record → 127.0.0.1.
+    /// `ota.zefv.dev` is one label under the wildcard, so the *.zefv.dev cert covers it.
+    static let defaultInstallHost = "mr.zefv.dev"
     static var installHost: String {
-        UserDefaults.standard.string(forKey: "uzd_install_host") ?? "mr.\(certDomain)"
+        UserDefaults.standard.string(forKey: "uzd_install_host") ?? (certDomain == defaultDomain ? defaultInstallHost : "mr.\(certDomain)")
     }
     static func setInstallHost(_ h: String) { UserDefaults.standard.set(h, forKey: "uzd_install_host") }
 

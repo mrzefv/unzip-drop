@@ -41,9 +41,12 @@ final class OTAInstaller: ObservableObject {
         case hostNotCovered(host: String, mode: String, sans: [String])
         case noLocalLeaf(host: String)
         case hostNotLoopback(host: String)
+        case rootNotTrusted
 
         var errorDescription: String? {
             switch self {
+            case .rootNotTrusted:
+                return "Your local root CA isn't trusted on this device yet, so Safari would reject the install silently. Settings › On-Device OTA › Local CA: Install trust profile, then enable it in Settings › General › About › Certificate Trust Settings."
             case .hostNotCovered(let h, let mode, let sans):
                 let covering = sans.isEmpty ? "nothing readable" : sans.joined(separator: ", ")
                 if mode == "local" {
@@ -81,6 +84,7 @@ final class OTAInstaller: ObservableObject {
 
         if mode == "local" {
             guard LocalCAManager.hasLeaf else { throw InstallError.noLocalLeaf(host: host) }
+            guard LocalCAManager.isRootTrusted() else { throw InstallError.rootNotTrusted }
             // Auto-reissue when within 30 days of the 397-day cap (iOS TLS limit).
             if LocalCAManager.reissueIfNeeded() { /* fresh leaf issued */ }
             guard LocalCAManager.covers(host) else {

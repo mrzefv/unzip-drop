@@ -287,3 +287,62 @@ nonisolated enum LocalCAManager {
         return url
     }
 }
+
+
+// MARK: - Files the iPhone can see (Files app › On My iPhone › unzip-drop › OTA Certs)
+
+/// Everything the user might want to inspect or move elsewhere lands here —
+/// public material only (certs, chains, the trust profile). Private keys never
+/// leave the Keychain.
+nonisolated enum OTAFiles {
+    static var folder: URL {
+        let d = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("OTA Certs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+
+    /// `shareddocuments://` opens the Files app straight at our folder.
+    static var filesAppURL: URL? { URL(string: "shareddocuments://" + folder.path) }
+
+    static func list() -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+            .filter { !$0.lastPathComponent.hasPrefix(".") }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    /// Root cert (PEM + DER), leaf chain, trust profile, README.
+    @discardableResult
+    static func exportLocalCA() -> [URL] {
+        var out: [URL] = []
+        func put(_ name: String, _ data: Data?) { guard let data else { return }; let u = folder.appendingPathComponent(name); if (try? data.write(to: u, options: .atomic)) != nil { out.append(u) } }
+        put("MRvEK-Root-CA.crt", try? Data(contentsOf: LocalCAManager.rootCertURL))
+        put("MRvEK-Root-CA.cer", LocalCAManager.rootDER())
+        if let host = LocalCAManager.meta?.host { put("leaf-\(host).crt", try? Data(contentsOf: LocalCAManager.leafCertURL)) }
+        put("MRvEK-OTA-Trust.mobileconfig", LocalCAManager.mobileConfig())
+        put("README.txt", Data("""
+        OTA Certs — exported by unzip-drop
+
+        MRvEK-Root-CA.crt / .cer     your on-device root CA (PEM / DER). Public — safe to share.
+        leaf-<host>.crt              the leaf + chain the on-device HTTPS server presents.
+        MRvEK-OTA-Trust.mobileconfig the trust profile. Open it to install the root, then enable it in
+                                     Settings › General › About › Certificate Trust Settings.
+
+        Private keys are NOT here — they live in the Keychain (ThisDeviceOnly) and never touch disk.
+        """.utf8))
+        return out
+    }
+
+    /// The public chain currently used in zefv.dev / own-cert mode (no key).
+    @discardableResult
+    static func exportPublicChain() -> [URL] {
+        guard let crt = ZefvCert.crtURL, let data = try? Data(contentsOf: crt) else { return [] }
+        let name = ServerConfig.certMode == "custom" ? "own-cert-fullchain.pem" : "zefv.dev-fullchain.pem"
+        let u = folder.appendingPathComponent(name)
+        return (try? data.write(to: u, options: .atomic)) != nil ? [u] : []
+    }
+
+    static func clear() {
+        for u in list() { try? FileManager.default.removeItem(at: u) }
+    }
+}

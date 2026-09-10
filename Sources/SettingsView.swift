@@ -594,262 +594,369 @@ private struct IPATemplateScreen: View {
 }
 
 
-// MARK: - OTA domain (VPS-renewed zefv.dev cert · own TLS cert · fully local CA)
+// MARK: - Table plumbing shared by the OTA screens
+
+/// Inset-grouped table screen with the app's dark chrome. Root screens get a
+/// chevron-down dismiss; pushed screens get the system back button.
+private struct TableScreen<Content: View>: View {
+    let title: String
+    var root = false
+    @ViewBuilder var content: Content
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List { content }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Theme.bg.ignoresSafeArea())
+            .scrollDismissesKeyboard(.interactively)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if root {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button { dismiss() } label: {
+                            Image(systemName: "chevron.down").font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(Theme.accent).frame(width: 34, height: 34)
+                                .background(Theme.accent.opacity(0.14)).clipShape(Circle())
+                        }
+                    }
+                }
+            }
+    }
+}
+
+private struct TRow: View {          // label · value
+    let k: String; let v: String
+    var tint: Color = Theme.text
+    var body: some View {
+        HStack {
+            Text(k).foregroundStyle(Theme.subtle)
+            Spacer(minLength: 12)
+            Text(v).font(.system(size: 15, design: .monospaced)).foregroundStyle(tint)
+                .lineLimit(1).truncationMode(.middle).multilineTextAlignment(.trailing)
+        }
+        .listRowBackground(Theme.card)
+    }
+}
+
+private struct TStatusRow: View {    // icon · text (green/orange)
+    let ok: Bool; let text: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: ok ? "checkmark.shield.fill" : "exclamationmark.shield.fill").foregroundStyle(ok ? .green : .orange)
+            Text(text).font(.subheadline).foregroundStyle(ok ? .green : .orange)
+        }
+        .listRowBackground(Theme.card)
+    }
+}
+
+private struct TNav<Dest: View>: View {   // icon · title · subtitle › pushes Dest
+    let icon: String; let title: String; var subtitle: String = ""
+    @ViewBuilder var dest: Dest
+    var body: some View {
+        NavigationLink {
+            dest
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon).foregroundStyle(Theme.accent).frame(width: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).foregroundStyle(Theme.text)
+                    if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(Theme.subtle).lineLimit(2) }
+                }
+            }
+        }
+        .listRowBackground(Theme.card)
+    }
+}
+
+private struct TButton: View {       // full-width action row
+    let title: String; let icon: String
+    var role: ButtonRole? = nil
+    var busy = false
+    var enabled = true
+    let action: () -> Void
+    var body: some View {
+        Button(role: role, action: action) {
+            HStack(spacing: 12) {
+                if busy { ProgressView().tint(Theme.accent) } else { Image(systemName: icon) }
+                Text(title).fontWeight(.semibold)
+                Spacer()
+            }
+            .foregroundStyle(role == .destructive ? .red : (enabled ? Theme.accent : Theme.subtle))
+        }
+        .disabled(busy || !enabled)
+        .listRowBackground(Theme.card)
+    }
+}
+
+private struct TField: View {        // label · text field on one row
+    let label: String
+    @Binding var text: String
+    var placeholder = ""
+    var keyboard: UIKeyboardType = .default
+    var body: some View {
+        HStack {
+            Text(label).foregroundStyle(Theme.subtle)
+            Spacer(minLength: 12)
+            TextField(placeholder, text: $text)
+                .keyboardType(keyboard).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .multilineTextAlignment(.trailing).foregroundStyle(Theme.text)
+                .font(.system(size: 15, design: .monospaced))
+        }
+        .listRowBackground(Theme.card)
+    }
+}
+
+private struct TNote: View {         // footer-ish explanatory row
+    let text: String
+    var tint: Color = Theme.subtle
+    var body: some View {
+        Text(text).font(.caption).foregroundStyle(tint).listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 6, trailing: 4))
+    }
+}
+
+private func certPill(_ exp: Date?) -> some View {
+    let days = exp.map { Calendar.current.dateComponents([.day], from: Date(), to: $0).day ?? 0 } ?? -1
+    let color: Color = exp == nil ? .orange : (days < 0 ? .red : (days < ServerConfig.refreshBufferDays ? .orange : .green))
+    let text = exp == nil ? "MISSING" : (days < 0 ? "EXPIRED" : (days < ServerConfig.refreshBufferDays ? "\(days)D LEFT" : "READY"))
+    return Text(text).font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(1)
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(color.opacity(0.18)).foregroundStyle(color).clipShape(Capsule())
+}
+
+/// Shared, observable snapshot of the OTA cert state so every pushed screen
+/// re-renders the root when it changes something.
+@MainActor
+private final class OTAState: ObservableObject {
+    @Published var mode = ServerConfig.certMode
+    @Published var host = ServerConfig.installHost
+    @Published var domain = ServerConfig.certDomain
+    @Published var sans: [String] = []
+    @Published var expires: Date?
+    @Published var rootTrusted = false
+    @Published var hasRoot = false
+    @Published var hasLeaf = false
+    @Published var hasCustom = false
+    @Published var cached = false
+    @Published var fetchedAt: Date?
+    @Published var files: [URL] = []
+
+    func reload() {
+        LocalCAManager.rehydrateIfNeeded()
+        mode = ServerConfig.certMode; host = ServerConfig.installHost; domain = ServerConfig.certDomain
+        hasRoot = LocalCAManager.hasRoot; hasLeaf = LocalCAManager.hasLeaf; hasCustom = ZefvCert.hasCustom
+        rootTrusted = LocalCAManager.isRootTrusted()
+        cached = ZefvCert.hasCached; fetchedAt = ZefvCert.meta?.fetchedAt
+        switch mode {
+        case "local":  sans = LocalCAManager.leafSANs(); expires = LocalCAManager.leafExpiry
+        case "custom": sans = ZefvCert.customSANs;       expires = ZefvCert.customNotAfter
+        default:       sans = ZefvCert.effectiveSANs;    expires = ZefvCert.effectiveNotAfter
+        }
+        files = OTAFiles.list()
+    }
+
+    var have: Bool { mode == "local" ? hasLeaf : (mode == "custom" ? hasCustom : ZefvCert.isAvailable) }
+    var coversHost: Bool { mode == "local" ? LocalCAManager.covers(host) : ZefvCert.covers(host, sans: sans) }
+    var ready: Bool { have && coversHost && (mode != "local" || rootTrusted) }
+    var modeName: String { mode == "local" ? "Local CA" : (mode == "custom" ? "Own cert" : "zefv.dev") }
+    var statusText: String { ready ? "READY" : (have ? (coversHost ? "NOT TRUSTED" : "MISMATCH") : "MISSING") }
+}
+
+// MARK: - On-Device OTA (root table)
 
 private struct OTADomainScreen: View {
     @EnvironmentObject var config: Config
+    @StateObject private var st = OTAState()
+
+    var body: some View {
+        NavigationStack {
+            TableScreen(title: "On-Device OTA", root: true) {
+
+                Section {
+                    Picker(selection: Binding(get: { st.mode }, set: { m in
+                        ServerConfig.setCertMode(m)
+                        if m == "public" {
+                            ServerConfig.setCertDomain(ServerConfig.defaultDomain)
+                            if !ServerConfig.installHost.hasSuffix("." + ServerConfig.defaultDomain) { ServerConfig.setInstallHost(ServerConfig.defaultInstallHost) }
+                        }
+                        st.reload()
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    })) {
+                        Label("zefv.dev · VPS auto-renew", systemImage: "globe").tag("public")
+                        Label("Own TLS cert",             systemImage: "doc.badge.plus").tag("custom")
+                        Label("Local root CA",            systemImage: "iphone").tag("local")
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "lock.rotation").foregroundStyle(Theme.accent).frame(width: 26)
+                            Text("Certificate mode").foregroundStyle(Theme.text)
+                        }
+                    }
+                    .pickerStyle(.menu).tint(Theme.accent)
+                    .listRowBackground(Theme.card)
+                } footer: {
+                    Text(st.mode == "public"
+                         ? "Real Let's Encrypt wildcard for *.zefv.dev, renewed on the VPS (certbot + Cloudflare) and pulled here. Trusted by iOS out of the box."
+                         : st.mode == "custom"
+                         ? "Your own TLS cert for your own domain. Import fullchain + key; point the host at 127.0.0.1."
+                         : "Your own root CA — offline, no DNS provider. iOS trusts it once the root profile is installed and enabled.")
+                    .foregroundStyle(Theme.subtle)
+                }
+
+                Section {
+                    HStack {
+                        Label("Active cert", systemImage: "checkmark.seal").foregroundStyle(Theme.text)
+                        Spacer()
+                        Text(st.statusText).font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(0.5)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background((st.ready ? Color.green : Color.orange).opacity(0.18))
+                            .foregroundStyle(st.ready ? .green : .orange).clipShape(Capsule())
+                    }
+                    .listRowBackground(Theme.card)
+                    TRow(k: "Mode", v: st.modeName)
+                    TRow(k: "Install host", v: st.host)
+                    TRow(k: "Covers", v: st.sans.isEmpty ? "—" : st.sans.joined(separator: ", "))
+                    TRow(k: "Expires", v: st.expires.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
+                    if st.mode == "local" {
+                        TStatusRow(ok: st.rootTrusted, text: st.rootTrusted ? "Root CA installed & trusted on this device" : "Root CA not trusted yet — install the profile, then enable it in Settings › General › About › Certificate Trust Settings")
+                    }
+                    if st.have && !st.coversHost {
+                        TStatusRow(ok: false, text: "The cert doesn't cover \(st.host).")
+                    }
+                }
+
+                Section("Setup") {
+                    if st.mode != "local" {
+                        TNav(icon: "network", title: "Install host & DNS", subtitle: st.host) { OTAHostScreen(st: st) }
+                    }
+                    switch st.mode {
+                    case "local":
+                        TNav(icon: "iphone", title: "Local CA", subtitle: st.hasRoot ? "Root ready · leaf \(st.hasLeaf ? "issued for \(LocalCAManager.meta?.host ?? st.host)" : "not issued")" : "Create root + leaf, install the trust profile") { LocalCAScreen(st: st) }
+                    case "custom":
+                        TNav(icon: "doc.badge.plus", title: "Own certificate", subtitle: st.hasCustom ? "Imported · \(st.sans.joined(separator: ", "))" : "Import fullchain + key (PEM)") { OwnCertScreen(st: st) }
+                    default:
+                        TNav(icon: "arrow.triangle.2.circlepath.circle", title: "zefv.dev certificate", subtitle: st.cached ? "Pulled from VPS · \(st.fetchedAt?.formatted(date: .abbreviated, time: .shortened) ?? "")" : "Bundled in IPA · pull from VPS to refresh") { VPSCertScreen(st: st) }
+                    }
+                }
+
+                Section {
+                    TNav(icon: "folder", title: "Exported files", subtitle: st.files.isEmpty ? "Nothing exported yet" : "\(st.files.count) file\(st.files.count == 1 ? "" : "s") · Files › On My iPhone › unzip-drop › OTA Certs") { OTAFilesScreen(st: st) }
+                } footer: {
+                    Text("Certs, chains and the trust profile are copied into a folder the Files app can see whenever you issue or install. Private keys never leave the Keychain.").foregroundStyle(Theme.subtle)
+                }
+            }
+        }
+        .onAppear { st.reload() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in st.reload() }
+    }
+}
+
+// MARK: - Install host & DNS
+
+private struct OTAHostScreen: View {
+    @ObservedObject var st: OTAState
     @State private var domain = ServerConfig.certDomain
     @State private var host = ServerConfig.installHost
-    @State private var saved = false
-    @State private var mode = ServerConfig.certMode
     @State private var dnsLoopback: Bool?
-    @State private var dnsChecking = false
-    @State private var sans = ZefvCert.effectiveSANs
-    @State private var showLocalCA = false
+    @State private var checking = false
+    @State private var saved = false
 
-    // Public (VPS) cert
-    @State private var refreshing = false
-    @State private var expires = ZefvCert.effectiveNotAfter
-    @State private var cached = ZefvCert.hasCached
-    @State private var fetchedAt = ZefvCert.meta?.fetchedAt
-    @State private var sourceURL = ServerConfig.certSourceURL
-    @State private var sourceToken = ServerConfig.certSourceToken
-    @State private var sourceSaved = false
-    @State private var error: String?
-    @State private var note: String?
-
-    // Own cert
-    @State private var showCertPicker = false
-    @State private var hasCustom = ZefvCert.hasCustom
-    @State private var customSANs = ZefvCert.customSANs
-    @State private var customExpires = ZefvCert.customNotAfter
-
-    // Local CA trust
-    @State private var rootTrusted = LocalCAManager.isRootTrusted()
-
-    private var clean: String {
-        host.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: "")
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    }
     private var cleanDomain: String {
         domain.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             .replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "*.", with: "")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/."))
     }
+    private var cleanHost: String {
+        let h = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            .replacingOccurrences(of: "https://", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return h.isEmpty ? (cleanDomain == ServerConfig.defaultDomain ? ServerConfig.defaultInstallHost : "mr.\(cleanDomain)") : h
+    }
     private var domainOK: Bool { cleanDomain.contains(".") && !cleanDomain.contains(" ") }
-    private var hostOK: Bool { domainOK && (clean.lowercased().hasSuffix("." + cleanDomain) || clean.lowercased() == cleanDomain) }
-    private var liveSANs: [String] {
-        switch mode { case "local": return LocalCAManager.leafSANs(); case "custom": return customSANs; default: return sans }
-    }
-    private var certCoversHost: Bool {
-        let h = probeHost
-        return mode == "local" ? LocalCAManager.covers(h) : ZefvCert.covers(h, sans: liveSANs)
-    }
+    private var hostOK: Bool { domainOK && (cleanHost.hasSuffix("." + cleanDomain) || cleanHost == cleanDomain) }
 
     var body: some View {
-        DetailScreen(title: "On-Device OTA Domain") {
-            modeCard
-            activeCertCard
-            if mode != "local" { hostCard }   // local mode sets its host in Local CA settings
-            switch mode {
-            case "local":  localModeCard
-            case "custom": customCertCard
-            default:       vpsCertCard
+        TableScreen(title: "Install host & DNS") {
+            Section {
+                if st.mode != "public" { TField(label: "Domain", text: $domain, placeholder: "example.com", keyboard: .URL) }
+                TField(label: "Install host", text: $host, placeholder: ServerConfig.defaultInstallHost, keyboard: .URL)
+            } footer: {
+                Text(st.mode == "public"
+                     ? "On Cloudflare, *.zefv.dev points at the VPS, so the OTA host is the dedicated mr.zefv.dev A record → 127.0.0.1 (DNS only). One label under the wildcard, so the *.zefv.dev cert covers it."
+                     : "The install host must resolve to 127.0.0.1 via an A record — iOS silently drops the install prompt otherwise. The cert must cover it (wildcard *.<domain> covers any single label).")
+                .foregroundStyle(Theme.subtle)
             }
-        }
-        .fullScreenCover(isPresented: $showLocalCA) { LocalCAScreen().environmentObject(config).preferredColorScheme(.dark) }
-        .sheet(isPresented: $showCertPicker) {
-            DocPicker(types: [.item]) { urls in
-                guard !urls.isEmpty else { return }
-                do {
-                    try ZefvCert.importCustom(files: urls)
-                    error = nil; note = "Imported \(urls.count) file\(urls.count == 1 ? "" : "s")."
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                } catch { self.error = error.localizedDescription }
-                reload()
-            }
-        }
-        .onChange(of: host) { _ in saved = false }
-        .onChange(of: domain) { _ in saved = false; dnsLoopback = nil }
-        .onChange(of: sourceURL) { _ in sourceSaved = false }
-        .onChange(of: sourceToken) { _ in sourceSaved = false }
-        .onAppear { reload(); Task { await checkLoopback() } }
-        // Re-check trust every time the app comes back — the user installs the
-        // profile in Settings.app and returns here.
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-            rootTrusted = LocalCAManager.isRootTrusted()
-        }
-    }
 
-    // MARK: Cards
-
-    private var modeCard: some View {
-        let modes: [(key: String, name: String, icon: String)] = [
-            ("public", "zefv.dev", "globe"),
-            ("custom", "Own cert", "doc.badge.plus"),
-            ("local",  "Local CA", "iphone"),
-        ]
-        return Card {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("Certificate mode", systemImage: "lock.rotation").font(.headline).foregroundStyle(Theme.text)
-                HStack(spacing: 8) {
-                    ForEach(modes, id: \.key) { m in
-                        Button {
-                            mode = m.key; ServerConfig.setCertMode(m.key)
-                            if m.key == "public", cleanDomain != ServerConfig.defaultDomain || cleanDomain.isEmpty {
-                                // zefv.dev mode implies the zefv.dev domain.
-                                domain = ServerConfig.defaultDomain
-                                if !hostOK { host = ServerConfig.defaultInstallHost }
-                                ServerConfig.setCertDomain(domain); ServerConfig.setInstallHost(host); saved = true
-                            }
-                            reload()
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
-                        } label: {
-                            VStack(spacing: 3) {
-                                Image(systemName: m.icon).font(.system(size: 16))
-                                Text(m.name).font(.system(size: 12, weight: .semibold))
-                            }
-                            .padding(.vertical, 12).frame(maxWidth: .infinity)
-                            .background(mode == m.key ? Theme.accent.opacity(0.18) : Theme.card)
-                            .foregroundStyle(mode == m.key ? Theme.accent : Theme.subtle)
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(mode == m.key ? Theme.accent : Theme.stroke, lineWidth: 1))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                Text(mode == "public"
-                     ? "Real Let's Encrypt wildcard for *.zefv.dev, renewed automatically on the VPS (certbot + Cloudflare DNS-01) and pulled here. Trusted by iOS out of the box — nothing to install, nothing to renew."
-                     : mode == "custom"
-                     ? "Your own TLS cert for your own domain. Import the fullchain + private key (PEM). Point *.<your domain> at 127.0.0.1 and iOS trusts it like any public cert."
-                     : "Your own root CA — no DNS, no external CA, instant and offline. iOS trusts it only after you install the root profile once (you can inspect it first).")
-                    .font(.caption).foregroundStyle(Theme.subtle)
-            }
-        }
-    }
-
-    private var activeCertCard: some View {
-        let hostOKNow = mode == "local" ? LocalCAManager.covers(host) : ZefvCert.covers(host, sans: liveSANs)
-        let have = mode == "local" ? LocalCAManager.hasLeaf : (mode == "custom" ? hasCustom : ZefvCert.isAvailable)
-        let ready = have && hostOKNow && (mode != "local" || rootTrusted)
-        let exp: Date? = mode == "local" ? LocalCAManager.leafExpiry : (mode == "custom" ? customExpires : expires)
-        return Card {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("Active cert", systemImage: mode == "local" ? "iphone" : (mode == "custom" ? "doc.badge.plus" : "globe")).font(.headline).foregroundStyle(Theme.text)
-                    Spacer()
-                    Text(ready ? "READY" : (have ? (hostOKNow ? "NOT TRUSTED" : "MISMATCH") : "MISSING"))
-                        .font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(0.5)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background((ready ? Color.green : Color.orange).opacity(0.18))
-                        .foregroundStyle(ready ? .green : .orange).clipShape(Capsule())
-                }
-                kvRow("Mode", mode == "local" ? "Fully local (root CA)" : (mode == "custom" ? "Own TLS cert" : "zefv.dev (VPS · auto-renew)"))
-                kvRow("Install host", host)
-                kvRow("Cert covers", liveSANs.isEmpty ? "—" : liveSANs.joined(separator: ", "))
-                kvRow("Expires", exp.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
-                if mode == "local" {
-                    HStack(spacing: 6) {
-                        Image(systemName: rootTrusted ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
-                            .foregroundStyle(rootTrusted ? .green : .orange)
-                        Text(rootTrusted ? "Root CA is installed and trusted on this device."
-                                         : "Root CA is NOT trusted on this device yet — install the profile, then enable it in Settings › General › About › Certificate Trust Settings.")
-                            .font(.caption2).foregroundStyle(rootTrusted ? .green : .orange)
-                    }
-                }
-                if have && !hostOKNow {
-                    Text(mode == "local"
-                         ? "Issue a leaf for \(host) in Local CA settings — instant, the root you trusted covers any host it signs."
-                         : mode == "custom"
-                         ? "The imported cert doesn't cover \(host). Import a cert for *.\(cleanDomain) or change the install host."
-                         : "Pull latest so the zefv.dev cert covers \(host).")
-                        .font(.caption2).foregroundStyle(.orange)
-                }
-            }
-        }
-    }
-
-    private func kvRow(_ k: String, _ v: String) -> some View {
-        HStack {
-            Text(k).font(.caption).foregroundStyle(Theme.subtle)
-            Spacer()
-            Text(v).font(.caption.monospaced()).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
-        }
-    }
-
-    private var hostCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                Label("Domain & install host", systemImage: "network").font(.headline).foregroundStyle(Theme.text)
-                Text(mode == "public"
-                     ? "Installs run over an on-device Vapor HTTPS server. On Cloudflare, *.zefv.dev points at the VPS (user subdomains), so the OTA host is the dedicated `mr.zefv.dev` label with its own A record → 127.0.0.1 (DNS only). One label under the wildcard, so the *.zefv.dev cert covers it."
-                     : "Installs run over an on-device Vapor HTTPS server. Point the install host (or `*.<domain>`) at 127.0.0.1 with an A record — iOS silently drops the install prompt if the host doesn't resolve to loopback.")
-                    .font(.caption).foregroundStyle(Theme.subtle)
-                if mode != "public" {
-                    Field(label: "Domain", text: $domain, placeholder: "example.com", keyboard: .URL)
-                }
-                Field(label: "Install host", text: $host, placeholder: cleanDomain == ServerConfig.defaultDomain || cleanDomain.isEmpty ? ServerConfig.defaultInstallHost : "mr.\(cleanDomain)", keyboard: .URL)
-                if !domainOK { Text("Enter a domain like example.com").font(.caption).foregroundStyle(.orange) }
-                else if !hostOK { Text("Host must be under \(cleanDomain).").font(.caption).foregroundStyle(.orange) }
-                else if !certCoversHost, !liveSANs.isEmpty {
-                    Text("Cert covers \(liveSANs.joined(separator: ", ")) — not \(clean).").font(.caption).foregroundStyle(.orange)
-                }
-                HStack(spacing: 8) {
-                    Image(systemName: dnsChecking ? "hourglass" : (dnsLoopback == true ? "checkmark.circle.fill" : (dnsLoopback == false ? "xmark.octagon.fill" : "questionmark.circle")))
-                        .foregroundStyle(dnsLoopback == true ? .green : (dnsLoopback == false ? .red : Theme.subtle))
-                    Text(dnsChecking ? "Resolving \(probeHost)…"
-                         : dnsLoopback == true ? "\(probeHost) → 127.0.0.1 ✓"
-                         : dnsLoopback == false ? "\(probeHost) does not resolve to 127.0.0.1 — add an A record for it (DNS only, not proxied)"
-                         : "DNS not checked")
-                        .font(.caption).foregroundStyle(Theme.subtle)
-                    Spacer()
-                    Button { Task { await checkLoopback() } } label: { Text("Check").font(.caption.weight(.semibold)).foregroundStyle(Theme.accent) }
-                        .disabled(!domainOK || dnsChecking)
-                }
-                accentButton(saved ? "Saved" : "Save", saved ? "checkmark.circle.fill" : "network", enabled: hostOK) {
-                    ServerConfig.setCertDomain(cleanDomain)
-                    ServerConfig.setInstallHost(probeHost)
-                    domain = ServerConfig.certDomain; host = ServerConfig.installHost; saved = true
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    Task { await checkLoopback() }
-                }
-            }
-        }
-    }
-
-    private var vpsCertCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Label("zefv.dev certificate", systemImage: "arrow.triangle.2.circlepath.circle").font(.headline).foregroundStyle(Theme.text)
-                    Spacer()
-                    statusPill(expires)
-                }
-                kv("In use", cached ? "Pulled from VPS" : "Bundled in IPA")
-                kv("Covers", sans.isEmpty ? "—" : sans.joined(separator: ", "))
-                kv("Expires", expires.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
-                kv("Last pull", fetchedAt?.formatted(date: .abbreviated, time: .shortened) ?? "never")
-                if let error { Text(error).font(.caption).foregroundStyle(.orange) }
-                if let note { Text(note).font(.caption).foregroundStyle(.green) }
+            Section("DNS") {
                 HStack(spacing: 10) {
-                    accentButton(refreshing ? "Fetching…" : "Pull latest from VPS", "arrow.down.circle", busy: refreshing) { Task { await refresh() } }
-                    if cached {
-                        Button { ZefvCert.clearCache(); reload() } label: {
-                            Image(systemName: "trash").frame(width: 46, height: 46)
-                                .background(Theme.card).foregroundStyle(.orange)
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                        }
-                    }
+                    Image(systemName: checking ? "hourglass" : (dnsLoopback == true ? "checkmark.circle.fill" : (dnsLoopback == false ? "xmark.octagon.fill" : "questionmark.circle")))
+                        .foregroundStyle(dnsLoopback == true ? .green : (dnsLoopback == false ? .red : Theme.subtle))
+                    Text(checking ? "Resolving \(cleanHost)…"
+                         : dnsLoopback == true ? "\(cleanHost) → 127.0.0.1"
+                         : dnsLoopback == false ? "\(cleanHost) does not resolve to 127.0.0.1"
+                         : "Not checked").font(.subheadline).foregroundStyle(Theme.text)
+                    Spacer()
                 }
-                Text("certbot on the VPS renews *.zefv.dev via the Cloudflare DNS API and drops the new pair at the source below. The app auto-pulls on install when within \(ServerConfig.refreshBufferDays) days of expiry — Pull latest just forces it now.")
-                    .font(.caption2).foregroundStyle(Theme.subtle)
-                Divider().overlay(Theme.stroke)
-                Text("Cert source").font(.caption.weight(.semibold)).foregroundStyle(Theme.text)
-                Field(label: "URL", text: $sourceURL, placeholder: ServerConfig.defaultCertSourceURL, keyboard: .URL)
-                Field(label: "Token (X-OTA-Token)", text: $sourceToken, placeholder: ServerConfig.defaultCertSourceToken, keyboard: .asciiCapable)
-                accentButton(sourceSaved ? "Saved" : "Save source", sourceSaved ? "checkmark.circle.fill" : "server.rack") {
+                .listRowBackground(Theme.card)
+                TButton(title: "Check DNS", icon: "arrow.clockwise", busy: checking, enabled: domainOK) { Task { await check() } }
+            }
+
+            Section {
+                if !domainOK { TStatusRow(ok: false, text: "Enter a domain like example.com") }
+                else if !hostOK { TStatusRow(ok: false, text: "Host must be under \(cleanDomain).") }
+                else if !st.sans.isEmpty, !ZefvCert.covers(cleanHost, sans: st.sans) { TStatusRow(ok: false, text: "Cert covers \(st.sans.joined(separator: ", ")) — not \(cleanHost).") }
+                TButton(title: saved ? "Saved" : "Save", icon: saved ? "checkmark.circle.fill" : "square.and.arrow.down", enabled: hostOK) {
+                    ServerConfig.setCertDomain(cleanDomain); ServerConfig.setInstallHost(cleanHost)
+                    domain = ServerConfig.certDomain; host = ServerConfig.installHost; saved = true
+                    st.reload(); UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    Task { await check() }
+                }
+            }
+        }
+        .onChange(of: host) { _ in saved = false; dnsLoopback = nil }
+        .onChange(of: domain) { _ in saved = false; dnsLoopback = nil }
+        .task { await check() }
+    }
+
+    private func check() async {
+        guard domainOK else { return }
+        checking = true; dnsLoopback = await ZefvCert.resolvesToLoopback(cleanHost); checking = false
+    }
+}
+
+// MARK: - zefv.dev certificate (VPS)
+
+private struct VPSCertScreen: View {
+    @ObservedObject var st: OTAState
+    @State private var sourceURL = ServerConfig.certSourceURL
+    @State private var sourceToken = ServerConfig.certSourceToken
+    @State private var sourceSaved = false
+    @State private var refreshing = false
+    @State private var error: String?
+    @State private var note: String?
+
+    var body: some View {
+        TableScreen(title: "zefv.dev certificate") {
+            Section {
+                HStack { Text("Status").foregroundStyle(Theme.subtle); Spacer(); certPill(ZefvCert.effectiveNotAfter) }.listRowBackground(Theme.card)
+                TRow(k: "In use", v: st.cached ? "Pulled from VPS" : "Bundled in IPA")
+                TRow(k: "Covers", v: ZefvCert.effectiveSANs.isEmpty ? "—" : ZefvCert.effectiveSANs.joined(separator: ", "))
+                TRow(k: "Expires", v: ZefvCert.effectiveNotAfter.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
+                TRow(k: "Last pull", v: st.fetchedAt?.formatted(date: .abbreviated, time: .shortened) ?? "never")
+            }
+
+            Section {
+                TButton(title: refreshing ? "Fetching…" : "Pull latest from VPS", icon: "arrow.down.circle", busy: refreshing) { Task { await refresh() } }
+                if st.cached { TButton(title: "Forget pulled copy (use bundled)", icon: "trash", role: .destructive) { ZefvCert.clearCache(); st.reload() } }
+                if let error { TStatusRow(ok: false, text: error) }
+                if let note { TStatusRow(ok: true, text: note) }
+            } footer: {
+                Text("certbot on the VPS renews *.zefv.dev through the Cloudflare DNS API; the app auto-pulls on install when within \(ServerConfig.refreshBufferDays) days of expiry. Pull latest forces it now.").foregroundStyle(Theme.subtle)
+            }
+
+            Section("Cert source") {
+                TField(label: "URL", text: $sourceURL, placeholder: ServerConfig.defaultCertSourceURL, keyboard: .URL)
+                TField(label: "Token", text: $sourceToken, placeholder: ServerConfig.defaultCertSourceToken, keyboard: .asciiCapable)
+                TButton(title: sourceSaved ? "Saved" : "Save source", icon: sourceSaved ? "checkmark.circle.fill" : "server.rack") {
                     ServerConfig.setCertSourceURL(sourceURL.trimmingCharacters(in: .whitespacesAndNewlines))
                     ServerConfig.setCertSourceToken(sourceToken.trimmingCharacters(in: .whitespacesAndNewlines))
                     sourceURL = ServerConfig.certSourceURL; sourceToken = ServerConfig.certSourceToken; sourceSaved = true
@@ -857,125 +964,15 @@ private struct OTADomainScreen: View {
                 }
             }
         }
-    }
-
-    private var customCertCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Label("Own TLS certificate", systemImage: "doc.badge.plus").font(.headline).foregroundStyle(Theme.text)
-                    Spacer()
-                    if hasCustom { statusPill(customExpires) }
-                }
-                Text("Bring the cert you already have for your domain — Let's Encrypt, ZeroSSL, Cloudflare Origin, anything iOS trusts. Pick the fullchain (.pem/.crt) and the private key (.pem/.key), or one combined PEM. The key must be unencrypted PEM; it stays on this device.")
-                    .font(.caption).foregroundStyle(Theme.subtle)
-                if hasCustom {
-                    kv("Covers", customSANs.isEmpty ? "—" : customSANs.joined(separator: ", "))
-                    kv("Expires", customExpires.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
-                    if !ZefvCert.covers(host, sans: customSANs) {
-                        Text("This cert doesn't cover \(host). Set the install host to a name it covers (wildcard *.\(cleanDomain) covers any single label).")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
-                } else {
-                    Text("No cert imported yet.").font(.caption).foregroundStyle(.orange)
-                }
-                if let error { Text(error).font(.caption).foregroundStyle(.orange) }
-                if let note { Text(note).font(.caption).foregroundStyle(.green) }
-                HStack(spacing: 10) {
-                    accentButton(hasCustom ? "Replace cert + key" : "Import cert + key", "square.and.arrow.down") { error = nil; note = nil; showCertPicker = true }
-                    if hasCustom {
-                        Button { ZefvCert.clearCustom(); reload() } label: {
-                            Image(systemName: "trash").frame(width: 46, height: 46)
-                                .background(Theme.card).foregroundStyle(.orange)
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                        }
-                    }
-                }
-                Text("Nothing renews automatically in this mode — when the cert expires, import the renewed pair.")
-                    .font(.caption2).foregroundStyle(Theme.subtle)
-            }
-        }
-    }
-
-    private var localModeCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("Fully local CA", systemImage: "iphone").font(.headline).foregroundStyle(Theme.text)
-                Text(LocalCAManager.hasRoot
-                     ? "Root CA ready. Leaf for \(LocalCAManager.meta?.host ?? ServerConfig.installHost): \(LocalCAManager.hasLeaf ? "issued" : "not issued")."
-                     : "No local root yet.")
-                    .font(.caption).foregroundStyle(Theme.subtle)
-                HStack(spacing: 6) {
-                    Image(systemName: rootTrusted ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
-                        .foregroundStyle(rootTrusted ? .green : .orange)
-                    Text(rootTrusted ? "Root profile installed & trusted" : "Root profile not trusted on this device")
-                        .font(.caption.weight(.semibold)).foregroundStyle(rootTrusted ? .green : .orange)
-                    Spacer()
-                    Button { rootTrusted = LocalCAManager.isRootTrusted() } label: { Text("Re-check").font(.caption.weight(.semibold)).foregroundStyle(Theme.accent) }
-                }
-                accentButton("Open local CA settings", "chevron.right") { showLocalCA = true }
-            }
-        }
-    }
-
-    // MARK: Helpers
-
-    private func accentButton(_ title: String, _ icon: String, enabled: Bool = true, busy: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack {
-                if busy { ProgressView().tint(.black) } else { Image(systemName: icon) }
-                Text(title).fontWeight(.semibold)
-                Spacer()
-            }
-            .padding(.vertical, 12).padding(.horizontal, 14)
-            .background(enabled ? Theme.accent : Theme.subtle).foregroundStyle(.black)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .disabled(!enabled || busy)
-    }
-
-    private func statusPill(_ exp: Date?) -> some View {
-        let days = exp.map { Calendar.current.dateComponents([.day], from: Date(), to: $0).day ?? 0 } ?? -1
-        let color: Color = exp == nil ? .orange : (days < 0 ? .red : (days < ServerConfig.refreshBufferDays ? .orange : .green))
-        let text = exp == nil ? "MISSING" : (days < 0 ? "EXPIRED" : (days < ServerConfig.refreshBufferDays ? "\(days)D LEFT" : "READY"))
-        return Text(text).font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(1)
-            .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(color.opacity(0.18)).foregroundStyle(color).clipShape(Capsule())
-    }
-
-    private func kv(_ k: String, _ v: String) -> some View {
-        HStack {
-            Text(k).font(.caption).foregroundStyle(Theme.subtle)
-            Spacer()
-            Text(v).font(.caption.monospaced()).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
-        }
-    }
-
-    private func reload() {
-        LocalCAManager.rehydrateIfNeeded()   // restore root/leaf from iCloud Keychain after a reinstall
-        host = ServerConfig.installHost
-        expires = ZefvCert.effectiveNotAfter; cached = ZefvCert.hasCached; fetchedAt = ZefvCert.meta?.fetchedAt
-        sans = mode == "custom" ? ZefvCert.customSANs : ZefvCert.effectiveSANs
-        hasCustom = ZefvCert.hasCustom; customSANs = ZefvCert.customSANs; customExpires = ZefvCert.customNotAfter
-        rootTrusted = LocalCAManager.isRootTrusted()
-    }
-
-    private var probeHost: String {
-        clean.isEmpty ? (cleanDomain == ServerConfig.defaultDomain ? ServerConfig.defaultInstallHost : "mr.\(cleanDomain)") : clean
-    }
-
-    private func checkLoopback() async {
-        guard domainOK else { return }
-        dnsChecking = true
-        dnsLoopback = await ZefvCert.resolvesToLoopback(probeHost)
-        dnsChecking = false
+        .onChange(of: sourceURL) { _ in sourceSaved = false }
+        .onChange(of: sourceToken) { _ in sourceSaved = false }
     }
 
     private func refresh() async {
         refreshing = true; error = nil; note = nil
         do {
-            _ = try await ZefvCert.fetch(); reload()
+            _ = try await ZefvCert.fetch()
+            OTAFiles.exportPublicChain(); st.reload()
             note = "Pulled from \(URL(string: ServerConfig.certSourceURL)?.host ?? "VPS")"
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch { self.error = error.localizedDescription }
@@ -983,169 +980,212 @@ private struct OTADomainScreen: View {
     }
 }
 
+// MARK: - Own certificate
+
+private struct OwnCertScreen: View {
+    @ObservedObject var st: OTAState
+    @State private var showPicker = false
+    @State private var error: String?
+    @State private var note: String?
+
+    var body: some View {
+        TableScreen(title: "Own certificate") {
+            Section {
+                HStack { Text("Status").foregroundStyle(Theme.subtle); Spacer(); if st.hasCustom { certPill(ZefvCert.customNotAfter) } else { Text("MISSING").font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundStyle(.orange) } }.listRowBackground(Theme.card)
+                if st.hasCustom {
+                    TRow(k: "Covers", v: ZefvCert.customSANs.joined(separator: ", "))
+                    TRow(k: "Expires", v: ZefvCert.customNotAfter.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
+                    if !ZefvCert.covers(st.host, sans: ZefvCert.customSANs) { TStatusRow(ok: false, text: "Doesn't cover \(st.host) — change the install host or import a cert for it.") }
+                }
+            } footer: {
+                Text("Bring the cert you already have for your domain — Let's Encrypt, ZeroSSL, Cloudflare Origin, anything iOS trusts. Pick the fullchain (.pem/.crt) and the private key (.pem/.key), or one combined PEM. The key must be unencrypted PEM; it stays on this device.").foregroundStyle(Theme.subtle)
+            }
+            Section {
+                TButton(title: st.hasCustom ? "Replace cert + key" : "Import cert + key", icon: "square.and.arrow.down") { error = nil; note = nil; showPicker = true }
+                if st.hasCustom { TButton(title: "Remove imported cert", icon: "trash", role: .destructive) { ZefvCert.clearCustom(); st.reload() } }
+                if let error { TStatusRow(ok: false, text: error) }
+                if let note { TStatusRow(ok: true, text: note) }
+            } footer: {
+                Text("Nothing renews automatically in this mode — when the cert expires, import the renewed pair.").foregroundStyle(Theme.subtle)
+            }
+        }
+        .sheet(isPresented: $showPicker) {
+            DocPicker(types: [.item]) { urls in
+                guard !urls.isEmpty else { return }
+                do {
+                    try ZefvCert.importCustom(files: urls)
+                    OTAFiles.exportPublicChain()
+                    note = "Imported \(urls.count) file\(urls.count == 1 ? "" : "s")."
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                } catch { self.error = error.localizedDescription }
+                st.reload()
+            }
+        }
+    }
+}
+
+// MARK: - Exported files
+
+private struct OTAFilesScreen: View {
+    @ObservedObject var st: OTAState
+    @Environment(\.openURL) private var openURL
+    @State private var share: URLItem?
+
+    var body: some View {
+        TableScreen(title: "Exported files") {
+            Section {
+                TRow(k: "Folder", v: "Files › On My iPhone › unzip-drop › OTA Certs")
+                if let u = OTAFiles.filesAppURL {
+                    TButton(title: "Open in Files", icon: "folder") { openURL(u) }
+                }
+                TButton(title: "Export again", icon: "arrow.triangle.2.circlepath") {
+                    if st.mode == "local" { OTAFiles.exportLocalCA() } else { OTAFiles.exportPublicChain() }
+                    st.reload(); UINotificationFeedbackGenerator().notificationOccurred(.success)
+                }
+            }
+            Section("Files") {
+                if st.files.isEmpty {
+                    Text("Nothing exported yet.").foregroundStyle(Theme.subtle).listRowBackground(Theme.card)
+                }
+                ForEach(st.files, id: \.path) { u in
+                    Button { share = URLItem(url: u) } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: u.pathExtension == "mobileconfig" ? "doc.badge.gearshape" : (u.pathExtension == "txt" ? "doc.text" : "doc.badge.ellipsis"))
+                                .foregroundStyle(Theme.accent).frame(width: 26)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(u.lastPathComponent).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
+                                Text(sizeString(u)).font(.caption).foregroundStyle(Theme.subtle)
+                            }
+                            Spacer()
+                            Image(systemName: "square.and.arrow.up").foregroundStyle(Theme.subtle)
+                        }
+                    }
+                    .listRowBackground(Theme.card)
+                }
+            }
+            if !st.files.isEmpty {
+                Section { TButton(title: "Clear folder", icon: "trash", role: .destructive) { OTAFiles.clear(); st.reload() } }
+            }
+        }
+        .sheet(item: $share) { ShareSheet(items: [$0.url]) }
+    }
+
+    private func sizeString(_ u: URL) -> String {
+        let n = (try? FileManager.default.attributesOfItem(atPath: u.path)[.size] as? Int64) ?? 0
+        return ByteCountFormatter.string(fromByteCount: n, countStyle: .file)
+    }
+}
+
+// MARK: - Local CA
+
 private struct LocalCAScreen: View {
-    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var st: OTAState
     @State private var host = ServerConfig.installHost
     @State private var working = false
     @State private var error: String?
     @State private var note: String?
     @State private var showProfileText = false
     @State private var share: URLItem?
-    @State private var refresh = 0            // bump to re-read files
     @State private var dnsLoopback: Bool?
     @State private var dnsChecking = false
+    @State private var confirmDelete = false
 
-    private var hasRoot: Bool { _ = refresh; return LocalCAManager.hasRoot }
-    private var hasLeaf: Bool { _ = refresh; return LocalCAManager.hasLeaf }
-    private var meta: LocalCAManager.Meta? { _ = refresh; return LocalCAManager.meta }
+    private var cleanHost: String {
+        Config.clean(host).replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "*.", with: "").lowercased()
+    }
 
     var body: some View {
-        DetailScreen(title: "Local CA") {
-            Card {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Fully local OTA certificate", systemImage: "iphone.and.arrow.forward").font(.headline).foregroundStyle(Theme.text)
-                    Text("Generates a root CA on this device (OpenSSL), signs a leaf for your OTA host, and serves installs with it. No DNS, no external CA, works offline. Private keys never touch disk in the clear — they're stored in the Keychain with ThisDeviceOnly protection, excluded from backups. iOS trusts it only after you install the root profile below — inspect it first; nothing is signed by anyone but your device.")
-                        .font(.caption).foregroundStyle(Theme.subtle)
+        TableScreen(title: "Local CA") {
+            Section {
+                TRow(k: "Root CA", v: st.hasRoot ? "ready" : "not created", tint: st.hasRoot ? .green : .orange)
+                TRow(k: "Leaf", v: st.hasLeaf ? "issued for \(LocalCAManager.meta?.host ?? "—")" : "not issued", tint: st.hasLeaf ? .green : .orange)
+                TStatusRow(ok: st.rootTrusted, text: st.rootTrusted ? "Root profile installed & trusted on this device" : "Root profile not trusted on this device yet")
+                TButton(title: "Re-check trust", icon: "arrow.clockwise") { st.reload() }
+            } footer: {
+                Text("Generates a root CA on this device (OpenSSL), signs a leaf for your OTA host, and serves installs with it. Private keys stay in the Keychain (ThisDeviceOnly) — public certs are mirrored to iCloud Keychain so a reinstall keeps the same root.").foregroundStyle(Theme.subtle)
+            }
+
+            Section("1 · Host & leaf") {
+                TField(label: "OTA host", text: $host, placeholder: ServerConfig.defaultInstallHost, keyboard: .URL)
+                HStack(spacing: 10) {
+                    Image(systemName: dnsChecking ? "hourglass" : (dnsLoopback == true ? "checkmark.circle.fill" : (dnsLoopback == false ? "xmark.octagon.fill" : "questionmark.circle")))
+                        .foregroundStyle(dnsLoopback == true ? .green : (dnsLoopback == false ? .red : Theme.subtle))
+                    Text(dnsChecking ? "Resolving…" : dnsLoopback == true ? "\(cleanHost) → 127.0.0.1" : dnsLoopback == false ? "\(cleanHost) does not resolve to 127.0.0.1" : "DNS not checked")
+                        .font(.subheadline).foregroundStyle(Theme.text)
+                    Spacer()
+                    Button("Check") { Task { await checkDNS() } }.font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+                }
+                .listRowBackground(Theme.card)
+                TButton(title: working ? "Working…" : (st.hasLeaf ? "Re-issue leaf for host" : "Create CA & issue leaf"), icon: "checkmark.seal.fill", busy: working) { Task { await issue() } }
+            } footer: {
+                Text("The leaf covers this host and *.<host>. The host must ALSO resolve to 127.0.0.1 (A record, or a free name like 127-0-0-1.nip.io) or the install prompt never appears.").foregroundStyle(Theme.subtle)
+            }
+
+            if st.hasRoot {
+                Section("2 · Trust profile") {
+                    TButton(title: "Install trust profile", icon: "square.and.arrow.down") {
+                        OTAFiles.exportLocalCA()
+                        if let u = LocalCAManager.writeMobileConfig() { share = URLItem(url: u) } else { error = "Couldn't build the profile." }
+                        st.reload()
+                    }
+                    TButton(title: "View profile contents", icon: "doc.text.magnifyingglass") { showProfileText = true }
+                } footer: {
+                    Text("One payload: the root cert as a trusted-root payload. Unsigned, plain text. After installing, enable it in Settings › General › About › Certificate Trust Settings — the status above flips green on its own.").foregroundStyle(Theme.subtle)
+                }
+
+                Section("Root details") {
+                    TRow(k: "Subject", v: "MRvEK Local Root CA")
+                    TRow(k: "Fingerprint", v: fingerprint)
+                    if let m = LocalCAManager.meta {
+                        TRow(k: "Created", v: m.rootCreated.formatted(date: .abbreviated, time: .shortened))
+                        TRow(k: "Leaf issued", v: m.leafIssued.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    TRow(k: "Leaf expires", v: LocalCAManager.leafExpiry.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
+                    TRow(k: "Key storage", v: "Keychain · ThisDeviceOnly")
+                }
+
+                Section {
+                    TButton(title: "Delete local CA", icon: "trash", role: .destructive) { confirmDelete = true }
                 }
             }
 
-            Card {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("Host", systemImage: "network").font(.headline).foregroundStyle(Theme.text)
-                    Field(label: "OTA host", text: $host, placeholder: ServerConfig.defaultInstallHost)
-                    Text("The leaf covers this host and *.<host>. This is separate from trust: the host must ALSO resolve to 127.0.0.1 via a real DNS A record (or use a free *.nip.io / *.sslip.io name, e.g. 127-0-0-1.nip.io) — iOS silently drops the install prompt if it doesn't, with no error.")
-                        .font(.caption2).foregroundStyle(Theme.subtle)
-                    HStack(spacing: 8) {
-                        Image(systemName: dnsChecking ? "hourglass" : (dnsLoopback == true ? "checkmark.circle.fill" : (dnsLoopback == false ? "xmark.octagon.fill" : "questionmark.circle")))
-                            .foregroundStyle(dnsLoopback == true ? .green : (dnsLoopback == false ? .red : Theme.subtle))
-                        Text(dnsChecking ? "Resolving \(host)…"
-                             : dnsLoopback == true ? "\(host) → 127.0.0.1 ✓"
-                             : dnsLoopback == false ? "\(host) does NOT resolve to 127.0.0.1 — install sheet will not appear"
-                             : "DNS not checked yet")
-                            .font(.caption).foregroundStyle(Theme.subtle)
-                        Spacer()
-                        Button { Task { await checkDNS() } } label: { Text("Check").font(.caption.weight(.semibold)).foregroundStyle(Theme.accent) }
-                    }
-                    accentButton(working ? "Working…" : (hasLeaf ? "Re-issue leaf for host" : "Create CA & issue leaf"), "checkmark.seal.fill", busy: working) {
-                        Task { await issue() }
-                    }
-                }
-            }
-
-            if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) } }
-            if let note { Card { Text(note).font(.caption).foregroundStyle(.green) } }
-
-            if hasRoot { rootCard }
-            if hasRoot { profileCard }
-
-            if hasRoot {
-                Card {
-                    Button(role: .destructive) { LocalCAManager.reset(); bump(); note = "Local CA deleted." } label: {
-                        Label("Delete local CA", systemImage: "trash").font(.subheadline.weight(.semibold))
-                    }
-                }
-            }
+            if let error { Section { TStatusRow(ok: false, text: error) } }
+            if let note { Section { TStatusRow(ok: true, text: note) } }
         }
         .sheet(item: $share) { ShareSheet(items: [$0.url]) }
         .sheet(isPresented: $showProfileText) { ProfileInspector(text: profileXML) }
+        .confirmationDialog("Delete the local CA?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete root + leaf", role: .destructive) { LocalCAManager.reset(); OTAFiles.clear(); st.reload(); note = "Local CA deleted." }
+        } message: { Text("Installs signed by this root stop being trusted. Remove the profile from Settings afterwards.") }
         .task { await checkDNS() }
     }
 
-    // MARK: Root details
-
-    private var rootCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Root CA", systemImage: "checkmark.shield.fill").font(.headline).foregroundStyle(Theme.text)
-                kv("Subject", "MRvEK Local Root CA")
-                kv("Fingerprint", fingerprint)
-                if let m = meta {
-                    kv("Created", m.rootCreated.formatted(date: .abbreviated, time: .shortened))
-                    kv("Leaf host", m.host)
-                    kv("Leaf issued", m.leafIssued.formatted(date: .abbreviated, time: .shortened))
-                }
-                kv("Key usage", "CA · certificate signing only")
-                kv("Private key storage", "Keychain · ThisDeviceOnly (never backed up)")
-            }
-        }
-    }
-
-    // MARK: Profile (inspect + install)
-
-    private var profileCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("Trust profile", systemImage: "doc.badge.gearshape").font(.headline).foregroundStyle(Theme.text)
-                Text("This .mobileconfig contains one payload: the root cert above, as a com.apple.security.root (trusted root) payload. It is NOT signed by Apple or anyone else — it's plain text you can read in full. After installing, enable it in Settings › General › About › Certificate Trust Settings.")
-                    .font(.caption).foregroundStyle(Theme.subtle)
-                HStack(spacing: 10) {
-                    accentButton("View profile contents", "doc.text.magnifyingglass") { showProfileText = true }
-                }
-                Button {
-                    if let u = LocalCAManager.writeMobileConfig() { share = URLItem(url: u) }
-                    else { error = "Couldn't build the profile." }
-                } label: {
-                    HStack { Image(systemName: "square.and.arrow.down"); Text("Install profile").fontWeight(.semibold); Spacer() }
-                        .padding(.vertical, 12).padding(.horizontal, 14)
-                        .background(Theme.accent).foregroundStyle(.black).clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                Text("Opening the profile takes you to Settings to review and install it. You confirm every step; iOS shows a red 'Unmanaged Root Certificate' warning because it grants trust — that's expected for a root you made.")
-                    .font(.caption2).foregroundStyle(Theme.subtle)
-            }
-        }
-    }
-
-    // MARK: helpers
-
     private var profileXML: String {
-        (LocalCAManager.mobileConfig()).flatMap { String(data: $0, encoding: .utf8) } ?? "(no profile — create the CA first)"
+        LocalCAManager.mobileConfig().flatMap { String(data: $0, encoding: .utf8) } ?? "(no profile — create the CA first)"
     }
-
     private var fingerprint: String {
         guard let der = LocalCAManager.rootDER() else { return "—" }
-        return SHA256.hash(data: der).map { String(format: "%02X", $0) }.joined(separator: ":")
+        return SHA256.hash(data: der).prefix(8).map { String(format: "%02X", $0) }.joined(separator: ":") + "…"
     }
-
-    private func kv(_ k: String, _ v: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(k).font(.caption).foregroundStyle(Theme.subtle)
-            Text(v).font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.text)
-                .lineLimit(3).textSelection(.enabled)
-        }
-    }
-
-    private func accentButton(_ title: String, _ icon: String, busy: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack { if busy { ProgressView().tint(.black) } else { Image(systemName: icon) }; Text(title).fontWeight(.semibold); Spacer() }
-                .padding(.vertical, 12).padding(.horizontal, 14)
-                .background(Theme.accent).foregroundStyle(.black).clipShape(RoundedRectangle(cornerRadius: 12))
-        }.disabled(busy)
-    }
-
-    private func bump() { refresh += 1 }
 
     private func checkDNS() async {
-        dnsChecking = true
-        let h = Config.clean(host).replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "*.", with: "")
-        dnsLoopback = await ZefvCert.resolvesToLoopback(h)
-        dnsChecking = false
+        dnsChecking = true; dnsLoopback = await ZefvCert.resolvesToLoopback(cleanHost); dnsChecking = false
     }
 
     private func issue() async {
         working = true; error = nil; note = nil
-        let h = Config.clean(host).replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "*.", with: "")
-        guard h.contains(".") else { error = "Enter a host like mr.zefv.dev"; working = false; return }
+        let h = cleanHost
+        guard h.contains(".") else { error = "Enter a host like \(ServerConfig.defaultInstallHost)"; working = false; return }
         do {
             try LocalCAManager.issueLeaf(host: h)
             ServerConfig.setInstallHost(h)
             ServerConfig.setCertMode("local")
-            bump()
+            OTAFiles.exportLocalCA()
+            st.reload()
             await checkDNS()
-            if dnsLoopback == false {
-                note = "Root + leaf ready for \(h) — but that host does NOT resolve to 127.0.0.1, so the install sheet won't appear. Point an A record at 127.0.0.1, or use a free name like 127-0-0-1.nip.io."
-            } else {
-                note = "Root + leaf ready for \(h). Cert mode set to local. Install the profile, then Sign & Install."
-            }
+            note = dnsLoopback == false
+                ? "Root + leaf ready for \(h) and exported to Files — but \(h) does NOT resolve to 127.0.0.1, so the install sheet won't appear until it does."
+                : "Root + leaf ready for \(h) and exported to Files. Install the trust profile next."
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch { self.error = error.localizedDescription }
         working = false

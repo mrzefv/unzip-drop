@@ -83,7 +83,7 @@ struct SigningSheet: View {
         VStack(spacing: 0) {
             titleBar
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 16.5) {
                     signingMethodCard        // mSign: Saved / Enterprise / Apple ID
                     appIcon
                     identity                 // App metadata: name / bundle / version
@@ -92,12 +92,12 @@ struct SigningSheet: View {
                     binaryCard               // Mach-O / binary analysis
                     dylibInjection
                     changesSummary
-                    if let error { Text(error).font(.caption).foregroundStyle(.orange).padding(.horizontal, 4) }
+                    if let error { Text(error).font(.caption).foregroundStyle(.orange).padding(.horizontal, 3) }
                     if ota.tracing { tracingCard }
                     if let rep = ota.lastReport { reportCard(rep) }
-                    Spacer(minLength: 20)
+                    Spacer(minLength: 15)
                 }
-                .padding(16)
+                .padding(12)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { signBar.background(BarBlur()) }
         }
@@ -153,26 +153,26 @@ struct SigningSheet: View {
     // MARK: Title
 
     private var titleBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 9) {
             Button { dismiss() } label: {
-                Image(systemName: "chevron.left").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 34, height: 34).background(Color(white: 0.16)).clipShape(Circle())
+                Image(systemName: "chevron.left").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 19, height: 25.5).background(Color(white: 0.16)).clipShape(Circle())
             }
             Spacer()
-            HStack(spacing: 10) {
+            HStack(spacing: 7.5) {
                 iconThumb(iconPNG ?? meta.iconPNG, side: 30)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(name).font(.system(size: 16, weight: .bold)).foregroundStyle(.white).lineLimit(1)
-                    Text(bundle).font(.system(size: 12)).foregroundStyle(blue).lineLimit(1)
+                    Text(name).font(.system(size: 12, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                    Text(bundle).font(.system(size: 9)).foregroundStyle(blue).lineLimit(1)
                 }
             }
             Spacer()
             Button { dismiss() } label: {
-                Image(systemName: "xmark").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 34, height: 34).background(Color(white: 0.16)).clipShape(Circle())
+                Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 19, height: 25.5).background(Color(white: 0.16)).clipShape(Circle())
             }
         }
-        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 10)
+        .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 7.5)
         .background(BarBlur())
         .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
     }
@@ -180,29 +180,29 @@ struct SigningSheet: View {
     // MARK: Bundle info (mSign: Entitlements · Info.plist)
 
     private var bundleInfoCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             sectionLabel("BUNDLE INFO")
             VStack(spacing: 0) {
                 bundleRow("Entitlements", "key.fill", "View") { showBundleInfo = true }
-                Divider().overlay(Theme.stroke).padding(.leading, 52)
+                Divider().overlay(Theme.stroke).padding(.leading, 39)
                 bundleRow("Info.plist", "doc.text.fill", "View") { showBundleInfo = true }
-                Divider().overlay(Theme.stroke).padding(.leading, 52)
+                Divider().overlay(Theme.stroke).padding(.leading, 39)
                 bundleRow("Mach-O dependencies", "point.3.connected.trianglepath.dotted", macho.map { "\($0.arm64?.dylibs.count ?? 0)" } ?? "—") {}
             }
-            .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 16))
+            .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
 
     private func bundleRow(_ title: String, _ icon: String, _ trailing: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                ZStack { RoundedRectangle(cornerRadius: 9).fill(blue.opacity(0.15)).frame(width: 34, height: 34); Image(systemName: icon).foregroundStyle(blue).font(.system(size: 14)) }
-                Text(title).font(.system(size: 15, weight: .medium)).foregroundStyle(.white)
+            HStack(spacing: 9) {
+                ZStack { RoundedRectangle(cornerRadius: 7).fill(blue.opacity(0.15)).frame(width: 19, height: 25.5); Image(systemName: icon).foregroundStyle(blue).font(.system(size: 10.5)) }
+                Text(title).font(.system(size: 11, weight: .medium)).foregroundStyle(.white)
                 Spacer()
                 Text(trailing).font(.caption.weight(.semibold)).foregroundStyle(Theme.subtle)
                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(Theme.subtle)
             }
-            .padding(14)
+            .padding(10.5)
         }
         .buttonStyle(.plain)
     }
@@ -210,22 +210,22 @@ struct SigningSheet: View {
     // MARK: Binary analysis (hand-rolled Mach-O reader)
 
     private var binaryCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             sectionLabel("BINARY")
             if let r = macho {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 7.5) {
+                    HStack(spacing: 6) {
                         Image(systemName: r.encrypted ? "lock.fill" : "lock.open.fill").foregroundStyle(r.encrypted ? .red : .green)
                         Text(r.encrypted ? "FairPlay ENCRYPTED — will not run after re-sign" : "Decrypted — safe to re-sign")
-                            .font(.system(size: 15, weight: .bold)).foregroundStyle(r.encrypted ? .red : .green)
+                            .font(.system(size: 11, weight: .bold)).foregroundStyle(r.encrypted ? .red : .green)
                         Spacer()
-                        Text(r.isFat ? "FAT" : "THIN").font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(0.5)
-                            .padding(.horizontal, 6).padding(.vertical, 3).background(Color(white: 0.16)).foregroundStyle(Theme.subtle).clipShape(Capsule())
+                        Text(r.isFat ? "FAT" : "THIN").font(.system(size: 7, weight: .heavy, design: .monospaced)).kerning(0.5)
+                            .padding(.horizontal, 4.5).padding(.vertical, 2).background(Color(white: 0.16)).foregroundStyle(Theme.subtle).clipShape(Capsule())
                     }
                     ForEach(r.slices) { sl in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 8) {
-                                Text(sl.arch).font(.system(size: 13, weight: .bold, design: .monospaced)).foregroundStyle(blue)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 6) {
+                                Text(sl.arch).font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(blue)
                                 Text(sl.fileType).font(.caption).foregroundStyle(Theme.subtle)
                                 if sl.pie { tagSmall("PIE") }
                                 if sl.hasCodeSignature { tagSmall("SIGNED \(ByteCountFormatter.string(fromByteCount: Int64(sl.codeSignatureSize), countStyle: .file))") }
@@ -237,40 +237,40 @@ struct SigningSheet: View {
                             if !sl.dylibs.isEmpty {
                                 DisclosureGroup {
                                     ForEach(sl.dylibs + sl.weakDylibs.map { "(weak) " + $0 }, id: \.self) { d in
-                                        Text(d).font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
+                                        Text(d).font(.system(size: 7.5, design: .monospaced)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
                                     }
                                 } label: { Text("Show load commands").font(.caption).foregroundStyle(blue) }
                                 .tint(blue)
                             }
                         }
-                        .padding(10).background(Color(white: 0.06)).clipShape(RoundedRectangle(cornerRadius: 10))
+                        .padding(7.5).background(Color(white: 0.06)).clipShape(RoundedRectangle(cornerRadius: 7.5))
                     }
                     ForEach(r.warnings, id: \.self) { w in
-                        HStack(alignment: .top, spacing: 6) {
+                        HStack(alignment: .top, spacing: 4.5) {
                             Image(systemName: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
                             Text(w).font(.caption).foregroundStyle(.orange)
                         }
                     }
                 }
-                .padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(r.encrypted ? Color.red.opacity(0.6) : Color.clear, lineWidth: 1.5))
+                .padding(10.5).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(r.encrypted ? Color.red.opacity(0.6) : Color.clear, lineWidth: 1))
             } else if let e = machoError {
-                Text(e).font(.caption).foregroundStyle(.orange).padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 16))
+                Text(e).font(.caption).foregroundStyle(.orange).padding(10.5).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
-                HStack(spacing: 10) { ProgressView().tint(blue); Text("Reading Mach-O headers…").font(.caption).foregroundStyle(Theme.subtle) }
-                    .padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 16))
+                HStack(spacing: 7.5) { ProgressView().tint(blue); Text("Reading Mach-O headers…").font(.caption).foregroundStyle(Theme.subtle) }
+                    .padding(10.5).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }
     }
 
     private func tagSmall(_ s: String) -> some View {
-        Text(s).font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(0.5)
-            .padding(.horizontal, 6).padding(.vertical, 3).background(blue.opacity(0.15)).foregroundStyle(blue).clipShape(Capsule())
+        Text(s).font(.system(size: 7, weight: .heavy, design: .monospaced)).kerning(0.5)
+            .padding(.horizontal, 4.5).padding(.vertical, 2).background(blue.opacity(0.15)).foregroundStyle(blue).clipShape(Capsule())
     }
     private func kvSmall(_ k: String, _ v: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Text(k).font(.caption2).foregroundStyle(Theme.subtle).frame(width: 70, alignment: .leading)
-            Text(v).font(.system(size: 11, design: .monospaced)).foregroundStyle(.white)
+        HStack(alignment: .top, spacing: 4.5) {
+            Text(k).font(.caption2).foregroundStyle(Theme.subtle).frame(width: 39.5, alignment: .leading)
+            Text(v).font(.system(size: 8, design: .monospaced)).foregroundStyle(.white)
         }
     }
 
@@ -302,9 +302,9 @@ struct SigningSheet: View {
     // mSign-style signing method: a selector (Saved / Enterprise / Apple ID)
     // over a body whose accent + content changes with the choice.
     private var signingMethodCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 7.5) {
             sectionLabel("SIGNING METHOD")
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 methodChip("saved", "Saved cert", "checkmark.seal.fill")
                 methodChip("enterprise", "Enterprise", "building.2.fill")
                 methodChip("appleid", "Apple ID", "applelogo")
@@ -316,9 +316,9 @@ struct SigningSheet: View {
                 default:           savedBody
                 }
             }
-            .padding(16)
-            .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(methodAccent.opacity(0.5), lineWidth: 1))
+            .padding(12)
+            .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(methodAccent.opacity(0.5), lineWidth: 1))
         }
     }
 
@@ -330,53 +330,53 @@ struct SigningSheet: View {
 
     private func methodChip(_ id: String, _ title: String, _ icon: String) -> some View {
         Button { method = id } label: {
-            VStack(spacing: 4) {
-                Image(systemName: icon).font(.system(size: 13))
-                Text(title).font(.system(size: 10, weight: .semibold))
+            VStack(spacing: 3) {
+                Image(systemName: icon).font(.system(size: 10))
+                Text(title).font(.system(size: 7.5, weight: .semibold))
             }
-            .padding(.vertical, 8).frame(maxWidth: .infinity)
+            .padding(.vertical, 6).frame(maxWidth: .infinity)
             .background(method == id ? methodAccent.opacity(0.18) : Color(white: 0.1))
             .foregroundStyle(method == id ? methodAccent : Theme.subtle)
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(method == id ? methodAccent : Theme.stroke, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(method == id ? methodAccent : Theme.stroke, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
         }
         .buttonStyle(.plain)
     }
 
     @ViewBuilder private var savedBody: some View {
         if let c = certs.active {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(blue).font(.system(size: 15)).padding(.top, 2)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("USING YOUR SAVED CERTIFICATE").font(.system(size: 9, weight: .heavy)).kerning(0.7).foregroundStyle(blue)
-                        Text(c.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
-                        Text(certSubtitle(c)).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(blue).font(.system(size: 11)).padding(.top, 1.5)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("USING YOUR SAVED CERTIFICATE").font(.system(size: 7, weight: .heavy)).kerning(0.7).foregroundStyle(blue)
+                        Text(c.name).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                        Text(certSubtitle(c)).font(.system(size: 8)).foregroundStyle(Theme.subtle).lineLimit(1)
                     }
                     Spacer(minLength: 0)
                 }
                 Divider().overlay(Theme.stroke)
                 // Distributed Identity | Certificate — mSign layout
                 HStack(alignment: .top, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("DISTRIBUTED IDENTITY", systemImage: "globe").font(.system(size: 9, weight: .heavy)).kerning(0.5).foregroundStyle(blue)
-                        Text(ServerConfig.installHost).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
-                        Text(ServerConfig.certMode == "local" ? "Local root CA · offline" : "Public URL for OTA").font(.system(size: 10)).foregroundStyle(Theme.subtle)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label("DISTRIBUTED IDENTITY", systemImage: "globe").font(.system(size: 7, weight: .heavy)).kerning(0.5).foregroundStyle(blue)
+                        Text(ServerConfig.installHost).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(ServerConfig.certMode == "local" ? "Local root CA · offline" : "Public URL for OTA").font(.system(size: 7.5)).foregroundStyle(Theme.subtle)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    Rectangle().fill(Theme.stroke).frame(width: 1).padding(.horizontal, 10)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("CERTIFICATE", systemImage: "lock.shield.fill").font(.system(size: 9, weight: .heavy)).kerning(0.5).foregroundStyle(.green)
-                        Text(ServerConfig.certMode == "local" ? "Local CA" : "Let's Encrypt").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                    Rectangle().fill(Theme.stroke).frame(width: 1).padding(.horizontal, 7.5)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label("CERTIFICATE", systemImage: "lock.shield.fill").font(.system(size: 7, weight: .heavy)).kerning(0.5).foregroundStyle(.green)
+                        Text(ServerConfig.certMode == "local" ? "Local CA" : "Let's Encrypt").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.white)
                         if let d = certDaysLeft {
-                            Text(d < 0 ? "EXPIRED" : "\(d) days left").font(.system(size: 10)).foregroundStyle(d < 21 ? .orange : .green)
+                            Text(d < 0 ? "EXPIRED" : "\(d) days left").font(.system(size: 7.5)).foregroundStyle(d < 21 ? .orange : .green)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         } else {
-            HStack(spacing: 10) {
+            HStack(spacing: 7.5) {
                 Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
                 Text("No certificate — import one in Settings › Certificates.").font(.caption).foregroundStyle(.orange)
             }
@@ -384,21 +384,21 @@ struct SigningSheet: View {
     }
 
     @ViewBuilder private var enterpriseBody: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("ENTERPRISE CERTIFICATE").font(.system(size: 9, weight: .heavy)).kerning(0.7).foregroundStyle(.purple)
+        VStack(alignment: .leading, spacing: 4.5) {
+            Text("ENTERPRISE CERTIFICATE").font(.system(size: 7, weight: .heavy)).kerning(0.7).foregroundStyle(.purple)
             Text(enterpriseName.isEmpty ? "Tap to choose an enterprise cert" : enterpriseName)
-                .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-            Text("In-house distribution · no revoke risk · no expiry pressure").font(.system(size: 11)).foregroundStyle(Theme.subtle)
+                .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.white)
+            Text("In-house distribution · no revoke risk · no expiry pressure").font(.system(size: 8)).foregroundStyle(Theme.subtle)
             Text("Plug in: enterprise cert picker").font(.caption2).foregroundStyle(.purple.opacity(0.7))
         }
     }
 
     @ViewBuilder private var appleIDBody: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("APPLE ID (FREE)").font(.system(size: 9, weight: .heavy)).kerning(0.7).foregroundStyle(.cyan)
+        VStack(alignment: .leading, spacing: 4.5) {
+            Text("APPLE ID (FREE)").font(.system(size: 7, weight: .heavy)).kerning(0.7).foregroundStyle(.cyan)
             Text(appleIDEmail.isEmpty ? "Sign in with an Apple ID" : appleIDEmail)
-                .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-            Text("Free account · 7-day cert · reinstall weekly").font(.system(size: 11)).foregroundStyle(Theme.subtle)
+                .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.white)
+            Text("Free account · 7-day cert · reinstall weekly").font(.system(size: 8)).foregroundStyle(Theme.subtle)
             Text("Plug in: Apple ID login + cert request").font(.caption2).foregroundStyle(.cyan.opacity(0.7))
         }
     }
@@ -419,20 +419,20 @@ struct SigningSheet: View {
     }
 
     private var appIcon: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             sectionLabel("APP ICON")
             Button { showIconPicker = true } label: {
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     iconThumb(iconPNG ?? meta.iconPNG, side: 72)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(iconPNG == nil ? "Replace app icon" : "Icon replaced").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
-                        Text("PNG/JPEG — auto-resized to required sizes").font(.system(size: 13)).foregroundStyle(Theme.subtle)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(iconPNG == nil ? "Replace app icon" : "Icon replaced").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                        Text("PNG/JPEG — auto-resized to required sizes").font(.system(size: 10)).foregroundStyle(Theme.subtle)
                     }
                     Spacer()
                     if iconPNG != nil { Button { iconPNG = nil } label: { Image(systemName: "arrow.uturn.backward").foregroundStyle(blue) } }
                 }
-                .padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.stroke, style: StrokeStyle(lineWidth: 1.5, dash: [6])))
+                .padding(10.5).frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, style: StrokeStyle(lineWidth: 1, dash: [6])))
             }
             .buttonStyle(.plain)
         }
@@ -441,7 +441,7 @@ struct SigningSheet: View {
     // MARK: Identity
 
     private var identity: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             sectionLabel("APP NAME · BUNDLE ID · VERSION")
             VStack(spacing: 0) {
                 identRow("Aa", "Name", $name)
@@ -450,31 +450,31 @@ struct SigningSheet: View {
                 divider
                 identRow("number", "Version", $version, mono: true)
             }
-            .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 16))
+            .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
 
     private func identRow(_ icon: String, _ label: String, _ text: Binding<String>, mono: Bool = false) -> some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10.5) {
             ZStack {
-                RoundedRectangle(cornerRadius: 9).fill(blue.opacity(0.15)).frame(width: 40, height: 40)
-                if icon == "Aa" { Text("Aa").font(.system(size: 15, weight: .bold)).foregroundStyle(blue) }
+                RoundedRectangle(cornerRadius: 7).fill(blue.opacity(0.15)).frame(width: 22.5, height: 30)
+                if icon == "Aa" { Text("Aa").font(.system(size: 11, weight: .bold)).foregroundStyle(blue) }
                 else { Image(systemName: icon).foregroundStyle(blue) }
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label).font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.subtle)
+            VStack(alignment: .leading, spacing: 1.5) {
+                Text(label).font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.subtle)
                 TextField(label, text: text)
-                    .font(.system(size: 15, design: mono ? .monospaced : .default)).foregroundStyle(.white)
+                    .font(.system(size: 11, design: mono ? .monospaced : .default)).foregroundStyle(.white)
                     .autocorrectionDisabled().textInputAutocapitalization(.never)
             }
         }
-        .padding(14)
+        .padding(10.5)
     }
 
     // MARK: Build options (collapsible groups)
 
     private var buildOptions: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             sectionLabel("BUILD OPTIONS")
             group("general", "slider.horizontal.3", "General", badge: generalCount > 0 ? "\(generalCount) active" : nil) {
                 toggle("Disable ATS (allow HTTP)", $o.disableATS)
@@ -507,64 +507,64 @@ struct SigningSheet: View {
     private func group<C: View>(_ key: String, _ icon: String, _ title: String, badge: String?, @ViewBuilder content: () -> C) -> some View {
         VStack(spacing: 0) {
             Button { withAnimation { if expanded.contains(key) { expanded.remove(key) } else { expanded.insert(key) } } } label: {
-                HStack(spacing: 14) {
-                    ZStack { RoundedRectangle(cornerRadius: 9).fill(blue.opacity(0.15)).frame(width: 40, height: 40); Image(systemName: icon).foregroundStyle(blue) }
-                    Text(title).font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
+                HStack(spacing: 10.5) {
+                    ZStack { RoundedRectangle(cornerRadius: 7).fill(blue.opacity(0.15)).frame(width: 22.5, height: 30); Image(systemName: icon).foregroundStyle(blue) }
+                    Text(title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white)
                     Spacer()
                     if let b = badge {
-                        Text(b).font(.system(size: 13, weight: .bold)).foregroundStyle(b.contains("active") ? blue : Theme.subtle)
-                            .padding(.horizontal, 10).padding(.vertical, 5)
+                        Text(b).font(.system(size: 10, weight: .bold)).foregroundStyle(b.contains("active") ? blue : Theme.subtle)
+                            .padding(.horizontal, 7.5).padding(.vertical, 4)
                             .background(Color(white: 0.14)).clipShape(Capsule())
                     }
-                    Image(systemName: "chevron.down").font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.subtle)
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.subtle)
                         .rotationEffect(.degrees(expanded.contains(key) ? 180 : 0))
                 }
-                .padding(14)
+                .padding(10.5)
             }
             .buttonStyle(.plain)
             if expanded.contains(key) {
-                VStack(spacing: 0) { content() }.padding(.bottom, 6)
+                VStack(spacing: 0) { content() }.padding(.bottom, 4.5)
             }
         }
-        .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 16))
+        .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func toggle(_ label: String, _ b: Binding<Bool>, disabled: Bool = false, note: String? = nil) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label).font(.system(size: 15)).foregroundStyle(disabled ? Theme.subtle : .white)
+            VStack(alignment: .leading, spacing: 1.5) {
+                Text(label).font(.system(size: 11)).foregroundStyle(disabled ? Theme.subtle : .white)
                 if let n = note { Text(n).font(.caption2).foregroundStyle(Theme.subtle) }
             }
             Spacer()
             Toggle("", isOn: b).labelsHidden().tint(blue).disabled(disabled)
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
+        .padding(.horizontal, 12).padding(.vertical, 6)
     }
 
     // MARK: Dylib injection
 
     private var dylibInjection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             sectionLabel("DYLIB INJECTION")
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 10.5) {
                 segRow("Inject Path", ["@executable_path": "@executable", "@rpath": "@rpath"], $injectPath)
                 segRow("Inject Folder", ["/": "/", "Frameworks/": "Frameworks/"], $injectFolder)
 
                 Text("\(injectPath)/\(injectFolder == "/" ? "" : "Frameworks/")xxx.dylib")
-                    .font(.system(size: 14, design: .monospaced)).foregroundStyle(Theme.subtle)
-                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(white: 0.06)).clipShape(RoundedRectangle(cornerRadius: 10))
+                    .font(.system(size: 10.5, design: .monospaced)).foregroundStyle(Theme.subtle)
+                    .padding(9).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(white: 0.06)).clipShape(RoundedRectangle(cornerRadius: 7.5))
 
                 ForEach($dylibs) { $d in
-                    HStack(spacing: 12) {
+                    HStack(spacing: 9) {
                         Button { dylibs.removeAll { $0.id == d.id } } label: {
-                            Image(systemName: "minus.circle.fill").font(.system(size: 26)).foregroundStyle(.red)
+                            Image(systemName: "minus.circle.fill").font(.system(size: 19.5)).foregroundStyle(.red)
                         }
-                        Text(d.url.lastPathComponent).font(.system(size: 16, design: .monospaced)).foregroundStyle(.white).lineLimit(1)
+                        Text(d.url.lastPathComponent).font(.system(size: 12, design: .monospaced)).foregroundStyle(.white).lineLimit(1)
                         Spacer()
                         Toggle("weak", isOn: $d.weak).labelsHidden().tint(blue)
                     }
-                    .padding(12).background(Color(white: 0.10)).clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(9).background(Color(white: 0.10)).clipShape(RoundedRectangle(cornerRadius: 9))
                 }
 
                 if !machoDylibs.isEmpty {
@@ -572,46 +572,46 @@ struct SigningSheet: View {
                         ForEach(machoDylibs, id: \.self) { d in
                             HStack {
                                 Image(systemName: removeDylibs.contains(d) ? "checkmark.square.fill" : "square").foregroundStyle(removeDylibs.contains(d) ? .red : Theme.subtle)
-                                Text(d).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
+                                Text(d).font(.system(size: 9, design: .monospaced)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
                                 Spacer()
                             }
                             .contentShape(Rectangle())
                             .onTapGesture { if removeDylibs.contains(d) { removeDylibs.remove(d) } else { removeDylibs.insert(d) } }
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 3)
                         }
                     } label: {
-                        Text("Existing load commands (\(machoDylibs.count)) — tap to strip").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.subtle)
+                        Text("Existing load commands (\(machoDylibs.count)) — tap to strip").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.subtle)
                     }
                     .tint(blue)
-                    .padding(12).background(Color(white: 0.06)).clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(9).background(Color(white: 0.06)).clipShape(RoundedRectangle(cornerRadius: 9))
                 }
 
                 Button { showDylibPicker = true } label: {
-                    VStack(spacing: 8) {
-                        Image(systemName: "plus").font(.system(size: 26, weight: .bold)).foregroundStyle(Theme.subtle)
-                        Text("Add library (.dylib, .framework)").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
-                        Text("Tap to browse").font(.system(size: 12)).foregroundStyle(Theme.subtle)
+                    VStack(spacing: 6) {
+                        Image(systemName: "plus").font(.system(size: 19.5, weight: .bold)).foregroundStyle(Theme.subtle)
+                        Text("Add library (.dylib, .framework)").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+                        Text("Tap to browse").font(.system(size: 9)).foregroundStyle(Theme.subtle)
                     }
-                    .frame(maxWidth: .infinity).padding(.vertical, 26)
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.stroke, style: StrokeStyle(lineWidth: 1.5, dash: [6])))
+                    .frame(maxWidth: .infinity).padding(.vertical, 19.5)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, style: StrokeStyle(lineWidth: 1, dash: [6])))
                 }
                 .buttonStyle(.plain)
             }
-            .padding(16).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 18))
+            .padding(12).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 13.5))
         }
     }
 
     private func segRow(_ label: String, _ opts: [String: String], _ sel: Binding<String>) -> some View {
-        HStack(spacing: 10) {
-            Text(label).font(.system(size: 16)).foregroundStyle(.white).frame(width: 108, alignment: .leading)
+        HStack(spacing: 7.5) {
+            Text(label).font(.system(size: 12)).foregroundStyle(.white).frame(width: 61, alignment: .leading)
             ForEach(opts.sorted(by: { $0.key < $1.key }), id: \.key) { k, title in
                 Button { sel.wrappedValue = k } label: {
-                    Text(title).font(.system(size: 14, weight: .semibold, design: .monospaced))
-                        .padding(.vertical, 10).frame(maxWidth: .infinity)
+                    Text(title).font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                        .padding(.vertical, 7.5).frame(maxWidth: .infinity)
                         .background(sel.wrappedValue == k ? blue.opacity(0.18) : Color(white: 0.1))
                         .foregroundStyle(sel.wrappedValue == k ? blue : Theme.subtle)
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(sel.wrappedValue == k ? blue : Theme.stroke, lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 9).stroke(sel.wrappedValue == k ? blue : Theme.stroke, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: 9))
                 }
                 .buttonStyle(.plain)
             }
@@ -631,14 +631,14 @@ struct SigningSheet: View {
             if ident.isEmpty && dy.isEmpty && build.isEmpty {
                 EmptyView()
             } else {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     sectionLabel("CHANGES TO BE APPLIED")
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 9) {
                         if !ident.isEmpty { summaryBlock("square.on.square", "Identity", ident) }
                         if !dy.isEmpty { summaryBlock("syringe", "Dylibs", dy) }
                         if !build.isEmpty { summaryBlock("slider.horizontal.3", "Build options", build) }
                     }
-                    .padding(16).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 18))
+                    .padding(12).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 13.5))
                 }
             }
         }
@@ -655,30 +655,30 @@ struct SigningSheet: View {
     }
 
     private func summaryBlock(_ icon: String, _ title: String, _ items: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack { Image(systemName: icon).foregroundStyle(blue); Text(title).font(.system(size: 16, weight: .bold)).foregroundStyle(.white); Spacer(); Text("\(items.count)").foregroundStyle(Theme.subtle) }
-            ForEach(items, id: \.self) { Text("· \($0)").font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.subtle) }
+        VStack(alignment: .leading, spacing: 4) {
+            HStack { Image(systemName: icon).foregroundStyle(blue); Text(title).font(.system(size: 12, weight: .bold)).foregroundStyle(.white); Spacer(); Text("\(items.count)").foregroundStyle(Theme.subtle) }
+            ForEach(items, id: \.self) { Text("· \($0)").font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.subtle) }
         }
     }
 
     // MARK: Log + signed
 
     private var tracingCard: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 7.5) {
             ProgressView().tint(blue)
             Text("Watching installd… tap Install in the iOS sheet. Report in ~25s.").font(.caption).foregroundStyle(Theme.subtle)
         }
-        .padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(10.5).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 10.5))
     }
 
     private func reportCard(_ r: OTAInstaller.Report) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 7.5) {
             HStack {
                 Label("Install trace", systemImage: "waveform.path.ecg").font(.headline).foregroundStyle(.white)
                 Spacer()
                 Text(r.delivered ? "IPA DELIVERED" : "NOT DELIVERED")
-                    .font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(0.5)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .font(.system(size: 7, weight: .heavy, design: .monospaced)).kerning(0.5)
+                    .padding(.horizontal, 5).padding(.vertical, 2)
                     .background((r.delivered ? Color.green : Color.orange).opacity(0.18))
                     .foregroundStyle(r.delivered ? .green : .orange).clipShape(Capsule())
             }
@@ -686,44 +686,44 @@ struct SigningSheet: View {
                 Text("installd made no requests.").font(.caption).foregroundStyle(.orange)
             } else {
                 ForEach(r.requests) { e in
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Image(systemName: e.status == 200 ? "checkmark.circle.fill" : "xmark.circle").foregroundStyle(e.status == 200 ? .green : .orange).font(.caption)
-                        Text(e.path).font(.system(size: 11, design: .monospaced)).foregroundStyle(.white).lineLimit(1).truncationMode(.middle)
+                        Text(e.path).font(.system(size: 8, design: .monospaced)).foregroundStyle(.white).lineLimit(1).truncationMode(.middle)
                         Spacer()
                         Text(ByteCountFormatter.string(fromByteCount: e.bytes, countStyle: .file)).font(.caption2.monospaced()).foregroundStyle(Theme.subtle)
                     }
                 }
             }
-            Text(r.diagnosis).font(.system(size: 13)).foregroundStyle(.white)
+            Text(r.diagnosis).font(.system(size: 10)).foregroundStyle(.white)
             if let p = r.profileNote {
-                Text(p).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.subtle)
+                Text(p).font(.system(size: 9, design: .monospaced)).foregroundStyle(Theme.subtle)
             }
         }
-        .padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(10.5).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 10.5))
     }
 
     // MARK: Sign bar
 
     private var signBar: some View {
         Button { Task { await sign() } } label: {
-            HStack(spacing: 10) {
-                if signing { ProgressView().tint(.white) } else { Image(systemName: "signature").font(.system(size: 18, weight: .bold)) }
-                Text(signing ? "Signing…" : "Sign IPA").font(.system(size: 18, weight: .bold))
+            HStack(spacing: 7.5) {
+                if signing { ProgressView().tint(.white) } else { Image(systemName: "signature").font(.system(size: 13.5, weight: .bold)) }
+                Text(signing ? "Signing…" : "Sign IPA").font(.system(size: 13.5, weight: .bold))
             }
-            .frame(maxWidth: .infinity).padding(.vertical, 16)
+            .frame(maxWidth: .infinity).padding(.vertical, 12)
             .background(certs.active == nil || macho?.encrypted == true ? Theme.subtle : blue).foregroundStyle(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .disabled(signing || certs.active == nil || macho?.encrypted == true)
-        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
+        .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 4.5)
     }
 
     // MARK: Helpers
 
     private func sectionLabel(_ s: String) -> some View {
-        Text(s).font(.system(size: 13, weight: .bold)).kerning(1).foregroundStyle(Theme.subtle)
+        Text(s).font(.system(size: 10, weight: .bold)).kerning(1).foregroundStyle(Theme.subtle)
     }
-    private var divider: some View { Rectangle().fill(Theme.stroke).frame(height: 1).padding(.leading, 68) }
+    private var divider: some View { Rectangle().fill(Theme.stroke).frame(height: 1).padding(.leading, 51) }
 
     private func iconThumb(_ data: Data?, side: CGFloat) -> some View {
         Group {

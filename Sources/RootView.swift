@@ -1,7 +1,8 @@
 //
 //  RootView.swift
-//  App shell. The app is a signer first: Library (sign + install), Browse
-//  (repo.json sources → apps → IPA), Signed (history), Settings. The GitHub
+//  App shell. The app is a signer first: Browse (repo.json sources → apps →
+//  IPA), Library (sign + install), Signed (history), Settings. Handing an IPA to
+//  SignQueue opens SigningSheet directly — there is no intermediate Sign screen. The GitHub
 //  tools (Import · Contents · Push · Build · Repos) live behind Settings ›
 //  GitHub as a full-screen hub.
 //
@@ -11,15 +12,23 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject var session: Session
     @ObservedObject private var signQueue = SignQueue.shared
-    @State private var showSign = false
     @ObservedObject private var hub = GitHubHub.shared
     @State private var tab = 0
+    @State private var signItem: SignItem?
+    @State private var signError: String?
+
+    /// An IPA handed to the shell for signing — goes straight into SigningSheet.
+    private struct SignItem: Identifiable {
+        let url: URL
+        let meta: IPAMeta
+        var id: String { url.path }
+    }
 
     var body: some View {
         ZStack {
             switch tab {
-            case 0: LibraryView()
-            case 1: SourcesView()
+            case 0: SourcesView()
+            case 1: LibraryView()
             case 2: SignedView()
             default: SettingsView()
             }
@@ -30,14 +39,35 @@ struct RootView: View {
         }
         .background(Color.black.ignoresSafeArea())
         .onChange(of: signQueue.requestedTab) { t in
-            // Signing is a flow, not a tab: present SignView over whatever's showing.
-            if t != nil { showSign = true; signQueue.requestedTab = nil }
+            // Signing is a flow, not a tab: open SigningSheet directly over whatever's showing.
+            guard t != nil else { return }
+            signQueue.requestedTab = nil
+            if let url = signQueue.pending { openSigningSheet(url) }
         }
-        .fullScreenCover(isPresented: $showSign) { SignView().preferredColorScheme(.dark) }
+        .fullScreenCover(item: $signItem) { it in
+            SigningSheet(ipaURL: it.url, meta: it.meta) { _ in }
+                .preferredColorScheme(.dark)
+        }
         .fullScreenCover(isPresented: $hub.isPresented) {
             GitHubHubScreen()
                 .environmentObject(session)
                 .preferredColorScheme(.dark)
+        }
+        .alert("Couldn't read IPA", isPresented: Binding(get: { signError != nil }, set: { if !$0 { signError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(signError ?? "") }
+    }
+
+    private func openSigningSheet(_ url: URL) {
+        Task {
+            do {
+                let m = try await Task.detached { try IPAMeta.read(url) }.value
+                signQueue.pending = nil
+                signItem = SignItem(url: url, meta: m)
+            } catch {
+                signQueue.pending = nil
+                signError = error.localizedDescription
+            }
         }
     }
 }
@@ -47,8 +77,8 @@ struct RootView: View {
 private struct TabBar: View {
     @Binding var selected: Int
     private let tabs: [(label: String, icon: String)] = [
-        ("Library",  "square.stack.3d.up.fill"),
         ("Browse",   "safari.fill"),
+        ("Library",  "square.stack.3d.up.fill"),
         ("Signed",   "signature"),
         ("Settings", "gearshape.fill"),
     ]

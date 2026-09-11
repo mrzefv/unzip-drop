@@ -86,6 +86,9 @@ struct SigningSheet: View {
         var weakDylibReferences = false, sha256Only = false, forceResign = true, surgicalMode = true
         var forceMinIOS12 = false, disableFileSharing = false, forcePortrait = false, skipIPad = false
         var stripSCInfo = false, stripPrivacy = false, stripWatch = false, stripExtensions = false, removeURLSchemes = false
+        var stripBitcode = false, stripDebugSymbols = false
+        var autoFixEntitlements = false, disablePush = false, disableAppGroups = false
+        var disableiCloud = false, disableSiri = false, disableBackgroundModes = false
         var replaceIcon = true
     }
 
@@ -585,35 +588,47 @@ struct SigningSheet: View {
             sectionLabel("BUILD OPTIONS")
             group("general", "slider.horizontal.3", "General", badge: generalCount > 0 ? "\(generalCount) active" : nil) {
                 toggle("Remove existing libraries", $o.removeExistingLibraries, note: "Strip pre-existing dylibs and frameworks before injection")
-                toggle("Thin to arm64 only", Binding(get: { false }, set: { _ in }), disabled: true, note: "coming soon")
-                toggle("Randomize bundle ID", $o.randomizeBundleID, note: "append a random suffix so it can coexist with the original app")
-                toggle("Disable ATS (allow HTTP)", $o.disableATS)
-                toggle("Weak dylib references", $o.weakDylibReferences, note: "use LC_LOAD_WEAK_DYLIB for injected libraries")
-                toggle("Remove Watch apps", $o.stripWatch)
-                toggle("SHA256 only", Binding(get: { false }, set: { _ in }), disabled: true, note: "coming soon")
-                toggle("Force re-sign", Binding(get: { true }, set: { _ in }), disabled: true, note: "always on in current signer")
-                toggle("Surgical mode", $o.surgicalMode, note: "70–85% faster; auto-disabled when injecting dylibs")
+                toggle("Thin to arm64 only", $o.thinToArm64Only, note: "Drop other architectures — ~30% smaller, A8+ devices")
+                toggle("Randomize bundle ID", $o.randomizeBundleID, note: "Append a random suffix so it can coexist with the original app")
+                toggle("Disable ATS (HTTP allowed)", $o.disableATS, note: "Adds NSAllowsArbitraryLoads to Info.plist for legacy HTTP endpoints")
+                toggle("Weak dylib references", $o.weakDylibReferences, note: "Use LC_LOAD_WEAK_DYLIB — survives missing libs at launch")
+                toggle("Remove Watch apps", $o.stripWatch, note: "Strip the embedded watchOS bundle for smaller IPAs")
+                toggle("SHA256 only", $o.sha256Only, note: "Skip SHA1 hashes — modern iOS verifies faster, ~5% smaller CodeResources")
+                toggle("Force re-sign", $o.forceResign, note: "Override existing signatures even on already-signed IPAs")
+                toggle("Surgical mode", $o.surgicalMode, note: "70–85% faster signing — auto-disabled if injecting dylibs")
             }
             group("strip", "scissors", "Strip Content", badge: "\(stripCount)") {
-                toggle("Strip SC_Info", $o.stripSCInfo)
-                toggle("Strip privacy manifests", $o.stripPrivacy)
-                toggle("Remove app extensions (PlugIns)", $o.stripExtensions)
-                toggle("Remove URL schemes", $o.removeURLSchemes)
+                toggle("Strip PlugIns", $o.stripExtensions, note: "Remove app extensions (Today widget, share sheet) — required for some sideloads")
+                toggle("Strip SC_Info", $o.stripSCInfo, note: "Remove App Store DRM metadata — basic anti-traceback")
+                toggle("Strip privacy declarations", $o.stripPrivacy, note: "Remove PrivacyInfo.xcprivacy files — avoids privacy manifest disclosure")
+                toggle("Strip Bitcode", $o.stripBitcode, note: "Remove __LLVM segment — legacy, ignored by iOS 14+")
+                toggle("Strip debug symbols", $o.stripDebugSymbols, note: "Drop dSYM/symbol tables — smaller binary")
             }
-            group("plist", "key.fill", "Entitlement Scrubbers", badge: "\(plistCount)") {
-                toggle("Force MinimumOSVersion 12.0", $o.forceMinIOS12)
-                toggle("Disable file sharing", $o.disableFileSharing)
-                toggle("Force portrait only", $o.forcePortrait)
-                toggle("iPhone only (skip iPad)", $o.skipIPad)
+            group("scrub", "key.fill", "Entitlement Scrubbers", badge: "\(scrubCount)") {
+                toggle("Auto-fix entitlements", $o.autoFixEntitlements, note: "Strip ents that don't match your cert team — fixes \"Profile doesn't include\" errors")
+                toggle("Disable Push Notifications", $o.disablePush, note: "Strip aps-environment — required if your cert isn't push-enabled")
+                toggle("Disable App Groups", $o.disableAppGroups, note: "Strip com.apple.security.application-groups — required for free certs")
+                toggle("Disable iCloud", $o.disableiCloud, note: "Strip iCloud container & ubiquity entitlements")
+                toggle("Disable Siri", $o.disableSiri, note: "Strip com.apple.developer.siri")
+                toggle("Disable Background Modes", $o.disableBackgroundModes, note: "Strip UIBackgroundModes — kills VoIP/audio background")
+            }
+            group("plist", "doc.text.fill", "Info.plist Tweaks", badge: "\(plistCount)") {
+                toggle("Force min iOS 12.0", $o.forceMinIOS12, note: "Override MinimumOSVersion so older devices can install")
+                toggle("Hide URL schemes", $o.removeURLSchemes, note: "Strip CFBundleURLTypes — kills custom URL handlers")
+                toggle("Disable file sharing", $o.disableFileSharing, note: "Force UIFileSharingEnabled = false")
+                toggle("Force portrait", $o.forcePortrait, note: "Lock UISupportedInterfaceOrientations to portrait only")
+                toggle("Skip iPad", $o.skipIPad, note: "Restrict UIDeviceFamily to iPhone only — smaller install footprint")
             }
         }
     }
 
     private var generalCount: Int {
-        [o.removeExistingLibraries, o.randomizeBundleID, o.disableATS, o.weakDylibReferences, o.stripWatch, o.surgicalMode].filter { $0 }.count
+        [o.removeExistingLibraries, o.thinToArm64Only, o.randomizeBundleID, o.disableATS,
+         o.weakDylibReferences, o.stripWatch, o.sha256Only, o.forceResign, o.surgicalMode].filter { $0 }.count
     }
-    private var stripCount: Int { [o.stripSCInfo, o.stripPrivacy, o.stripExtensions, o.removeURLSchemes].filter { $0 }.count }
-    private var plistCount: Int { [o.forceMinIOS12, o.disableFileSharing, o.forcePortrait, o.skipIPad].filter { $0 }.count }
+    private var stripCount: Int { [o.stripExtensions, o.stripSCInfo, o.stripPrivacy, o.stripBitcode, o.stripDebugSymbols].filter { $0 }.count }
+    private var scrubCount: Int { [o.autoFixEntitlements, o.disablePush, o.disableAppGroups, o.disableiCloud, o.disableSiri, o.disableBackgroundModes].filter { $0 }.count }
+    private var plistCount: Int { [o.forceMinIOS12, o.removeURLSchemes, o.disableFileSharing, o.forcePortrait, o.skipIPad].filter { $0 }.count }
 
     @ViewBuilder
     private func group<C: View>(_ key: String, _ icon: String, _ title: String, badge: String?, @ViewBuilder content: () -> C) -> some View {
@@ -757,9 +772,12 @@ struct SigningSheet: View {
     }
 
     private var strip: [String] {
-        [o.stripSCInfo ? "Strip SC_Info" : nil, o.stripPrivacy ? "Strip privacy manifests" : nil,
-         o.stripExtensions ? "Remove extensions" : nil,
-         o.removeURLSchemes ? "Remove URL schemes" : nil].compactMap { $0 }
+        [o.stripExtensions ? "Strip PlugIns" : nil, o.stripSCInfo ? "Strip SC_Info" : nil,
+         o.stripPrivacy ? "Strip privacy declarations" : nil, o.stripBitcode ? "Strip Bitcode" : nil,
+         o.stripDebugSymbols ? "Strip debug symbols" : nil,
+         o.autoFixEntitlements ? "Auto-fix entitlements" : nil, o.disablePush ? "Disable Push" : nil,
+         o.disableAppGroups ? "Disable App Groups" : nil, o.disableiCloud ? "Disable iCloud" : nil,
+         o.disableSiri ? "Disable Siri" : nil, o.disableBackgroundModes ? "Disable Background Modes" : nil].compactMap { $0 }
     }
     private var generalSummary: [String] {
         [o.removeExistingLibraries ? "Remove existing libraries" : nil,
@@ -767,10 +785,12 @@ struct SigningSheet: View {
          o.disableATS ? "Disable ATS" : nil,
          o.weakDylibReferences ? "Weak dylib references" : nil,
          o.stripWatch ? "Remove Watch apps" : nil,
+         o.thinToArm64Only ? "Thin to arm64" : nil, o.sha256Only ? "SHA256 only" : nil,
          o.surgicalMode ? (dylibs.isEmpty ? "Surgical mode" : "Surgical mode (auto-disabled: dylibs)") : nil].compactMap { $0 }
     }
     private var plistList: [String] {
-        [o.forceMinIOS12 ? "MinimumOSVersion 12.0" : nil, o.disableFileSharing ? "Disable file sharing" : nil,
+        [o.forceMinIOS12 ? "MinimumOSVersion 12.0" : nil, o.removeURLSchemes ? "Hide URL schemes" : nil,
+         o.disableFileSharing ? "Disable file sharing" : nil,
          o.forcePortrait ? "Force portrait" : nil, o.skipIPad ? "iPhone only" : nil].compactMap { $0 }
         + plistSetValues.sorted(by: { $0.key < $1.key }).map { "Info.plist: \($0.key)=\($0.value)" }
     }
@@ -939,6 +959,14 @@ struct SigningSheet: View {
         s.stripWatchApps = o.stripWatch
         s.stripExtensions = o.stripExtensions
         s.removeURLSchemes = o.removeURLSchemes
+        s.stripBitcode = o.stripBitcode
+        s.stripDebugSymbols = o.stripDebugSymbols
+        s.autoFixEntitlements = o.autoFixEntitlements
+        s.disablePush = o.disablePush
+        s.disableAppGroups = o.disableAppGroups
+        s.disableiCloud = o.disableiCloud
+        s.disableSiri = o.disableSiri
+        s.disableBackgroundModes = o.disableBackgroundModes
         s.entitlementsPlistData = encodedEntitlementsPlistData()
         return s
     }

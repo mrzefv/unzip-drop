@@ -198,6 +198,16 @@ nonisolated struct SignOptions: Sendable {
     var stripWatchApps = false
     var stripExtensions = false
     var removeURLSchemes = false
+    var stripBitcode = false
+    var stripDebugSymbols = false
+
+    // Entitlement scrubbers (mutate the entitlements plist before it reaches zsign)
+    var autoFixEntitlements = false     // drop ents not granted by the signing profile
+    var disablePush = false             // strip aps-environment
+    var disableAppGroups = false        // strip application-groups
+    var disableiCloud = false           // strip iCloud container + ubiquity
+    var disableSiri = false             // strip developer.siri
+    var disableBackgroundModes = false  // strip UIBackgroundModes (Info.plist)
 
     var skipEmbeddedProvision = false
     var surgicalMode = true
@@ -209,6 +219,8 @@ nonisolated struct SignOptions: Sendable {
         && injectDylibs.isEmpty && removeDylibs.isEmpty && plistSet.isEmpty && entitlementsPlistData == nil
         && forceMinIOS == nil && !disableFileSharing && !forcePortrait && !skipIPad && !disableATS
         && !stripSCInfo && !stripPrivacyManifests && !stripWatchApps && !stripExtensions && !removeURLSchemes
+        && !stripBitcode && !stripDebugSymbols
+        && !autoFixEntitlements && !disablePush && !disableAppGroups && !disableiCloud && !disableSiri && !disableBackgroundModes
     }
 }
 
@@ -265,9 +277,9 @@ nonisolated enum Signer {
             // Parallel DAG signing (mSign's speed path). Safe: disjoint subtrees.
             ZSignSetParallel(o.surgicalMode && o.injectDylibs.isEmpty)
             let entitlementsURL: URL?
-            if let entitlementsData = o.entitlementsPlistData {
+            if let scrubbed = Self.scrubbedEntitlements(o.entitlementsPlistData, options: o, profile: material.provision, onLog: onLog) {
                 let u = work.appendingPathComponent("entitlements.plist")
-                try entitlementsData.write(to: u)
+                try scrubbed.write(to: u)
                 entitlementsURL = u
             } else {
                 entitlementsURL = nil
@@ -389,6 +401,7 @@ nonisolated enum Signer {
             if o.forcePortrait { dict["UISupportedInterfaceOrientations"] = ["UIInterfaceOrientationPortrait"]; changed = true }
             if o.skipIPad { dict["UIDeviceFamily"] = [1]; changed = true }
             if o.removeURLSchemes { dict.removeObject(forKey: "CFBundleURLTypes"); changed = true }
+            if o.disableBackgroundModes { dict.removeObject(forKey: "UIBackgroundModes"); changed = true }
             if o.disableATS {
                 dict["NSAppTransportSecurity"] = ["NSAllowsArbitraryLoads": true]; changed = true
             }
@@ -426,6 +439,50 @@ nonisolated enum Signer {
         }
     }
 
+
+    // MARK: - Entitlement scrubbers
+
+    /// Applies the Entitlement Scrubbers toggles to the entitlements plist handed to zsign.
+    /// Returns nil when there is nothing to sign with (no base ents, no scrub requested),
+    /// otherwise the mutated plist Data.
+    nonisolated static func scrubbedEntitlements(_ base: Data?, options o: SignOptions, profile: Data, onLog: ((String) -> Void)?) -> Data? {
+        let wantsScrub = o.autoFixEntitlements || o.disablePush || o.disableAppGroups || o.disableiCloud || o.disableSiri
+        guard base != nil || wantsScrub else { return base }
+
+        var ent: [String: Any] = [:]
+        if let base, let obj = try? PropertyListSerialization.propertyList(from: base, format: nil) as? [String: Any] {
+            ent = obj
+        }
+        guard !ent.isEmpty || wantsScrub else { return base }
+
+        var removed: [String] = []
+        func drop(_ key: String) { if ent.removeValue(forKey: key) != nil { removed.append(key) } }
+
+        if o.disablePush { drop("aps-environment") }
+        if o.disableAppGroups { drop("com.apple.security.application-groups") }
+        if o.disableiCloud {
+            for k in ["com.apple.developer.icloud-container-identifiers",
+                      "com.apple.developer.icloud-container-environment",
+                      "com.apple.developer.icloud-services",
+                      "com.apple.developer.ubiquity-container-identifiers",
+                      "com.apple.developer.ubiquity-kvstore-identifier"] { drop(k) }
+        }
+        if o.disableSiri { drop("com.apple.developer.siri") }
+
+        if o.autoFixEntitlements,
+           let xml = xmlPlistData(fromMobileProvision: profile),
+           let plist = try? PropertyListSerialization.propertyList(from: xml, format: nil) as? [String: Any],
+           let granted = plist["Entitlements"] as? [String: Any] {
+            for key in ent.keys where granted[key] == nil {
+                if key == "application-identifier" || key == "com.apple.developer.team-identifier" { continue }
+                ent.removeValue(forKey: key); removed.append(key)
+            }
+        }
+
+        if !removed.isEmpty { onLog?(">>> scrubbed entitlements: \(Set(removed).sorted().joined(separator: ", "))") }
+        if ent.isEmpty { return nil }
+        return try? PropertyListSerialization.data(fromPropertyList: ent, format: .xml, options: 0)
+    }
 }
 
 nonisolated struct IPAMeta: Sendable {

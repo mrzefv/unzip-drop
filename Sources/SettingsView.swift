@@ -275,6 +275,7 @@ private struct StatusFooter: View {
     @ObservedObject private var staff = StaffGate.shared
     @State private var checking = false
     @State private var didCopyMDID = false
+    @State private var mdidResetTask: Task<Void, Never>?
 
     private var footerIdentity: (roleLabel: String, roleColor: Color, accountURL: URL, accountLabel: String, accountIcon: String) {
         if staff.isStaff {
@@ -344,8 +345,10 @@ private struct StatusFooter: View {
                     UIPasteboard.general.string = staff.mdid
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     didCopyMDID = true
-                    Task {
+                    mdidResetTask?.cancel()
+                    mdidResetTask = Task {
                         try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        guard !Task.isCancelled else { return }
                         await MainActor.run { didCopyMDID = false }
                     }
                 } label: {
@@ -364,6 +367,7 @@ private struct StatusFooter: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .onDisappear { mdidResetTask?.cancel() }
     }
 }
 

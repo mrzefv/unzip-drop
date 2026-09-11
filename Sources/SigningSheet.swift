@@ -64,6 +64,12 @@ struct SigningSheet: View {
     @State private var installing = false
 
     private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
+    private let accent = Color(red: 0.74, green: 0.22, blue: 0.12)
+    private let accentSoft = Color(red: 0.89, green: 0.44, blue: 0.27)
+    private let accentTint = Color(red: 0.21, green: 0.08, blue: 0.07)
+    private let surface = Color(red: 0.06, green: 0.06, blue: 0.07)
+    private let surfaceRaised = Color(red: 0.09, green: 0.09, blue: 0.10)
+    private let success = Color(red: 0.45, green: 0.79, blue: 0.34)
 
     struct DylibItem: Identifiable, Equatable { let id = UUID(); let url: URL; var weak = false }
     struct ExtraToggles {
@@ -153,28 +159,38 @@ struct SigningSheet: View {
     // MARK: Title
 
     private var titleBar: some View {
-        HStack(spacing: 9) {
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 19, height: 25.5).background(Color(white: 0.16)).clipShape(Circle())
-            }
-            Spacer()
-            HStack(spacing: 7.5) {
-                iconThumb(iconPNG ?? meta.iconPNG, side: 30)
+        HStack(spacing: 12) {
+            titleBarButton("chevron.left")
+            HStack(spacing: 11) {
+                iconThumb(iconPNG ?? meta.iconPNG, side: 44)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(name).font(.system(size: 12, weight: .bold)).foregroundStyle(.white).lineLimit(1)
-                    Text(bundle).font(.system(size: 9)).foregroundStyle(blue).lineLimit(1)
+                    Text(name).font(.system(size: 14, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                    Text(bundle).font(.system(size: 10.5, weight: .medium)).foregroundStyle(accent).lineLimit(1)
                 }
+                Spacer(minLength: 0)
             }
-            Spacer()
-            Button { dismiss() } label: {
-                Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 19, height: 25.5).background(Color(white: 0.16)).clipShape(Circle())
-            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(surfaceRaised)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            titleBarButton("xmark")
         }
-        .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 7.5)
-        .background(BarBlur())
-        .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
+        .background(Color.black)
+    }
+
+    private func titleBarButton(_ icon: String) -> some View {
+        Button { dismiss() } label: {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(surfaceRaised)
+                .clipShape(Circle())
+        }
     }
 
     // MARK: Bundle info (mSign: Entitlements · Info.plist)
@@ -302,104 +318,75 @@ struct SigningSheet: View {
     // mSign-style signing method: a selector (Saved / Enterprise / Apple ID)
     // over a body whose accent + content changes with the choice.
     private var signingMethodCard: some View {
-        VStack(alignment: .leading, spacing: 7.5) {
+        VStack(alignment: .leading, spacing: 10) {
             sectionLabel("SIGNING METHOD")
-            HStack(spacing: 6) {
-                methodChip("saved", "Saved cert", "checkmark.seal.fill")
-                methodChip("enterprise", "Enterprise", "building.2.fill")
-                methodChip("appleid", "Apple ID", "applelogo")
-            }
-            Group {
-                switch method {
-                case "enterprise": enterpriseBody
-                case "appleid":    appleIDBody
-                default:           savedBody
-                }
-            }
-            .padding(12)
-            .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(methodAccent.opacity(0.5), lineWidth: 1))
+            savedBody
         }
     }
 
     private var sourceLabel: String { ServerConfig.installHost }
 
-    private var methodAccent: Color {
-        switch method { case "enterprise": return .purple; case "appleid": return .cyan; default: return blue }
-    }
-
-    private func methodChip(_ id: String, _ title: String, _ icon: String) -> some View {
-        Button { method = id } label: {
-            VStack(spacing: 3) {
-                Image(systemName: icon).font(.system(size: 10))
-                Text(title).font(.system(size: 7.5, weight: .semibold))
-            }
-            .padding(.vertical, 6).frame(maxWidth: .infinity)
-            .background(method == id ? methodAccent.opacity(0.18) : Color(white: 0.1))
-            .foregroundStyle(method == id ? methodAccent : Theme.subtle)
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(method == id ? methodAccent : Theme.stroke, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 9))
-        }
-        .buttonStyle(.plain)
-    }
-
     @ViewBuilder private var savedBody: some View {
         if let c = certs.active {
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(alignment: .top, spacing: 9) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(blue).font(.system(size: 11)).padding(.top, 1.5)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    ZStack {
+                        Circle().fill(accentTint)
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(accentSoft).font(.system(size: 18, weight: .bold))
+                    }
+                    .frame(width: 34, height: 34)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("USING YOUR SAVED CERTIFICATE").font(.system(size: 7, weight: .heavy)).kerning(0.7).foregroundStyle(blue)
-                        Text(c.name).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
-                        Text(certSubtitle(c)).font(.system(size: 8)).foregroundStyle(Theme.subtle).lineLimit(1)
+                        Text("USING YOUR SAVED CERTIFICATE").font(.system(size: 8.5, weight: .heavy)).kerning(1.1).foregroundStyle(accentSoft)
+                        Text(c.name).font(.system(size: 17, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                        Text(certSubtitle(c)).font(.system(size: 12.5, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
                     }
                     Spacer(minLength: 0)
+                    Button {} label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 48, height: 48)
+                            .background(Color.white.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
                 }
-                Divider().overlay(Theme.stroke)
-                // Distributed Identity | Certificate — mSign layout
+                .padding(.horizontal, 6)
                 HStack(alignment: .top, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Label("DISTRIBUTED IDENTITY", systemImage: "globe").font(.system(size: 7, weight: .heavy)).kerning(0.5).foregroundStyle(blue)
-                        Text(ServerConfig.installHost).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
-                        Text(ServerConfig.certMode == "local" ? "Local root CA · offline" : (ServerConfig.certMode == "custom" ? "Your own TLS cert" : "zefv.dev · VPS auto-renew")).font(.system(size: 7.5)).foregroundStyle(Theme.subtle)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Rectangle().fill(Theme.stroke).frame(width: 1).padding(.horizontal, 7.5)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Label("CERTIFICATE", systemImage: "lock.shield.fill").font(.system(size: 7, weight: .heavy)).kerning(0.5).foregroundStyle(.green)
-                        Text(ServerConfig.certMode == "local" ? "Local CA" : (ServerConfig.certMode == "custom" ? "Own cert" : "Let's Encrypt")).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.white)
-                        if let d = certDaysLeft {
-                            Text(d < 0 ? "EXPIRED" : "\(d) days left").font(.system(size: 7.5)).foregroundStyle(d < 21 ? .orange : .green)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    detailTile(
+                        icon: "globe",
+                        iconColor: blue,
+                        iconBackground: blue.opacity(0.16),
+                        title: "DISTRIBUTED IDENTITY",
+                        titleColor: blue,
+                        primary: ServerConfig.installHost,
+                        secondary: "https://\(ServerConfig.installHost)",
+                        tertiary: "This is the public URL where your app will be available."
+                    )
+                    Rectangle().fill(Theme.stroke).frame(width: 1).padding(.vertical, 18)
+                    detailTile(
+                        icon: "lock.fill",
+                        iconColor: success,
+                        iconBackground: success.opacity(0.16),
+                        title: "CERTIFICATE",
+                        titleColor: success,
+                        primary: ServerConfig.certMode == "local" ? "Local CA" : (ServerConfig.certMode == "custom" ? "Own cert" : "Let's Encrypt"),
+                        secondary: certStatusTitle,
+                        tertiary: certStatusSubtitle
+                    )
                 }
+                .background(surface)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             }
+            .padding(12)
+            .background(surfaceRaised)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(accent.opacity(0.45), lineWidth: 1.2))
         } else {
             HStack(spacing: 7.5) {
                 Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
                 Text("No certificate — import one in Settings › Certificates.").font(.caption).foregroundStyle(.orange)
             }
-        }
-    }
-
-    @ViewBuilder private var enterpriseBody: some View {
-        VStack(alignment: .leading, spacing: 4.5) {
-            Text("ENTERPRISE CERTIFICATE").font(.system(size: 7, weight: .heavy)).kerning(0.7).foregroundStyle(.purple)
-            Text(enterpriseName.isEmpty ? "Tap to choose an enterprise cert" : enterpriseName)
-                .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.white)
-            Text("In-house distribution · no revoke risk · no expiry pressure").font(.system(size: 8)).foregroundStyle(Theme.subtle)
-            Text("Plug in: enterprise cert picker").font(.caption2).foregroundStyle(.purple.opacity(0.7))
-        }
-    }
-
-    @ViewBuilder private var appleIDBody: some View {
-        VStack(alignment: .leading, spacing: 4.5) {
-            Text("APPLE ID (FREE)").font(.system(size: 7, weight: .heavy)).kerning(0.7).foregroundStyle(.cyan)
-            Text(appleIDEmail.isEmpty ? "Sign in with an Apple ID" : appleIDEmail)
-                .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.white)
-            Text("Free account · 7-day cert · reinstall weekly").font(.system(size: 8)).foregroundStyle(Theme.subtle)
-            Text("Plug in: Apple ID login + cert request").font(.caption2).foregroundStyle(.cyan.opacity(0.7))
         }
     }
 
@@ -418,21 +405,70 @@ struct SigningSheet: View {
         return parts.isEmpty ? "On-device certificate" : parts.joined(separator: " · ")
     }
 
+    private var certStatusTitle: String {
+        guard let d = certDaysLeft else { return "Unknown" }
+        return d < 0 ? "Expired" : "Valid"
+    }
+
+    private var certStatusSubtitle: String {
+        guard let d = certDaysLeft else { return "Expiry unavailable" }
+        let label = d == 1 ? "day" : "days"
+        if let date = ZefvCert.effectiveNotAfter {
+            return d < 0 ? "Expired \(date.formatted(date: .abbreviated, time: .omitted))" : "Expires in \(d) \(label) (\(date.formatted(date: .abbreviated, time: .omitted)))"
+        }
+        return d < 0 ? "Expired" : "Expires in \(d) \(label)"
+    }
+
+    private func detailTile(icon: String, iconColor: Color, iconBackground: Color, title: String, titleColor: Color, primary: String, secondary: String, tertiary: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous).fill(iconBackground)
+                    Image(systemName: icon).foregroundStyle(iconColor).font(.system(size: 18, weight: .semibold))
+                }
+                .frame(width: 44, height: 44)
+                Spacer()
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Text(title).font(.system(size: 8.5, weight: .heavy)).kerning(1.1).foregroundStyle(titleColor)
+                Text(primary).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white)
+                Text(secondary).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(titleColor)
+                Divider().overlay(Theme.stroke)
+                Text(tertiary).font(.system(size: 10.5, weight: .medium)).foregroundStyle(Theme.subtle)
+            }
+            HStack {
+                Spacer()
+                Image(systemName: "chevron.right").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.subtle)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var appIcon: some View {
         VStack(alignment: .leading, spacing: 6) {
             sectionLabel("APP ICON")
             Button { showIconPicker = true } label: {
                 HStack(spacing: 12) {
-                    iconThumb(iconPNG ?? meta.iconPNG, side: 72)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(iconPNG == nil ? "Replace app icon" : "Icon replaced").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
-                        Text("PNG/JPEG — auto-resized to required sizes").font(.system(size: 10)).foregroundStyle(Theme.subtle)
+                    iconThumb(iconPNG ?? meta.iconPNG, side: 64)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(iconPNG == nil ? "Replace app icon" : "Icon replaced").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.white)
+                        Text("PNG/JPEG — auto-resized to required sizes").font(.system(size: 10.5, weight: .medium)).foregroundStyle(Theme.subtle)
                     }
                     Spacer()
-                    if iconPNG != nil { Button { iconPNG = nil } label: { Image(systemName: "arrow.uturn.backward").foregroundStyle(blue) } }
+                    if iconPNG != nil {
+                        Button { iconPNG = nil } label: {
+                            Image(systemName: "arrow.uturn.backward").foregroundStyle(accentSoft).font(.system(size: 16, weight: .bold))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Image(systemName: "chevron.right").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.subtle)
+                    }
                 }
-                .padding(10.5).frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, style: StrokeStyle(lineWidth: 1, dash: [6])))
+                .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                .background(surfaceRaised)
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.08), style: StrokeStyle(lineWidth: 1, dash: [6])))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             .buttonStyle(.plain)
         }
@@ -457,18 +493,18 @@ struct SigningSheet: View {
     private func identRow(_ icon: String, _ label: String, _ text: Binding<String>, mono: Bool = false) -> some View {
         HStack(spacing: 10.5) {
             ZStack {
-                RoundedRectangle(cornerRadius: 7).fill(blue.opacity(0.15)).frame(width: 22.5, height: 30)
-                if icon == "Aa" { Text("Aa").font(.system(size: 11, weight: .bold)).foregroundStyle(blue) }
-                else { Image(systemName: icon).foregroundStyle(blue) }
+                RoundedRectangle(cornerRadius: 9, style: .continuous).fill(accentTint).frame(width: 32, height: 32)
+                if icon == "Aa" { Text("Aa").font(.system(size: 13, weight: .bold)).foregroundStyle(accentSoft) }
+                else { Image(systemName: icon).foregroundStyle(accentSoft) }
             }
             VStack(alignment: .leading, spacing: 1.5) {
-                Text(label).font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.subtle)
+                Text(label).font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.88))
                 TextField(label, text: text)
-                    .font(.system(size: 11, design: mono ? .monospaced : .default)).foregroundStyle(.white)
+                    .font(.system(size: 12, weight: .medium, design: mono ? .monospaced : .default)).foregroundStyle(.white)
                     .autocorrectionDisabled().textInputAutocapitalization(.never)
             }
         }
-        .padding(10.5)
+        .padding(12)
     }
 
     // MARK: Build options (collapsible groups)
@@ -490,7 +526,7 @@ struct SigningSheet: View {
                 toggle("Remove app extensions (PlugIns)", $o.stripExtensions)
                 toggle("Remove URL schemes", $o.removeURLSchemes)
             }
-            group("plist", "doc.fill", "Info.plist Tweaks", badge: "\(plistCount)") {
+            group("plist", "key.fill", "Entitlement Scrubbers", badge: "\(plistCount)") {
                 toggle("Force MinimumOSVersion 12.0", $o.forceMinIOS12)
                 toggle("Disable file sharing", $o.disableFileSharing)
                 toggle("Force portrait only", $o.forcePortrait)
@@ -508,13 +544,13 @@ struct SigningSheet: View {
         VStack(spacing: 0) {
             Button { withAnimation { if expanded.contains(key) { expanded.remove(key) } else { expanded.insert(key) } } } label: {
                 HStack(spacing: 10.5) {
-                    ZStack { RoundedRectangle(cornerRadius: 7).fill(blue.opacity(0.15)).frame(width: 22.5, height: 30); Image(systemName: icon).foregroundStyle(blue) }
+                    ZStack { RoundedRectangle(cornerRadius: 9, style: .continuous).fill(accentTint).frame(width: 32, height: 32); Image(systemName: icon).foregroundStyle(accentSoft) }
                     Text(title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white)
                     Spacer()
                     if let b = badge {
-                        Text(b).font(.system(size: 10, weight: .bold)).foregroundStyle(b.contains("active") ? blue : Theme.subtle)
-                            .padding(.horizontal, 7.5).padding(.vertical, 4)
-                            .background(Color(white: 0.14)).clipShape(Capsule())
+                        Text(b).font(.system(size: 10, weight: .bold)).foregroundStyle(b.contains("active") ? accentSoft : Theme.subtle)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Color.white.opacity(0.06)).clipShape(Capsule())
                     }
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.subtle)
                         .rotationEffect(.degrees(expanded.contains(key) ? 180 : 0))
@@ -526,7 +562,7 @@ struct SigningSheet: View {
                 VStack(spacing: 0) { content() }.padding(.bottom, 4.5)
             }
         }
-        .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(surfaceRaised).clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func toggle(_ label: String, _ b: Binding<Bool>, disabled: Bool = false, note: String? = nil) -> some View {
@@ -536,7 +572,7 @@ struct SigningSheet: View {
                 if let n = note { Text(n).font(.caption2).foregroundStyle(Theme.subtle) }
             }
             Spacer()
-            Toggle("", isOn: b).labelsHidden().tint(blue).disabled(disabled)
+            Toggle("", isOn: b).labelsHidden().tint(accent).disabled(disabled)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
     }
@@ -710,9 +746,9 @@ struct SigningSheet: View {
                 if signing { ProgressView().tint(.white) } else { Image(systemName: "signature").font(.system(size: 13.5, weight: .bold)) }
                 Text(signing ? "Signing…" : "Sign IPA").font(.system(size: 13.5, weight: .bold))
             }
-            .frame(maxWidth: .infinity).padding(.vertical, 12)
-            .background(certs.active == nil || macho?.encrypted == true ? Theme.subtle : blue).foregroundStyle(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .frame(maxWidth: .infinity).padding(.vertical, 16)
+            .background(certs.active == nil || macho?.encrypted == true ? Theme.subtle : accent).foregroundStyle(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .disabled(signing || certs.active == nil || macho?.encrypted == true)
         .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 4.5)
@@ -721,7 +757,7 @@ struct SigningSheet: View {
     // MARK: Helpers
 
     private func sectionLabel(_ s: String) -> some View {
-        Text(s).font(.system(size: 10, weight: .bold)).kerning(1).foregroundStyle(Theme.subtle)
+        Text(s).font(.system(size: 10, weight: .bold)).kerning(2).foregroundStyle(.white.opacity(0.72))
     }
     private var divider: some View { Rectangle().fill(Theme.stroke).frame(height: 1).padding(.leading, 51) }
 

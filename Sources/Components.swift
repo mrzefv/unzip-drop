@@ -35,7 +35,8 @@ struct TabTitleBar<Trailing: View>: View {
                 Text(center).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.subtle)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
+                ThemePaletteButton()
                 Text(title).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text)
                 Spacer()
                 trailing

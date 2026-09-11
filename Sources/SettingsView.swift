@@ -272,28 +272,46 @@ private struct RowPressStyle: ButtonStyle {
 
 private struct StatusFooter: View {
     @EnvironmentObject var config: Config
+    @ObservedObject private var staff = StaffGate.shared
+    @State private var checking = false
 
-    private var ready: Bool { config.hasToken && !config.owner.isEmpty && !config.repo.isEmpty }
+    private var username: String { config.owner.isEmpty ? "MRzefv" : config.owner }
+    private var role: UserRole { staff.isStaff ? staff.role : .member }
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             HStack(spacing: 10) {
-                Image(systemName: "archivebox.fill").foregroundStyle(Theme.accent)
-                Text(config.owner.isEmpty ? "MRzefv" : config.owner)
-                    .font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.text)
-                Text(ready ? "READY" : "SETUP")
+                Image(systemName: "signature")
+                    .font(.system(size: 22, weight: .semibold)).foregroundStyle(Theme.accent)
+                Text(username)
+                    .font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+                Button {
+                    guard !checking else { return }
+                    checking = true
+                    Task { await staff.refresh(); checking = false }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.subtle)
+                        .rotationEffect(.degrees(checking ? 360 : 0))
+                        .animation(checking ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default, value: checking)
+                }
+                .buttonStyle(.plain)
+                Text(role.badgeText)
                     .font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(1)
                     .padding(.horizontal, 9).padding(.vertical, 4)
-                    .background((ready ? Color.green : Color.orange).opacity(0.18))
-                    .foregroundStyle(ready ? Color.green : Color.orange)
-                    .overlay(Capsule().stroke((ready ? Color.green : Color.orange).opacity(0.5), lineWidth: 1))
+                    .background(role.color.opacity(0.18))
+                    .foregroundStyle(role.color)
+                    .overlay(Capsule().stroke(role.color.opacity(0.5), lineWidth: 1))
                     .clipShape(Capsule())
             }
-            (Text("TARGET: ")
-                .font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
-            + Text(config.repo.isEmpty ? "—" : "\(config.owner)/\(config.repo)")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent))
-            Text(Theme.owner).font(.footnote).foregroundStyle(Theme.subtle).padding(.top, 2)
+            (Text("MDID: ")
+                .font(.system(size: 14, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
+            + Text(staff.mdid)
+                .font(.system(size: 14, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent))
+            .onTapGesture {
+                UIPasteboard.general.string = staff.mdid
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
         }
         .frame(maxWidth: .infinity)
     }

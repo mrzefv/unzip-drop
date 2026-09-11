@@ -10,11 +10,8 @@ import SwiftUI
 extension Theme {
     /// Persist a chosen accent hex. `Theme.accent` itself is a constant; views that
     /// want the user accent read `Theme.userAccent`.
-    static func setAccentColor(hex: String) { UserDefaults.standard.set(hex, forKey: "theme_accent_hex") }
-    static var userAccent: Color {
-        guard let hex = UserDefaults.standard.string(forKey: "theme_accent_hex"), !hex.isEmpty else { return accent }
-        return Color(hex: hex)
-    }
+    static func setAccentColor(hex: String) { AppTheme.shared.accentHex = hex }
+    static var userAccent: Color { accent }
 }
 
 // MARK: - Theme Presets

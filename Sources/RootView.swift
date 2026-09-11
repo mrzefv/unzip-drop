@@ -13,6 +13,7 @@ struct RootView: View {
     @EnvironmentObject var session: Session
     @ObservedObject private var signQueue = SignQueue.shared
     @ObservedObject private var hub = GitHubHub.shared
+    @ObservedObject private var theme = AppTheme.shared
     @State private var tab = 0
     @State private var signItem: SignItem?
     @State private var signError: String?
@@ -33,11 +34,27 @@ struct RootView: View {
             default: SettingsView()
             }
         }
+        .id(theme.revision)                                   // re-skin every tab on a theme change
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(ThemeBackgroundLayer())                      // particle/grid network floats over the tab content
+        .overlay(alignment: .topLeading) {
+            // Invisible anchor under the palette button in the title bar; hosts the theme dropdown.
+            Color.clear.frame(width: 44, height: 44)
+                .padding(.leading, 26).padding(.top, 8)
+                .allowsHitTesting(false)
+                .popover(isPresented: $theme.panelShown, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+                    ThemePanel()
+                        .presentationCompactAdaptation(.popover)
+                        .presentationBackground(Theme.bg)
+                        .preferredColorScheme(theme.colorScheme)
+                }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             TabBar(selected: $tab)
         }
-        .background(Color.black.ignoresSafeArea())
+        .background(Theme.bg.ignoresSafeArea())
+        .tint(Theme.accent)
+        .preferredColorScheme(theme.colorScheme)
         .onChange(of: signQueue.requestedTab) { t in
             // Signing is a flow, not a tab: open SigningSheet directly over whatever's showing.
             guard t != nil else { return }
@@ -46,12 +63,12 @@ struct RootView: View {
         }
         .fullScreenCover(item: $signItem) { it in
             SigningSheet(ipaURL: it.url, meta: it.meta) { _ in }
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(theme.colorScheme)
         }
         .fullScreenCover(isPresented: $hub.isPresented) {
             GitHubHubScreen()
                 .environmentObject(session)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(theme.colorScheme)
         }
         .alert("Couldn't read IPA", isPresented: Binding(get: { signError != nil }, set: { if !$0 { signError = nil } })) {
             Button("OK", role: .cancel) {}
@@ -76,11 +93,12 @@ struct RootView: View {
 
 private struct TabBar: View {
     @Binding var selected: Int
+    @ObservedObject private var theme = AppTheme.shared
     private let tabs: [(label: String, icon: String)] = [
-        ("Browse",   "safari.fill"),
-        ("Library",  "square.stack.3d.up.fill"),
+        ("Browse",   "square.grid.3x3.fill"),
+        ("Library",  "square.grid.2x2.fill"),
         ("Signed",   "signature"),
-        ("Settings", "gearshape.fill"),
+        ("Settings", "gearshape"),
     ]
 
     var body: some View {
@@ -91,7 +109,8 @@ private struct TabBar: View {
                     UISelectionFeedbackGenerator().selectionChanged()
                 } label: {
                     VStack(spacing: 3) {
-                        Image(systemName: t.icon).font(.system(size: 19, weight: .semibold))
+                        Image(systemName: t.icon).font(.system(size: 22, weight: .regular))
+                            .frame(height: 26)
                         Text(t.label).font(.system(size: 10.5, weight: .semibold))
                     }
                     .foregroundStyle(selected == i ? Theme.accent : Theme.subtle)

@@ -15,7 +15,6 @@ struct UnzipDropApp: App {
             RootView()
                 .environmentObject(session)
                 .environmentObject(config)
-                .preferredColorScheme(.dark)
                 .onOpenURL { url in session.receiveIncoming(url) }
         }
     }

@@ -343,9 +343,7 @@ private struct StatusFooter: View {
                     .clipShape(Capsule())
 
                 Button {
-                    Task { @MainActor in
-                        copyMDID()
-                    }
+                    copyMDID()
                 } label: {
                     (Text("MDID: ")
                         .font(.system(size: 14, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)

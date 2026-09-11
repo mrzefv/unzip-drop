@@ -104,7 +104,7 @@ struct SettingsView: View {
                         }
 
                         SettingsSection("Support") {
-                            SettingsLink(icon: "network", title: "DELvEK.net", subtitle: "Trusted IPA Repository",
+                            SettingsLink(icon: "network", title: "delvek.net", subtitle: "Trusted IPA Repository",
                                          url: URL(string: "https://delvek.net")!)
                             SettingsLink(icon: "signature", title: "MSign",
                                          subtitle: "msign.party | Founder MRZefv",

@@ -275,22 +275,34 @@ private struct StatusFooter: View {
     @ObservedObject private var staff = StaffGate.shared
     @State private var checking = false
 
-    private var role: UserRole { staff.isStaff ? staff.role : .member }
-    private var roleLabel: String { staff.isStaff ? role.badgeText : "GUEST" }
-    private var roleColor: Color { staff.isStaff ? role.color : Theme.accent }
-    private var accountURL: URL { URL(string: staff.isStaff ? "https://msign.party" : "https://msign.party/account")! }
-    private var accountLabel: String { staff.isStaff ? "Open MSign dashboard" : "Create an MSign account" }
-    private var accountIcon: String { staff.isStaff ? "person.crop.circle" : "person.badge.plus" }
+    private var footerIdentity: (roleLabel: String, roleColor: Color, accountURL: URL, accountLabel: String, accountIcon: String) {
+        if staff.isStaff {
+            return (
+                roleLabel: staff.role.badgeText,
+                roleColor: staff.role.color,
+                accountURL: URL(string: "https://msign.party")!,
+                accountLabel: "Open MSign dashboard",
+                accountIcon: "person.crop.circle"
+            )
+        }
+        return (
+            roleLabel: "GUEST",
+            roleColor: Theme.accent,
+            accountURL: URL(string: "https://msign.party/account")!,
+            accountLabel: "Create an MSign account",
+            accountIcon: "person.badge.plus"
+        )
+    }
 
     var body: some View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
                 Button {
-                    openURL(accountURL)
+                    openURL(footerIdentity.accountURL)
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: accountIcon)
-                        Text(accountLabel)
+                        Image(systemName: footerIdentity.accountIcon)
+                        Text(footerIdentity.accountLabel)
                             .underline()
                     }
                     .font(.system(size: 17, weight: .semibold))
@@ -319,12 +331,12 @@ private struct StatusFooter: View {
             }
 
             HStack(spacing: 10) {
-                Text(roleLabel)
+                Text(footerIdentity.roleLabel)
                     .font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(1)
                     .padding(.horizontal, 9).padding(.vertical, 4)
-                    .background(roleColor.opacity(0.18))
-                    .foregroundStyle(roleColor)
-                    .overlay(Capsule().stroke(roleColor.opacity(0.5), lineWidth: 1))
+                    .background(footerIdentity.roleColor.opacity(0.18))
+                    .foregroundStyle(footerIdentity.roleColor)
+                    .overlay(Capsule().stroke(footerIdentity.roleColor.opacity(0.5), lineWidth: 1))
                     .clipShape(Capsule())
 
                 Button {

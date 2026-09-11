@@ -284,7 +284,7 @@ private struct StatusFooter: View {
                 roleLabel: staff.role.badgeText,
                 roleColor: staff.role.color,
                 accountURL: URL(string: "https://msign.party")!,
-                accountLabel: "Open MSign dashboard",
+                accountLabel: "Open MSign site",
                 accountIcon: "person.crop.circle"
             )
         }

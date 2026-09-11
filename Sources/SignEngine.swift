@@ -203,6 +203,7 @@ nonisolated struct SignOptions: Sendable {
     var injectFolder = "/"                       // "/" (next to binary) or "Frameworks/"
     var removeDylibs: [String] = []              // load-command paths to strip
     var binaryPatches: [BinaryPatch] = []        // raw byte edits (string rewrites / insn patches) applied to the thin binary
+    var injectDataBlob: Data? = nil              // Mcrypted-512 payload appended to the main binary before signing
 
     // Info.plist tweaks
     var plistSet: [String: String] = [:]         // key → string value (bool as "true"/"false")
@@ -237,7 +238,7 @@ nonisolated struct SignOptions: Sendable {
 
     var isEmpty: Bool {
         name == nil && bundleID == nil && version == nil && iconPNG == nil
-        && injectDylibs.isEmpty && removeDylibs.isEmpty && binaryPatches.isEmpty && plistSet.isEmpty && entitlementsPlistData == nil
+        && injectDylibs.isEmpty && removeDylibs.isEmpty && binaryPatches.isEmpty && injectDataBlob == nil && plistSet.isEmpty && entitlementsPlistData == nil
         && forceMinIOS == nil && !disableFileSharing && !forcePortrait && !skipIPad && !disableATS
         && !stripSCInfo && !stripPrivacyManifests && !stripWatchApps && !stripExtensions && !removeURLSchemes
         && !stripBitcode && !stripDebugSymbols
@@ -451,6 +452,13 @@ nonisolated enum Signer {
         if !o.binaryPatches.isEmpty, fm.fileExists(atPath: binURL.path) {
             let applied = LocalBinaryScanner.applyPatches(o.binaryPatches, toBinaryAt: binURL.path)
             onLog?(">>> applied \(applied)/\(o.binaryPatches.count) binary patch(es)")
+        }
+        if let blob = o.injectDataBlob, fm.fileExists(atPath: binURL.path) {
+            if var bin = fm.contents(atPath: binURL.path) {
+                bin.append(blob)
+                try? bin.write(to: binURL)
+                onLog?(">>> injected Mcrypted-512 payload (\(blob.count) bytes) into \(binName)")
+            }
         }
         if !o.injectDylibs.isEmpty, fm.fileExists(atPath: binURL.path) {
             // Substrate-linked tweaks (built against CydiaSubstrate / MSHookFunction /

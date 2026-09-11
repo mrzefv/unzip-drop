@@ -352,9 +352,9 @@ private struct StatusFooter: View {
                         .lineLimit(1)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Device identifier")
-                .accessibilityValue(didCopyMDID ? "Copied to clipboard" : "Not copied")
-                .accessibilityHint("Copies your device identifier")
+                .accessibilityLabel("MDID")
+                .accessibilityValue(staff.mdid)
+                .accessibilityHint(didCopyMDID ? "Copied to clipboard" : "Double tap to copy to clipboard")
 
                 Spacer(minLength: 0)
             }

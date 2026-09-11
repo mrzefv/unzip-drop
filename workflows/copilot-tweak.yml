@@ -1,0 +1,60 @@
+# .github/workflows/copilot-tweak.yml
+# Compiles a Copilot-generated .xm (in copilot-tweaks/) into an iOS arm64 .dylib
+# with Theos, and uploads it as an artifact the app downloads + injects.
+name: copilot-tweak
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Path to the .xm inside the repo (e.g. copilot-tweaks/FooTweak.xm)"
+        required: true
+        default: "copilot-tweaks/Tweak.xm"
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Theos
+        run: |
+          export THEOS=$HOME/theos
+          git clone --recursive https://github.com/theos/theos.git $THEOS
+          # iOS SDK for on-runner compilation
+          curl -L https://github.com/theos/sdks/archive/master.zip -o sdks.zip
+          unzip -q sdks.zip
+          mv sdks-master/*.sdk $THEOS/sdks/ || true
+          echo "THEOS=$THEOS" >> $GITHUB_ENV
+
+      - name: Stage tweak project
+        run: |
+          SRC="${{ github.event.inputs.source }}"
+          NAME=$(basename "$SRC" .xm)
+          mkdir -p build/$NAME
+          cp "$SRC" build/$NAME/Tweak.xm
+          cat > build/$NAME/Makefile <<EOF
+          TARGET := iphone:clang:latest:12.0
+          ARCHS = arm64
+          include \$(THEOS)/makefiles/common.mk
+          TWEAK_NAME = $NAME
+          ${NAME}_FILES = Tweak.xm
+          ${NAME}_CFLAGS = -fobjc-arc
+          include \$(THEOS)/makefiles/tweak.mk
+          EOF
+          # No control/plist needed — we only want the .dylib.
+
+      - name: Build
+        run: |
+          export THEOS=$HOME/theos
+          SRC="${{ github.event.inputs.source }}"; NAME=$(basename "$SRC" .xm)
+          cd build/$NAME
+          make
+          # Theos emits .theos/obj/<NAME>.dylib
+          find .theos -name '*.dylib' -exec cp {} ../../$NAME.dylib \;
+
+      - name: Upload dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-dylib
+          path: "*.dylib"
+          if-no-files-found: error

@@ -14,7 +14,7 @@ nonisolated enum CopilotBuild {
         var errorDescription: String? {
             switch self {
             case .noConfig: return "Set GitHub owner/repo/token in Settings first."
-            case .noWorkflow: return "No 'copilot-tweak' workflow found. Push .github/workflows/copilot-tweak.yml to the repo (bundled in the app’s vps/ folder)."
+            case .noWorkflow: return "No copilot-tweak workflow found (or it lacks a workflow_dispatch trigger). Push .github/workflows/copilot-tweak.yml — the on: block must include workflow_dispatch:."
             }
         }
     }
@@ -36,7 +36,7 @@ nonisolated enum CopilotBuild {
 
         let actions = ActionsClient(owner: owner, repo: repo, token: token)
         let wfs = try await actions.workflows()
-        guard let wf = wfs.first(where: { $0.path.hasSuffix("copilot-tweak.yml") || $0.name.lowercased().contains("copilot") }) else {
+        guard let wf = wfs.first(where: { $0.path.hasSuffix("/copilot-tweak.yml") || $0.path.hasSuffix("copilot-tweak.yml") }) else {
             throw BuildError.noWorkflow
         }
         try await actions.dispatch(workflowID: wf.id, ref: branch, inputs: ["source": "copilot-tweaks/\(file)"])

@@ -58,6 +58,7 @@ nonisolated struct ZsignSigner {
         bundleID: String? = nil,
         displayName: String? = nil,
         version: String? = nil,
+        entitlementsPath: String? = nil,
         skipEmbeddedProvision: Bool = false
     ) throws {
         let fm = FileManager.default
@@ -73,6 +74,7 @@ nonisolated struct ZsignSigner {
             bundleID ?? "",
             displayName ?? "",
             version ?? "",
+            entitlementsPath ?? "",
             true   // fork writes embedded.mobileprovision only inside `if(dontGenerate…)`; always embed
         )
         if code != 0 { throw ZsignError.signingFailed(code: code) }
@@ -183,6 +185,7 @@ nonisolated struct SignOptions: Sendable {
 
     // Info.plist tweaks
     var plistSet: [String: String] = [:]         // key → string value (bool as "true"/"false")
+    var entitlementsPlistData: Data? = nil
     var forceMinIOS: String?                     // e.g. "12.0"
     var disableFileSharing = false
     var forcePortrait = false
@@ -203,7 +206,7 @@ nonisolated struct SignOptions: Sendable {
 
     var isEmpty: Bool {
         name == nil && bundleID == nil && version == nil && iconPNG == nil
-        && injectDylibs.isEmpty && removeDylibs.isEmpty && plistSet.isEmpty
+        && injectDylibs.isEmpty && removeDylibs.isEmpty && plistSet.isEmpty && entitlementsPlistData == nil
         && forceMinIOS == nil && !disableFileSharing && !forcePortrait && !skipIPad && !disableATS
         && !stripSCInfo && !stripPrivacyManifests && !stripWatchApps && !stripExtensions && !removeURLSchemes
     }
@@ -261,14 +264,24 @@ nonisolated enum Signer {
         do {
             // Parallel DAG signing (mSign's speed path). Safe: disjoint subtrees.
             ZSignSetParallel(o.surgicalMode && o.injectDylibs.isEmpty)
+            let entitlementsURL: URL?
+            if let entitlementsData = o.entitlementsPlistData {
+                let u = work.appendingPathComponent("entitlements.plist")
+                try entitlementsData.write(to: u)
+                entitlementsURL = u
+            } else {
+                entitlementsURL = nil
+            }
+
             try ZsignSigner.signAppBundle(
                 appBundlePath: appURL.path,
                 provisionPath: provURL.path,
-                p12Path:       p12URL.path,
-                p12Password:   material.password,
-                bundleID:      o.bundleID,
-                displayName:   o.name,
-                version:       o.version,
+                p12Path: p12URL.path,
+                p12Password: material.password,
+                bundleID: o.bundleID,
+                displayName: o.name,
+                version: o.version,
+                entitlementsPath: entitlementsURL?.path,
                 skipEmbeddedProvision: o.skipEmbeddedProvision
             )
             capture?.stop()

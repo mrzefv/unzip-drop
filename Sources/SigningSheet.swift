@@ -46,6 +46,10 @@ struct SigningSheet: View {
     @State private var enterpriseName = ""
     @State private var appleIDEmail = ""
     @State private var showBundleInfo = false
+    @State private var bundleInfoMode: BundleInfoEditorSheet.Mode = .entitlements
+    @State private var entitlementValues: [String: String] = [:]
+    @State private var entitlementTypeHints: [String: String] = [:]
+    @State private var plistSetValues: [String: String] = [:]
 
     // binary analysis
     @State private var macho: MachOReport?
@@ -149,6 +153,15 @@ struct SigningSheet: View {
                 for u in urls { dylibs.append(DylibItem(url: u)) }
             }
         }
+        .sheet(isPresented: $showBundleInfo) {
+            BundleInfoEditorSheet(
+                mode: bundleInfoMode,
+                entitlements: $entitlementValues,
+                infoPlistSet: $plistSetValues
+            ) { removedKey in
+                entitlementTypeHints.removeValue(forKey: removedKey)
+            }
+        }
         .sheet(isPresented: $showIconPicker) {
             DocPicker(types: [.png, .jpeg, .image]) { urls in
                 if let u = urls.first, let d = try? Data(contentsOf: u), let img = UIImage(data: d) {
@@ -201,9 +214,16 @@ struct SigningSheet: View {
         VStack(alignment: .leading, spacing: 6) {
             sectionLabel("BUNDLE INFO")
             VStack(spacing: 0) {
-                bundleRow("Entitlements", "key.fill", "View") { showBundleInfo = true }
+                bundleRow("Entitlements", "key.fill", entitlementValues.isEmpty ? "View" : "\(entitlementValues.count)") {
+                    if entitlementValues.isEmpty { loadEntitlementsFromActiveProfile() }
+                    bundleInfoMode = .entitlements
+                    showBundleInfo = true
+                }
                 Divider().overlay(Theme.stroke).padding(.leading, 39)
-                bundleRow("Info.plist", "doc.text.fill", "View") { showBundleInfo = true }
+                bundleRow("Info.plist", "doc.text.fill", plistSetValues.isEmpty ? "View" : "\(plistSetValues.count)") {
+                    bundleInfoMode = .infoPlist
+                    showBundleInfo = true
+                }
                 Divider().overlay(Theme.stroke).padding(.leading, 39)
                 bundleRow("Mach-O dependencies", "point.3.connected.trianglepath.dotted", macho.map { "\($0.arm64?.dylibs.count ?? 0)" } ?? "—") {}
             }
@@ -700,6 +720,7 @@ struct SigningSheet: View {
     private var plistList: [String] {
         [o.forceMinIOS12 ? "MinimumOSVersion 12.0" : nil, o.disableFileSharing ? "Disable file sharing" : nil,
          o.forcePortrait ? "Force portrait" : nil, o.skipIPad ? "iPhone only" : nil].compactMap { $0 }
+        + plistSetValues.sorted(by: { $0.key < $1.key }).map { "Info.plist: \($0.key)=\($0.value)" }
     }
 
     private func summaryBlock(_ icon: String, _ title: String, _ items: [String]) -> some View {
@@ -816,6 +837,7 @@ struct SigningSheet: View {
         s.injectDylibs = dylibs.map { ($0.url, o.weakDylibReferences ? true : $0.weak) }
         s.injectPath = injectPath; s.injectFolder = injectFolder
         s.removeDylibs = Array(Set((o.removeExistingLibraries ? machoDylibs : []) + Array(removeDylibs)))
+        s.plistSet = plistSetValues
         s.forceMinIOS = o.forceMinIOS12 ? "12.0" : nil
         s.disableFileSharing = o.disableFileSharing
         s.forcePortrait = o.forcePortrait
@@ -827,7 +849,70 @@ struct SigningSheet: View {
         s.stripWatchApps = o.stripWatch
         s.stripExtensions = o.stripExtensions
         s.removeURLSchemes = o.removeURLSchemes
+        s.entitlementsPlistData = encodedEntitlementsPlistData()
         return s
+    }
+
+    private func loadEntitlementsFromActiveProfile() {
+        guard let material = try? certs.activeMaterial() else { return }
+        let parsed = parseProvisionEntitlements(provision: material.provision)
+        entitlementValues = parsed.values
+        entitlementTypeHints = parsed.typeHints
+    }
+
+    private func parseProvisionEntitlements(provision: Data) -> (values: [String: String], typeHints: [String: String]) {
+        guard let xml = xmlPlistData(fromMobileProvision: provision),
+              let plist = try? PropertyListSerialization.propertyList(from: xml, format: nil) as? [String: Any],
+              let ent = plist["Entitlements"] as? [String: Any] else {
+            return ([:], [:])
+        }
+        var values: [String: String] = [:]
+        var hints: [String: String] = [:]
+        for (k, v) in ent {
+            values[k] = stringifyEntitlementValue(v)
+            if v is Bool { hints[k] = "bool" }
+            else if v is NSNumber { hints[k] = "number" }
+            else if v is [Any] { hints[k] = "array" }
+            else { hints[k] = "string" }
+        }
+        return (values, hints)
+    }
+
+    private func encodedEntitlementsPlistData() -> Data? {
+        guard !entitlementValues.isEmpty else { return nil }
+        var dict: [String: Any] = [:]
+        for (k, raw) in entitlementValues {
+            let v = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            switch entitlementTypeHints[k] {
+            case "bool":
+                dict[k] = (v.lowercased() == "true")
+            case "number":
+                if let i = Int(v) { dict[k] = i }
+                else if let d = Double(v) { dict[k] = d }
+                else { dict[k] = v }
+            case "array":
+                dict[k] = v.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            default:
+                if v.lowercased() == "true" { dict[k] = true }
+                else if v.lowercased() == "false" { dict[k] = false }
+                else { dict[k] = v }
+            }
+        }
+        return try? PropertyListSerialization.data(fromPropertyList: dict, format: .xml, options: 0)
+    }
+
+    private func stringifyEntitlementValue(_ value: Any) -> String {
+        if let b = value as? Bool { return b ? "true" : "false" }
+        if let s = value as? String { return s }
+        if let arr = value as? [String] { return arr.joined(separator: ", ") }
+        if let arr = value as? [Any] { return arr.map { "\($0)" }.joined(separator: ", ") }
+        return "\(value)"
+    }
+
+    private func xmlPlistData(fromMobileProvision data: Data) -> Data? {
+        guard let start = data.range(of: Data("<?xml".utf8)),
+              let end = data.range(of: Data("</plist>".utf8)) else { return nil }
+        return data.subdata(in: start.lowerBound..<end.upperBound)
     }
 
     private func randomSuffix(_ count: Int) -> String {
@@ -881,6 +966,111 @@ struct SigningSheet: View {
 }
 
 // MARK: - Document picker
+
+struct BundleInfoEditorSheet: View {
+    enum Mode { case entitlements, infoPlist }
+
+    let mode: Mode
+    @Binding var entitlements: [String: String]
+    @Binding var infoPlistSet: [String: String]
+    var onRemoveEntitlement: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if mode == .entitlements {
+                    KeyValueEditorList(
+                        title: "Entitlements",
+                        values: $entitlements,
+                        addLabel: "Add entitlement key",
+                        onRemoveKey: onRemoveEntitlement
+                    )
+                } else {
+                    KeyValueEditorList(
+                        title: "Info.plist",
+                        values: $infoPlistSet,
+                        addLabel: "Add Info.plist key"
+                    )
+                }
+            }
+            .navigationTitle(mode == .entitlements ? "Entitlements (\(entitlements.count))" : "Info.plist (\(infoPlistSet.count))")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+private struct KeyValueEditorList: View {
+    let title: String
+    @Binding var values: [String: String]
+    let addLabel: String
+    var onRemoveKey: ((String) -> Void)? = nil
+
+    @State private var newKey = ""
+    @State private var newValue = "true"
+
+    private var sortedKeys: [String] { values.keys.sorted() }
+
+    var body: some View {
+        List {
+            ForEach(sortedKeys, id: \.self) { key in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(key).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white.opacity(0.75))
+                    TextField("Value", text: Binding(
+                        get: { values[key] ?? "" },
+                        set: { values[key] = $0 }
+                    ))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.system(size: 15))
+                }
+                .padding(.vertical, 6)
+                .listRowBackground(Color(white: 0.08))
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        values.removeValue(forKey: key)
+                        onRemoveKey?(key)
+                    } label: { Label("Remove", systemImage: "minus.circle.fill") }
+                }
+            }
+
+            Section {
+                VStack(spacing: 8) {
+                    TextField("Key", text: $newKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Value", text: $newValue)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button {
+                        let k = newKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !k.isEmpty else { return }
+                        values[k] = newValue
+                        newKey = ""
+                        newValue = "true"
+                    } label: {
+                        HStack {
+                            Image(systemName: "plus.circle.fill").foregroundStyle(.green)
+                            Text(addLabel)
+                            Spacer()
+                        }
+                    }
+                }
+                .font(.system(size: 15))
+                .padding(.vertical, 8)
+            }
+            .listRowBackground(Color(white: 0.08))
+        }
+        .scrollContentBackground(.hidden)
+        .background(Color.black)
+    }
+}
 
 struct DocPicker: UIViewControllerRepresentable {
     let types: [UTType]

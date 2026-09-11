@@ -140,6 +140,7 @@ int zsign(NSString *app,
 		  NSString *bundleid,
 		  NSString *displayname,
 		  NSString *bundleversion,
+		  NSString *entitlementsFile,
 		  bool dontGenerateEmbeddedMobileProvision
 		  )
 {
@@ -168,6 +169,12 @@ int zsign(NSString *app,
 	strBundleId = [bundleid cStringUsingEncoding:NSUTF8StringEncoding];
 	strDisplayName = [displayname cStringUsingEncoding:NSUTF8StringEncoding];
 	strBundleVersion = [bundleversion cStringUsingEncoding:NSUTF8StringEncoding];
+	if (entitlementsFile != nil) {
+		const char *entPath = [entitlementsFile cStringUsingEncoding:NSUTF8StringEncoding];
+		if (entPath != NULL && entPath[0] != '\0') {
+			strEntitlementsFile = entPath;
+		}
+	}
 	
 	string strPath = [app cStringUsingEncoding:NSUTF8StringEncoding];
 	if (!IsFileExists(strPath.c_str())) {

@@ -880,7 +880,7 @@ struct BarBlur: View {
     var body: some View {
         ZStack {
             Rectangle().fill(.ultraThinMaterial)
-            Color(white: 0.06).opacity(0.72)
+            Color(white: 0.06).opacity(0.52)
         }
         .ignoresSafeArea()
     }

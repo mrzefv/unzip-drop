@@ -305,7 +305,7 @@ private struct DetailScreen<Content: View>: View {
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 8)
-            .background(Theme.bg)
+            .background(BarBlur())
             .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
 
             ScrollView(showsIndicators: false) {

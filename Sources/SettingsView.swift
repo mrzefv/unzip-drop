@@ -274,6 +274,7 @@ private struct StatusFooter: View {
     @Environment(\.openURL) private var openURL
     @ObservedObject private var staff = StaffGate.shared
     @State private var checking = false
+    @State private var didCopyMDID = false
 
     private var footerIdentity: (roleLabel: String, roleColor: Color, accountURL: URL, accountLabel: String, accountIcon: String) {
         if staff.isStaff {
@@ -342,7 +343,11 @@ private struct StatusFooter: View {
                 Button {
                     UIPasteboard.general.string = staff.mdid
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    UIAccessibility.post(notification: .announcement, argument: "MDID copied")
+                    didCopyMDID = true
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        await MainActor.run { didCopyMDID = false }
+                    }
                 } label: {
                     (Text("MDID: ")
                         .font(.system(size: 14, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
@@ -352,6 +357,7 @@ private struct StatusFooter: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("MDID: \(staff.mdid)")
+                .accessibilityValue(didCopyMDID ? "Copied to clipboard" : "Not copied")
                 .accessibilityHint("Copies your device identifier")
 
                 Spacer(minLength: 0)

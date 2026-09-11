@@ -54,6 +54,8 @@ struct SigningSheet: View {
     @State private var developerToolMode: DeveloperToolSheet.Mode = .strings
     @State private var developerStrings: [DeveloperStringEntry] = []
     @State private var binaryPatches: [BinaryPatch] = []
+    @State private var injectDataBlob: Data? = nil
+    @State private var injectDataName: String = ""
 
     // binary analysis
     @State private var macho: MachOReport?
@@ -178,7 +180,9 @@ struct SigningSheet: View {
                 ipaURL: ipaURL,
                 macho: macho,
                 machoError: machoError,
-                patches: $binaryPatches
+                patches: $binaryPatches,
+                injectBlob: $injectDataBlob,
+                injectName: $injectDataName
             )
         }
         .fullScreenCover(item: $settingsJump) { j in
@@ -289,6 +293,11 @@ struct SigningSheet: View {
                 Divider().overlay(Theme.stroke).padding(.leading, 39)
                 bundleRow("Disassemble ARM64", "chevron.left.forwardslash.chevron.right", "View") {
                     developerToolMode = .disassemble
+                    showDeveloperTool = true
+                }
+                Divider().overlay(Theme.stroke).padding(.leading, 39)
+                bundleRow("Inject Data", "lock.doc.fill", injectDataBlob == nil ? "Hide" : "Ready") {
+                    developerToolMode = .injectData
                     showDeveloperTool = true
                 }
             }
@@ -950,6 +959,7 @@ struct SigningSheet: View {
         s.injectPath = injectPath; s.injectFolder = injectFolder
         s.removeDylibs = Array(Set((o.removeExistingLibraries ? machoDylibs : []) + Array(removeDylibs)))
         s.binaryPatches = binaryPatches
+        s.injectDataBlob = injectDataBlob
         s.plistSet = plistSetValues
         s.forceMinIOS = o.forceMinIOS12 ? "12.0" : nil
         s.disableFileSharing = o.disableFileSharing
@@ -1163,13 +1173,15 @@ struct BundleInfoEditorSheet: View {
 }
 
 struct DeveloperToolSheet: View {
-    enum Mode { case strings, patchFunctions, dependencies, disassemble }
+    enum Mode { case strings, patchFunctions, dependencies, disassemble, injectData }
 
     let mode: Mode
     let ipaURL: URL
     let macho: MachOReport?
     let machoError: String?
     @Binding var patches: [BinaryPatch]
+    @Binding var injectBlob: Data?
+    @Binding var injectName: String
 
     @Environment(\.dismiss) private var dismiss
     @State private var loading = true
@@ -1202,6 +1214,7 @@ struct DeveloperToolSheet: View {
                 case .patchFunctions: patchView
                 case .dependencies:   dependenciesView
                 case .disassemble:    disassembleView
+                case .injectData:     injectDataView
                 }
             }
             .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
@@ -1227,6 +1240,7 @@ struct DeveloperToolSheet: View {
         case .patchFunctions: return "Patch Functions"
         case .dependencies: return "Mach-O Dependencies"
         case .disassemble: return "Disassemble ARM64"
+        case .injectData: return "Inject Data"
         }
     }
 
@@ -1390,6 +1404,148 @@ struct DeveloperToolSheet: View {
         .scrollContentBackground(.hidden).background(Color.black)
     }
 
+    // MARK: Inject Data (Mcrypted-512)
+
+    @State private var showInjectPicker = false
+    @State private var injectWords: [String] = []       // active recovery key (12 words)
+    @State private var injectEntropy: Data? = nil
+    @State private var showKeyScreen = false
+    @State private var enterWords = ""                  // paste box for an existing key
+    @State private var injectStatus: String?
+    @State private var injectError: String?
+    @State private var extracted: (name: String, data: Data)?
+    @State private var showExtractShare = false
+
+    private var injectDataView: some View {
+        List {
+            Section {
+                Text("Hide a picture or document inside the app binary. It's encrypted with Mcrypted-512 (AES-256-GCM + HMAC-SHA-512) using a 12-word recovery key and appended to the main Mach-O before signing, so it rides inside the signed app.")
+                    .font(.caption).foregroundStyle(Theme.subtle)
+            }.listRowBackground(Color(white: 0.08))
+
+            Section("Recovery key") {
+                if injectWords.isEmpty {
+                    Button { generateKey() } label: { Label("Generate new 12-word key", systemImage: "key.horizontal.fill") }
+                    NavigationLink { enterKeyView } label: { Label("Enter an existing key", systemImage: "square.and.pencil") }
+                } else {
+                    Button { showKeyScreen = true } label: {
+                        Label("View & verify key (\(injectWords.prefix(2).joined(separator: " "))…)", systemImage: "key.fill")
+                    }
+                    Button(role: .destructive) { injectWords = []; injectEntropy = nil; injectBlob = nil } label: {
+                        Label("Clear key", systemImage: "trash")
+                    }
+                }
+            }.listRowBackground(Color(white: 0.08))
+
+            Section("Payload") {
+                Button { injectError = nil; injectStatus = nil; showInjectPicker = true } label: {
+                    Label(injectName.isEmpty ? "Choose file to hide" : injectName, systemImage: "doc.badge.plus")
+                }
+                Button { embedPayload() } label: {
+                    Label(injectBlob == nil ? "Encrypt & stage for signing" : "Re-encrypt", systemImage: "lock.fill")
+                }
+                .disabled(injectName.isEmpty || injectEntropy == nil || pendingFile == nil)
+                if injectBlob != nil {
+                    HStack {
+                        Label("Staged — embeds when you Sign IPA", systemImage: "checkmark.seal.fill").foregroundStyle(.green).font(.caption)
+                        Spacer()
+                        Button { injectBlob = nil; injectStatus = nil } label: { Image(systemName: "trash").foregroundStyle(.red) }
+                    }
+                }
+                if let injectStatus { Text(injectStatus).font(.caption).foregroundStyle(.green) }
+                if let injectError { Text(injectError).font(.caption).foregroundStyle(.orange) }
+            }.listRowBackground(Color(white: 0.08))
+
+            Section("Recover from this IPA") {
+                Text(injectWords.isEmpty ? "Enter or generate a key above, then extract." : "Uses the key above.")
+                    .font(.caption).foregroundStyle(Theme.subtle)
+                Button { Task { await extractPayload() } } label: { Label("Extract hidden payload", systemImage: "lock.open.fill") }
+                    .disabled(injectEntropy == nil)
+                if let extracted {
+                    HStack {
+                        Label("\(extracted.name) · \(ByteCountFormatter.string(fromByteCount: Int64(extracted.data.count), countStyle: .file))", systemImage: "doc.fill")
+                            .font(.caption).foregroundStyle(Theme.text)
+                        Spacer()
+                        Button { showExtractShare = true } label: { Image(systemName: "square.and.arrow.up").foregroundStyle(blue) }
+                    }
+                }
+            }.listRowBackground(Color(white: 0.08))
+        }
+        .scrollContentBackground(.hidden).background(Color.black)
+        .sheet(isPresented: $showInjectPicker) {
+            DocPicker(types: [.item]) { urls in
+                guard let u = urls.first else { return }
+                let scoped = u.startAccessingSecurityScopedResource()
+                defer { if scoped { u.stopAccessingSecurityScopedResource() } }
+                if let d = try? Data(contentsOf: u) { pendingFile = d; injectName = u.lastPathComponent }
+            }
+        }
+        .sheet(isPresented: $showKeyScreen) {
+            McryptedKeyScreen(words: injectWords) { showKeyScreen = false }
+                .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showExtractShare) {
+            if let e = extracted {
+                let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(e.name)
+                let _ = try? e.data.write(to: tmp)
+                ShareSheet(items: [tmp])
+            }
+        }
+    }
+
+    private var enterKeyView: some View {
+        List {
+            Section("Enter your 12 words") {
+                TextField("word1 word2 … word12", text: $enterWords, axis: .vertical)
+                    .font(.system(size: 14, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                Button("Use this key") {
+                    let ws = enterWords.lowercased().split(whereSeparator: { $0 == " " || $0 == "\n" }).map(String.init)
+                    if let e = Mcrypted512.entropy(fromWords: ws) {
+                        injectWords = ws; injectEntropy = e; injectError = nil
+                    } else { injectError = "Invalid key — need 12 valid words." }
+                }
+                .disabled(enterWords.split(separator: " ").count < 12)
+                if let injectError { Text(injectError).font(.caption).foregroundStyle(.orange) }
+            }.listRowBackground(Color(white: 0.08))
+        }
+        .scrollContentBackground(.hidden).background(Color.black)
+        .navigationTitle("Enter Key").navigationBarTitleDisplayMode(.inline)
+    }
+
+    @State private var pendingFile: Data?
+
+    private func generateKey() {
+        let (w, e) = Mcrypted512.newRecoveryKey()
+        injectWords = w; injectEntropy = e; injectBlob = nil
+        showKeyScreen = true
+    }
+
+    private func embedPayload() {
+        injectError = nil; injectStatus = nil
+        guard let file = pendingFile else { injectError = "Pick a file first."; return }
+        guard let e = injectEntropy else { injectError = "Generate or enter a key first."; return }
+        do {
+            let blob = try Mcrypted512.makeBlob(payload: file, filename: injectName, entropy: e)
+            injectBlob = blob
+            injectStatus = "Encrypted \(ByteCountFormatter.string(fromByteCount: Int64(file.count), countStyle: .file)) → \(ByteCountFormatter.string(fromByteCount: Int64(blob.count), countStyle: .file)) blob."
+        } catch { injectError = error.localizedDescription }
+    }
+
+    private func extractPayload() async {
+        injectError = nil; extracted = nil
+        guard let ctx = await LocalBinaryScanner.binaryContext(ipaURL: ipaURL, localPath: nil) else {
+            injectError = "Couldn't read the binary."; return
+        }
+        // Search the FULL (fat) binary bytes for the payload — it lives past the code.
+        guard let full = await LocalBinaryScanner.rawMainBinary(ipaURL: ipaURL) else {
+            injectError = "Couldn't read the binary."; return
+        }
+        guard let e = injectEntropy else { injectError = "Enter or generate the key first."; return }
+        do { extracted = try Mcrypted512.extract(fromBinary: full, entropy: e) }
+        catch { injectError = error.localizedDescription }
+        _ = ctx
+    }
+
     // MARK: Engine calls
 
     private func runScan() async {
@@ -1424,6 +1580,128 @@ private struct StringSearchable: ViewModifier {
     func body(content: Content) -> some View {
         if mode == .strings { content.searchable(text: $text, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search strings") }
         else { content }
+    }
+}
+
+// MARK: - Mcrypted recovery-key screen (12-word grid + verify challenge)
+
+struct McryptedKeyScreen: View {
+    let words: [String]
+    let onDone: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var verifying = false
+    @State private var challenge: [Int] = []        // 1-based positions to confirm
+    @State private var answers: [Int: String] = [:]
+    @State private var verifyResult: Bool?
+
+    private let navy = Color(red: 0.11, green: 0.16, blue: 0.29)
+    private let cell = Color(red: 0.20, green: 0.26, blue: 0.42)
+
+    var body: some View {
+        NavigationStack {
+            Group { if verifying { verifyView } else { showView } }
+                .background(Color(red: 0.07, green: 0.11, blue: 0.22).ignoresSafeArea())
+                .navigationTitle("Mcrypted Key").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) { Button("Done") { onDone(); dismiss() } }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { UIPasteboard.general.string = words.joined(separator: " ") } label: { Image(systemName: "doc.on.doc") }
+                    }
+                }
+        }
+    }
+
+    private var showView: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 34)).foregroundStyle(.white)
+                    Text("Save these words in a secure place! You need them to decrypt your files if you lose this device. Anyone with this key can decrypt your payloads.")
+                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                }
+                .padding(16)
+                .background(Color(red: 0.62, green: 0.44, blue: 0.05))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange, lineWidth: 2))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
+                    ForEach(Array(words.enumerated()), id: \.offset) { i, w in
+                        HStack(spacing: 8) {
+                            Text("\(i+1)").font(.system(size: 15, weight: .bold)).foregroundStyle(.white.opacity(0.5))
+                            Text(w).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 14)
+                        .background(cell).clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+
+                Button {
+                    startChallenge()
+                } label: {
+                    Text("Verify Key").font(.system(size: 17, weight: .bold)).foregroundStyle(Color(red: 0.07, green: 0.11, blue: 0.22))
+                        .frame(maxWidth: .infinity).padding(.vertical, 16)
+                        .background(Color(red: 0.62, green: 0.71, blue: 0.98)).clipShape(RoundedRectangle(cornerRadius: 16))
+                }
+                .padding(.top, 8)
+            }
+            .padding(20)
+        }
+    }
+
+    private var verifyView: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                Text("Enter words \(challenge.map { "#\($0)" }.joined(separator: ", "))")
+                    .font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                ForEach(challenge, id: \.self) { pos in
+                    HStack(spacing: 12) {
+                        Text("#\(pos)").font(.system(size: 16, weight: .bold)).foregroundStyle(.white.opacity(0.6)).frame(width: 44, alignment: .leading)
+                        TextField("word", text: Binding(get: { answers[pos] ?? "" }, set: { answers[pos] = $0 }))
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .font(.system(size: 16, design: .monospaced)).foregroundStyle(.white)
+                            .padding(.horizontal, 12).padding(.vertical, 12)
+                            .background(cell).clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+
+                if let verifyResult {
+                    Text(verifyResult ? "✓ Key verified — you've backed it up correctly." : "✗ Doesn't match. Check the words and try again.")
+                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(verifyResult ? .green : .orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                HStack(spacing: 12) {
+                    Button { verifying = false; verifyResult = nil } label: {
+                        Text("Back").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).padding(.vertical, 14).background(cell).clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    Button { checkChallenge() } label: {
+                        Text("Check").font(.system(size: 16, weight: .bold)).foregroundStyle(Color(red: 0.07, green: 0.11, blue: 0.22))
+                            .frame(maxWidth: .infinity).padding(.vertical, 14).background(Color(red: 0.62, green: 0.71, blue: 0.98)).clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                }
+                .padding(.top, 6)
+            }
+            .padding(20)
+        }
+    }
+
+    private func startChallenge() {
+        // 3 random distinct positions, presented in random order.
+        challenge = Array(1...words.count).shuffled().prefix(3).shuffled()
+        answers = [:]; verifyResult = nil; verifying = true
+    }
+
+    private func checkChallenge() {
+        let ok = challenge.allSatisfy { pos in
+            (answers[pos] ?? "").lowercased().trimmingCharacters(in: .whitespaces) == words[pos - 1]
+        }
+        verifyResult = ok
+        if ok { UINotificationFeedbackGenerator().notificationOccurred(.success) }
     }
 }
 

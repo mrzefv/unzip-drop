@@ -298,7 +298,10 @@ private struct StatusFooter: View {
                 Button {
                     guard !checking else { return }
                     checking = true
-                    Task { await staff.refresh(); checking = false }
+                    Task {
+                        await staff.refresh()
+                        await MainActor.run { checking = false }
+                    }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 17, weight: .semibold))
@@ -321,17 +324,21 @@ private struct StatusFooter: View {
                     .overlay(Capsule().stroke(roleColor.opacity(0.5), lineWidth: 1))
                     .clipShape(Capsule())
 
-                (Text("MDID: ")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
-                + Text(staff.mdid)
-                    .font(.system(size: 14, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent))
-                    .lineLimit(1)
+                Button {
+                    UIPasteboard.general.string = staff.mdid
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                } label: {
+                    (Text("MDID: ")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
+                    + Text(staff.mdid)
+                        .font(.system(size: 14, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent))
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Copy MDID")
+                .accessibilityHint("Copies your device identifier")
 
                 Spacer(minLength: 0)
-            }
-            .onTapGesture {
-                UIPasteboard.general.string = staff.mdid
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
         }
         .frame(maxWidth: .infinity)

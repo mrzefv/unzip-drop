@@ -1,0 +1,4 @@
+build.sh: line 60: xcodebuild: command not found
+build.sh: line 51: xcodebuild: command not found
+build.sh: line 51: xcodebuild: command not found
+build.sh: line 44: xcodebuild: command not found

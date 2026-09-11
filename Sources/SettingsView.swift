@@ -347,6 +347,7 @@ private struct StatusFooter: View {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     didCopyMDID = true
                     mdidResetTask?.cancel()
+                    mdidResetTask = nil
                     let token = UUID()
                     mdidResetToken = token
                     mdidResetTask = Task { @MainActor in

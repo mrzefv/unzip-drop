@@ -104,11 +104,11 @@ struct SettingsView: View {
                         }
 
                         SettingsSection("Support") {
-                            SettingsLink(icon: "globe", title: "MRzefV", subtitle: "mrzefv.com | Founder MRzefv",
-                                         url: URL(string: "https://mrzefv.com")!)
-                            SettingsLink(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub",
-                                         subtitle: "github.com/mrzefv",
-                                         url: URL(string: "https://github.com/mrzefv")!)
+                            SettingsLink(icon: "globe", title: "delvek.net", subtitle: "Trusted IPA Repository",
+                                         url: URL(string: "https://delvek.net")!)
+                            SettingsLink(icon: "person.crop.circle.badge.checkmark", title: "MSign",
+                                         subtitle: "msign.party | Founder MRZefv",
+                                         url: URL(string: "https://msign.party")!)
                         }
 
                         SettingsSection(staff.isStaff ? "Staff (\(staff.role.title))" : "Access") {
@@ -271,49 +271,116 @@ private struct RowPressStyle: ButtonStyle {
 // MARK: - Footer (mSign-style identity + status pill)
 
 private struct StatusFooter: View {
-    @EnvironmentObject var config: Config
+    @Environment(\.openURL) private var openURL
     @ObservedObject private var staff = StaffGate.shared
     @State private var checking = false
+    @State private var didCopyMDID = false
+    @State private var mdidResetTask: Task<Void, Never>?
+    @State private var mdidResetToken = UUID()
 
-    private var username: String { config.owner.isEmpty ? "MRzefv" : config.owner }
-    private var role: UserRole { staff.isStaff ? staff.role : .member }
+    private var footerIdentity: (roleLabel: String, roleColor: Color, accountURL: URL, accountLabel: String, accountIcon: String) {
+        if staff.isStaff {
+            return (
+                roleLabel: staff.role.badgeText,
+                roleColor: staff.role.color,
+                accountURL: URL(string: "https://msign.party")!,
+                accountLabel: "Open MSign site",
+                accountIcon: "person.crop.circle"
+            )
+        }
+        return (
+            roleLabel: "GUEST",
+            roleColor: Theme.accent,
+            accountURL: URL(string: "https://msign.party/account")!,
+            accountLabel: "Create an MSign account",
+            accountIcon: "person.badge.plus"
+        )
+    }
 
     var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 10) {
-                Image(systemName: "signature")
-                    .font(.system(size: 22, weight: .semibold)).foregroundStyle(Theme.accent)
-                Text(username)
-                    .font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text)
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Button {
+                    openURL(footerIdentity.accountURL)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: footerIdentity.accountIcon)
+                        Text(footerIdentity.accountLabel)
+                            .underline()
+                    }
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+                Spacer()
                 Button {
                     guard !checking else { return }
                     checking = true
-                    Task { await staff.refresh(); checking = false }
+                    Task {
+                        await staff.refresh()
+                        await MainActor.run { checking = false }
+                    }
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.subtle)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.subtle)
+                        .frame(width: 34, height: 34)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(Circle())
                         .rotationEffect(.degrees(checking ? 360 : 0))
                         .animation(checking ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default, value: checking)
                 }
                 .buttonStyle(.plain)
-                Text(role.badgeText)
+            }
+
+            HStack(spacing: 10) {
+                Text(footerIdentity.roleLabel)
                     .font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(1)
                     .padding(.horizontal, 9).padding(.vertical, 4)
-                    .background(role.color.opacity(0.18))
-                    .foregroundStyle(role.color)
-                    .overlay(Capsule().stroke(role.color.opacity(0.5), lineWidth: 1))
+                    .background(footerIdentity.roleColor.opacity(0.18))
+                    .foregroundStyle(footerIdentity.roleColor)
+                    .overlay(Capsule().stroke(footerIdentity.roleColor.opacity(0.5), lineWidth: 1))
                     .clipShape(Capsule())
-            }
-            (Text("MDID: ")
-                .font(.system(size: 14, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
-            + Text(staff.mdid)
-                .font(.system(size: 14, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent))
-            .onTapGesture {
-                UIPasteboard.general.string = staff.mdid
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+
+                Button {
+                    copyMDID()
+                } label: {
+                    (Text("MDID: ")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
+                    + Text(staff.mdid)
+                        .font(.system(size: 14, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent))
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("MDID")
+                .accessibilityValue(staff.mdid)
+                .accessibilityHint(didCopyMDID ? "Copied to clipboard" : "Double tap to copy to clipboard")
+
+                Spacer(minLength: 0)
             }
         }
         .frame(maxWidth: .infinity)
+        .onDisappear {
+            mdidResetTask?.cancel()
+            mdidResetTask = nil
+        }
+    }
+
+    @MainActor
+    private func copyMDID() {
+        UIPasteboard.general.string = staff.mdid
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        didCopyMDID = true
+        mdidResetTask?.cancel()
+        mdidResetTask = nil
+        let token = UUID()
+        mdidResetToken = token
+        mdidResetTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled, mdidResetToken == token else { return }
+            didCopyMDID = false
+            mdidResetTask = nil
+        }
     }
 }
 

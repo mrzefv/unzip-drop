@@ -278,16 +278,19 @@ private struct StatusFooter: View {
     private var role: UserRole { staff.isStaff ? staff.role : .member }
     private var roleLabel: String { staff.isStaff ? role.badgeText : "GUEST" }
     private var roleColor: Color { staff.isStaff ? role.color : Theme.accent }
+    private var accountURL: URL { URL(string: staff.isStaff ? "https://msign.party" : "https://msign.party/account")! }
+    private var accountLabel: String { staff.isStaff ? "Open MSign dashboard" : "Create an MSign account" }
+    private var accountIcon: String { staff.isStaff ? "person.crop.circle" : "person.badge.plus" }
 
     var body: some View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
                 Button {
-                    openURL(URL(string: "https://msign.party/account")!)
+                    openURL(accountURL)
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "person.badge.plus")
-                        Text("Create an MSign account")
+                        Image(systemName: accountIcon)
+                        Text(accountLabel)
                             .underline()
                     }
                     .font(.system(size: 17, weight: .semibold))
@@ -335,8 +338,7 @@ private struct StatusFooter: View {
                         .lineLimit(1)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Copy MDID")
-                .accessibilityValue(staff.mdid)
+                .accessibilityLabel("MDID: \(staff.mdid)")
                 .accessibilityHint("Copies your device identifier")
 
                 Spacer(minLength: 0)

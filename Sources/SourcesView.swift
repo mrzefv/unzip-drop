@@ -596,9 +596,14 @@ nonisolated enum IPAInbox {
 
 nonisolated final class IPADownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     static let shared = IPADownloader()
-    private lazy var session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+    private var session: URLSession!
     private var handlers: [Int: (progress: @Sendable (Double) -> Void, done: @Sendable (Result<URL, Error>) -> Void, dest: URL)] = [:]
     private let lock = NSLock()
+
+    override init() {
+        super.init()
+        session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+    }
 
     /// Downloads to the inbox; returns immediately if it's already on device.
     func download(_ app: SourceApp, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {

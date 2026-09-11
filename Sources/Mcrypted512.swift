@@ -21,7 +21,9 @@ import CryptoKit
 
 nonisolated enum Mcrypted512 {
 
-    static let magic = Data("MC512\u{01}".utf8)   // 6 bytes: "MC512" + version 1
+    static let magicV1 = Data("MC512\u{01}".utf8)   // legacy SHA-512-chain KDF
+    static let magic   = Data("MC512\u{02}".utf8)   // current: scrypt KDF
+    static let magicPrefix = Data("MC512".utf8)
     enum McError: LocalizedError {
         case notFound, badMagic, badTag, badGCM, tooLarge, empty
         var errorDescription: String? {
@@ -88,14 +90,23 @@ nonisolated enum Mcrypted512 {
     }
 
     /// Same KDF over raw key material (the 16-byte recovery entropy).
-    private static func deriveKM(_ material: Data, salt: Data, rounds: Int = 200_000) -> (aes: SymmetricKey, mac: SymmetricKey) {
-        var acc = Data()
-        acc.append(salt)
-        acc.append(material)
+    // scrypt cost — Paranoid. N=2^19, r=4, p=1 → ~256 MB, ~2s on-device.
+    static let scryptN = 1 << 19
+    static let scryptR = 4
+    static let scryptP = 1
+
+    /// Memory-hard KDF (scrypt) → 64 bytes → AES-256 key ‖ HMAC-SHA-512 key.
+    private static func deriveKM(_ material: Data, salt: Data, rounds: Int = 0) -> (aes: SymmetricKey, mac: SymmetricKey) {
+        let out = Scrypt.derive(password: material, salt: salt, n: scryptN, r: scryptR, p: scryptP, dkLen: 64)
+        return (SymmetricKey(data: out.prefix(32)), SymmetricKey(data: out.suffix(32)))
+    }
+
+    /// v1 KDF (SHA-512 chain) — kept only to decrypt payloads embedded before scrypt.
+    private static func deriveLegacyV1(_ material: Data, salt: Data, rounds: Int = 200_000) -> (aes: SymmetricKey, mac: SymmetricKey) {
+        var acc = Data(); acc.append(salt); acc.append(material)
         var digest = Data(SHA512.hash(data: acc))
         for i in 1..<rounds {
-            var block = digest
-            block.append(salt)
+            var block = digest; block.append(salt)
             withUnsafeBytes(of: UInt32(i).littleEndian) { block.append(contentsOf: $0) }
             digest = Data(SHA512.hash(data: block))
         }
@@ -151,11 +162,14 @@ nonisolated enum Mcrypted512 {
     }
 
     private static func extractCore(fromBinary data: Data, keyMaterial: Data) throws -> (filename: String, payload: Data) {
-        guard let start = lastRange(of: magic, in: data)?.lowerBound else { throw McError.notFound }
+        guard let start = lastRange(of: magicPrefix, in: data)?.lowerBound else { throw McError.notFound }
         var p = start
         func need(_ n: Int) throws { guard p + n <= data.count else { throw McError.badMagic } }
 
-        try need(magic.count); p += magic.count
+        try need(6)                              // "MC512" + version byte
+        let version = data[start + 5]
+        guard version == 1 || version == 2 else { throw McError.badMagic }
+        p += 6
         try need(1); let saltLen = Int(data[p]); p += 1
         guard saltLen == 16 else { throw McError.badMagic }
         try need(16); let salt = data.subdata(in: p ..< p+16); p += 16
@@ -165,7 +179,7 @@ nonisolated enum Mcrypted512 {
         try need(ctLen); let combined = data.subdata(in: p ..< p+ctLen); p += ctLen
         try need(64); let tag = data.subdata(in: p ..< p+64)
 
-        let (aesKey, macKey) = deriveKM(keyMaterial, salt: salt)
+        let (aesKey, macKey) = version == 2 ? deriveKM(keyMaterial, salt: salt) : deriveLegacyV1(keyMaterial, salt: salt)
 
         // Verify HMAC over everything before the tag (encrypt-then-MAC).
         let signedRegion = data.subdata(in: start ..< (p))   // header+ct, excludes tag
@@ -178,7 +192,7 @@ nonisolated enum Mcrypted512 {
         } catch { throw McError.badGCM }
     }
 
-    static func hasPayload(inBinary data: Data) -> Bool { lastRange(of: magic, in: data) != nil }
+    static func hasPayload(inBinary data: Data) -> Bool { lastRange(of: magicPrefix, in: data) != nil }
 
     // MARK: helpers
 

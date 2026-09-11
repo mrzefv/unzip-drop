@@ -28,6 +28,7 @@ struct AVXScanHit: Identifiable, Decodable, Hashable {
     let xref:     String?
     var editable:   String? = nil   // "yes" | "limited" | "resource" | "no"
     var editReason: String? = nil
+    var module:     String? = nil   // owning binary/framework name (e.g. "IpaDownloadTool")
 }
 
 struct AVXScanStats: Decodable {
@@ -198,6 +199,7 @@ enum LocalBinaryScanner {
         guard let url = await resolveURL(ipaURL: ipaURL, localPath: localPath),
               let archive = Archive(url: url, accessMode: .read),
               let binary = mainBinaryData(from: archive) else { return nil }
+        let moduleName = mainBinaryName(from: archive)
         let thin = MachOTools.thinArm64(binary)
         let sections = MachOTools.sections(in: thin)
         let segments = MachOTools.segments(in: thin)
@@ -224,8 +226,12 @@ enum LocalBinaryScanner {
             }
             hits.append(AVXScanHit(id: id, address: va, string: s, category: c, score: score,
                 kind: k, section: section, bytes: nil, mnemonic: nil, operands: nil, xref: nil,
-                editable: editable, editReason: why))
-            switch c { case "premium": premium += 1; case "settings": settings += 1; default: other += 1 }
+                editable: editable, editReason: why, module: moduleName))
+            switch c {
+            case "premium": premium += 1
+            case "settings", "login", "url", "analytics": settings += 1
+            default: other += 1
+            }
             breakdown[k, default: 0] += 1
         }
 
@@ -458,9 +464,14 @@ enum LocalBinaryScanner {
         "in-app","in app","iap","restore","free trial","trial","lifetime","membership",
         "pro version","full version","unlimited","activate","license","entitlement","billing",
         "checkout"," plan","upgrade to","pricing","price","paid","buy "]
-    private static let settings = ["setting","preference","account","profile","config","sign in",
-        "signin","log in","login","logout","register","general","option","about","privacy",
-        "notification","appearance","language","theme","feedback","support"]
+    private static let login = ["sign in","signin","log in","login","logout","sign up","signup",
+        "register","password","credential","oauth","auth token","authenticate","session","account"]
+    private static let urlapi = ["http://","https://","api.","/api/","endpoint",".json","graphql",
+        "www.",".com/",".net/",".io/","bearer ","authorization","x-api","apikey","api_key","host="]
+    private static let analytics = ["analytics","telemetry","tracking","mixpanel","firebase","crashlytics",
+        "amplitude","segment","adjust","appsflyer","sentry","datadog","ga_","gtag","event_name","log_event"]
+    private static let settings = ["setting","preference","profile","config","general","option","about",
+        "privacy","notification","appearance","language","theme","feedback","support"]
     private static let watermark = ["cracked","signed by","crack by"," by @","t.me/","discord.gg",
         "telegram","appdb","scarlet","esign","leaked","@mrzefv","mrzefv","delvek"]
 
@@ -468,9 +479,12 @@ enum LocalBinaryScanner {
     static func categorize(_ s: String) -> (String, Int)? {
         guard s.count >= 4, s.count <= 256, s.rangeOfCharacter(from: .letters) != nil else { return nil }
         let l = s.lowercased()
-        if let k = premium.first(where: l.contains)  { return ("premium",  min(40 + k.count, 100)) }
-        if watermark.contains(where: l.contains)     { return ("other",    90) }   // surfaced by WATERMARK filter
-        if let k = settings.first(where: l.contains) { return ("settings", min(30 + k.count, 100)) }
+        if let k = premium.first(where: l.contains)   { return ("premium",   min(40 + k.count, 100)) }
+        if let k = urlapi.first(where: l.contains)    { return ("url",       min(45 + k.count, 100)) }
+        if let k = login.first(where: l.contains)     { return ("login",     min(38 + k.count, 100)) }
+        if let k = analytics.first(where: l.contains) { return ("analytics", min(35 + k.count, 100)) }
+        if watermark.contains(where: l.contains)      { return ("other",     90) }
+        if let k = settings.first(where: l.contains)  { return ("settings",  min(30 + k.count, 100)) }
         return nil
     }
 
@@ -530,6 +544,19 @@ enum LocalBinaryScanner {
     }
 
     /// Extract the app's main Mach-O from an already-open archive.
+    private static func mainBinaryName(from archive: Archive) -> String? {
+        for entry in archive {
+            let lower = entry.path.lowercased()
+            guard lower.hasPrefix("payload/"), lower.hasSuffix(".app/info.plist") else { continue }
+            var pdata = Data()
+            guard (try? archive.extract(entry, consumer: { pdata.append($0) })) != nil,
+                  let plist = (try? PropertyListSerialization.propertyList(from: pdata, options: [], format: nil)) as? [String: Any],
+                  let exec = plist["CFBundleExecutable"] as? String, !exec.isEmpty else { return nil }
+            return exec
+        }
+        return nil
+    }
+
     private static func mainBinaryData(from archive: Archive) -> Data? {
         for entry in archive {
             let lower = entry.path.lowercased()

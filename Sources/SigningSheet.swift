@@ -1178,13 +1178,20 @@ struct DeveloperToolSheet: View {
     @State private var editHit: AVXScanHit?
     @State private var disasm: [DecodedInsn] = []
     @State private var disasmVA = ""
+    @State private var catFilter = "all"
 
     private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
 
     private var filtered: [AVXScanHit] {
+        var out = hits
+        if catFilter != "all" { out = out.filter { catOf($0) == catFilter } }
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return hits }
-        return hits.filter { $0.string.localizedCaseInsensitiveContains(q) || $0.address.localizedCaseInsensitiveContains(q) }
+        if !q.isEmpty { out = out.filter { $0.string.localizedCaseInsensitiveContains(q) || $0.address.localizedCaseInsensitiveContains(q) } }
+        return out
+    }
+    /// Map raw scanner category → chip bucket.
+    private func catOf(_ h: AVXScanHit) -> String {
+        switch h.category { case "premium": return "paywall"; default: return h.category }
     }
 
     var body: some View {
@@ -1199,6 +1206,7 @@ struct DeveloperToolSheet: View {
             }
             .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .modifier(StringSearchable(mode: mode, text: $query))
         }
         .preferredColorScheme(.dark)
         .task { await runScan() }
@@ -1225,40 +1233,64 @@ struct DeveloperToolSheet: View {
     // MARK: Strings
 
     private var stringsView: some View {
-        List {
-            Section {
-                TextField("Search strings", text: $query)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-            }.listRowBackground(Color(white: 0.08))
+        VStack(spacing: 0) {
+            // Category chips
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(categories, id: \.0) { key, label in
+                        Button { catFilter = key } label: {
+                            Text(label).font(.system(size: 14, weight: .semibold))
+                                .padding(.horizontal, 14).padding(.vertical, 7)
+                                .background(catFilter == key ? Color(red: 0.2, green: 0.85, blue: 0.5) : Color(red: 0.2, green: 0.85, blue: 0.5).opacity(0.14))
+                                .foregroundStyle(catFilter == key ? .black : Color(red: 0.2, green: 0.85, blue: 0.5))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+            }
+            Divider().overlay(Color.white.opacity(0.08))
 
-            if loading {
-                Section { HStack { Spacer(); ProgressView().tint(blue); Spacer() } }.listRowBackground(Color.clear)
-            } else if filtered.isEmpty {
-                Section { Text(hits.isEmpty ? "No editable strings found." : "No matches.").foregroundStyle(Theme.subtle) }
-                    .listRowBackground(Color(white: 0.08))
-            } else {
-                Section("\(filtered.count) strings · \(patches.count) pending patch\(patches.count == 1 ? "" : "es")") {
+            List {
+                if loading {
+                    Section { HStack { Spacer(); ProgressView().tint(blue); Spacer() } }.listRowBackground(Color.clear)
+                } else if filtered.isEmpty {
+                    Section { Text(hits.isEmpty ? "No editable strings found." : "No matches.").foregroundStyle(Theme.subtle) }
+                        .listRowBackground(Color.clear)
+                } else {
                     ForEach(filtered) { hit in
                         Button { if hit.editable == "yes" { editHit = hit } } label: {
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack {
-                                    Text(hit.address).font(.system(size: 11, design: .monospaced)).foregroundStyle(blue)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(hit.string).font(.system(size: 15)).foregroundStyle(Theme.text).lineLimit(2)
+                                HStack(spacing: 8) {
+                                    Text(hit.module ?? "—").font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(Color(red: 0.2, green: 0.85, blue: 0.5))
+                                    if let k = hit.kind, k.contains("string") || k == "cfstring" || k == "ustring" {
+                                        Text("NSString").font(.system(size: 12, weight: .semibold)).foregroundStyle(blue)
+                                    }
                                     Spacer()
-                                    editBadge(hit.editable)
+                                    Text("\(hit.string.utf8.count)b").font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.subtle)
                                 }
-                                Text(hit.string).font(.system(size: 14)).foregroundStyle(Theme.text).lineLimit(3)
                                 if patches.contains(where: { $0.fileOffset == hitOffset(hit) }) {
                                     Text("→ patched (applies at sign)").font(.system(size: 11)).foregroundStyle(.green)
                                 }
                             }
+                            .padding(.vertical, 4)
                         }
                         .buttonStyle(.plain)
-                        .listRowBackground(Color(white: 0.08))
+                        .listRowBackground(Color.black)
+                        .listRowSeparatorTint(Color.white.opacity(0.06))
                     }
                 }
             }
+            .listStyle(.plain).scrollContentBackground(.hidden).background(Color.black)
         }
-        .scrollContentBackground(.hidden).background(Color.black)
+        .background(Color.black)
+    }
+
+    private var categories: [(String, String)] {
+        [("all", "All"), ("paywall", "Paywall"), ("login", "Login"), ("url", "URL/API"), ("analytics", "Analytics"), ("settings", "Settings")]
     }
 
     private func editBadge(_ e: String?) -> some View {
@@ -1382,6 +1414,16 @@ struct DeveloperToolSheet: View {
         let p = BinaryPatch(label: "\(ret ? "RET" : "NOP") @ \(disasmVA)", fileOffset: off, bytes: bytes, original: orig)
         patches.removeAll { $0.fileOffset == off }
         patches.append(p)
+    }
+}
+
+/// Adds a search bar to the Strings tool only.
+private struct StringSearchable: ViewModifier {
+    let mode: DeveloperToolSheet.Mode
+    @Binding var text: String
+    func body(content: Content) -> some View {
+        if mode == .strings { content.searchable(text: $text, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search strings") }
+        else { content }
     }
 }
 

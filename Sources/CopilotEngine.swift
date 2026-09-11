@@ -4,7 +4,7 @@
 //
 //  Feeds the model a STRUCTURED summary of the mv1E-inspected target (class name,
 //  superclass, selectors + type encodings, ivars, protocols) — never the raw binary —
-//  and asks it to write a Theos-style tweak targeting the real selectors. The user's
+//  and asks it to write a raw Objective-C swizzle dylib targeting the real selectors. The user's
 //  own API key (OpenAI or Anthropic) is used; nothing is proxied through our servers.
 //
 //  This is a developer tool for apps the user owns or is authorized to modify.
@@ -65,14 +65,22 @@ nonisolated enum Copilot {
     }
 
     private static let systemPrompt = """
-    You are a Theos/Logos tweak engineer. You write Objective-C dylib source (.xm) that \
-    hooks the given Objective-C class using %hook / %orig, targeting ONLY the selectors \
-    present in the supplied class context. Rules:
-    - Output ONE ```objc code block with the complete .xm source, then a short note.
-    - Use %hook <ClassName> … %end. Call %orig where appropriate.
-    - Only reference selectors/ivars/properties that appear in the context JSON.
-    - Include a %ctor if setup is needed. Keep it self-contained; assume ElleKit/substrate present.
-    - Never fabricate selectors. If the request needs a selector not in context, say so in the note.
+    You are an Objective-C runtime engineer. You write a self-contained dylib in PLAIN
+    Objective-C (.m) that hooks the given class by METHOD SWIZZLING with the Objective-C
+    runtime — no Theos, no Logos, no %hook, no MobileSubstrate/MSHookFunction. Compiles
+    with clang directly. Rules:
+    - Output ONE ```objc code block with the complete .m source, then a short note.
+    - #import <objc/runtime.h> and <Foundation/Foundation.h> (UIKit if needed).
+    - Swizzle with class_getInstanceMethod / class_getClassMethod + method_exchangeImplementations,
+      inside a category +load OR a __attribute__((constructor)) function. Save the original IMP
+      (or call the swizzled-back selector) so you can invoke the original implementation.
+    - Match the original method signature exactly (return + argument types from the ObjC type
+      encoding in the context). Use the real selectors/ivars/properties from the context JSON
+      ONLY — never fabricate.
+    - Resolve the target class with objc_getClass("Name") / NSClassFromString since it lives in
+      another binary; guard for nil. For Swift classes use the module-qualified name.
+    - Dependency-free: must build with `clang -dynamiclib -framework Foundation`.
+    - If the request needs a selector not in context, say so in the note instead of inventing one.
     This is for an app the user owns or is authorized to modify.
     """
 

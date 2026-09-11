@@ -59,7 +59,7 @@ struct CopilotView: View {
                     Section("Notes") { Text(note).font(.caption).foregroundStyle(Theme.subtle) }
                         .listRowBackground(Color(white: 0.08))
                 }
-                Section("Source (.xm)") {
+                Section("Source (.m)") {
                     ScrollView(.horizontal, showsIndicators: false) {
                         Text(source).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.text)
                             .textSelection(.enabled).padding(.vertical, 4)
@@ -68,7 +68,7 @@ struct CopilotView: View {
 
                 Section("Use it") {
                     Button { UIPasteboard.general.string = source } label: { Label("Copy source", systemImage: "doc.on.doc") }
-                    Button { saveSource() } label: { Label("Download source (.xm)", systemImage: "square.and.arrow.down") }
+                    Button { saveSource() } label: { Label("Download source (.m)", systemImage: "square.and.arrow.down") }
                     Button { Task { await buildViaActions() } } label: { Label("Compile to .dylib on GitHub Actions", systemImage: "hammer") }
                     Text("Compiling needs clang + the iOS SDK, which runs on GitHub Actions — not on-device. The built .dylib returns as an artifact, then stages for injection.")
                         .font(.caption2).foregroundStyle(Theme.subtle)
@@ -91,14 +91,14 @@ struct CopilotView: View {
     }
 
     private func saveSource() {
-        let name = "\(cls.name)Tweak.xm"
+        let name = "\(cls.name)Tweak.m"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         try? source.data(using: .utf8)?.write(to: url)
         savedURL = url; showShare = true
     }
 
     private func buildViaActions() async {
-        // Push the .xm to the repo's tweak workflow and dispatch it. The workflow
+        // Push the .m to the repo and dispatch the clang-swizzle build workflow.
         // compiles with Theos and uploads the .dylib artifact; the Build tab tracks it.
         error = nil
         do {

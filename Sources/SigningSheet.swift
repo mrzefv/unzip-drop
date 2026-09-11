@@ -1701,9 +1701,9 @@ struct DeveloperToolSheet: View {
 
     private func injectLive() async {
         liveBuilding = true; liveMsg = nil
-        guard let url = Bundle.main.url(forResource: "MV1ELive", withExtension: "xm"),
+        guard let url = Bundle.main.url(forResource: "MV1ELive", withExtension: "m"),
               let src = try? String(contentsOf: url) else {
-            liveMsg = "MV1ELive.xm not bundled in the app."; liveBuilding = false; return
+            liveMsg = "MV1ELive.m not bundled in the app."; liveBuilding = false; return
         }
         do {
             let d = UserDefaults.standard

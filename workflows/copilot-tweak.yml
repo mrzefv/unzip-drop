@@ -1,14 +1,15 @@
 # .github/workflows/copilot-tweak.yml
-# Compiles a Copilot-generated .xm (in copilot-tweaks/) into an iOS arm64 .dylib
-# with Theos, and uploads it as an artifact the app downloads + injects.
+# Compiles a Copilot-generated raw Objective-C swizzle source (copilot-tweaks/*.m)
+# into an iOS arm64 .dylib with plain clang + the iOS SDK — no Theos, no Logos.
+# The .dylib is uploaded as an artifact the app downloads, injects, and signs.
 name: copilot-tweak
 on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Path to the .xm inside the repo (e.g. copilot-tweaks/FooTweak.xm)"
+        description: "Path to the .m inside the repo (e.g. copilot-tweaks/FooTweak.m)"
         required: true
-        default: "copilot-tweaks/Tweak.xm"
+        default: "copilot-tweaks/Tweak.m"
 
 jobs:
   build:
@@ -16,45 +17,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Theos
-        run: |
-          export THEOS=$HOME/theos
-          git clone --recursive https://github.com/theos/theos.git $THEOS
-          # iOS SDK for on-runner compilation
-          curl -L https://github.com/theos/sdks/archive/master.zip -o sdks.zip
-          unzip -q sdks.zip
-          mv sdks-master/*.sdk $THEOS/sdks/ || true
-          echo "THEOS=$THEOS" >> $GITHUB_ENV
-
-      - name: Stage tweak project
+      - name: Compile with clang → arm64 .dylib
         run: |
           SRC="${{ github.event.inputs.source }}"
-          NAME=$(basename "$SRC" .xm)
-          mkdir -p build/$NAME
-          cp "$SRC" build/$NAME/Tweak.xm
-          cat > build/$NAME/Makefile <<EOF
-          TARGET := iphone:clang:latest:12.0
-          ARCHS = arm64
-          include \$(THEOS)/makefiles/common.mk
-          TWEAK_NAME = $NAME
-          ${NAME}_FILES = Tweak.xm
-          ${NAME}_CFLAGS = -fobjc-arc
-          include \$(THEOS)/makefiles/tweak.mk
-          EOF
-          # No control/plist needed — we only want the .dylib.
-
-      - name: Build
-        run: |
-          export THEOS=$HOME/theos
-          SRC="${{ github.event.inputs.source }}"; NAME=$(basename "$SRC" .xm)
-          cd build/$NAME
-          make
-          # Theos emits .theos/obj/<NAME>.dylib
-          find .theos -name '*.dylib' -exec cp {} ../../$NAME.dylib \;
+          NAME=$(basename "$SRC" .m)
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          mkdir -p out
+          # Objective-C runtime swizzle: link Foundation (+ UIKit, harmless if unused).
+          xcrun --sdk iphoneos clang \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=12.0 \
+            -dynamiclib \
+            -fobjc-arc \
+            -framework Foundation \
+            -framework UIKit \
+            -o "out/$NAME.dylib" \
+            "$SRC"
+          # ad-hoc codesign so it loads under a signed app after re-sign
+          codesign -f -s - "out/$NAME.dylib" || true
+          otool -L "out/$NAME.dylib" || true
 
       - name: Upload dylib
         uses: actions/upload-artifact@v4
         with:
           name: copilot-dylib
-          path: "*.dylib"
+          path: "out/*.dylib"
           if-no-files-found: error

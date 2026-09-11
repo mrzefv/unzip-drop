@@ -26,7 +26,7 @@ nonisolated enum CopilotBuild {
         guard !owner.isEmpty, !repo.isEmpty, !token.isEmpty else { throw BuildError.noConfig }
 
         let gh = GitHubClient(owner: owner, repo: repo, branch: branch, token: token)
-        let file = "\(className)Tweak.xm"
+        let file = "\(className)Tweak.m"
         _ = try await gh.push(
             files: [(path: file, data: Data(source.utf8))],
             subpath: "copilot-tweaks",

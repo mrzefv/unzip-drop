@@ -99,7 +99,7 @@ struct SignedView: View {
         MSignRow(
             icon: e.iconURL.flatMap { try? Data(contentsOf: $0) },
             title: e.name,
-            subtitle: "\(e.version) · \(e.bundleID)",
+            subtitle: "\(e.version) • \(e.bundleID)",
             badge: signedBadge(e),
             busy: installing == e.id,
             accent: Theme.accent,
@@ -109,9 +109,8 @@ struct SignedView: View {
     }
 
     private func signedBadge(_ e: SignedEntry) -> String {
-        let rel = e.signedAt.formatted(.relative(presentation: .named))
         let installs = installCounts[e.bundleID].map { " · \($0) install\($0 == 1 ? "" : "s")" } ?? ""
-        return "Signed \(rel)\(installs)"
+        return "Signed \(msignRelative(e.signedAt))\(installs)"
     }
 
     private func install(_ e: SignedEntry) async {

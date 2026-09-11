@@ -53,8 +53,9 @@ struct TabTitleBar<Trailing: View>: View {
 struct MSignRow: View {
     let icon: Data?
     let title: String
-    let subtitle: String        // "1.0 · com.mrzefv.unzipdrop"
-    let badge: String           // "Signed 2d ago" / "Downloaded"
+    let subtitle: String        // "1.0 • com.mrzefv.unzipdrop"
+    let badge: String           // "Signed 2h ago" / "Downloaded"
+    var badgeAccented: Bool = false      // tinted pill (mSign uses it for TrollStore)
     var busy: Bool = false
     var accent: Color = Color(red: 0.25, green: 0.55, blue: 1.0)
     let onAction: () -> Void
@@ -63,27 +64,41 @@ struct MSignRow: View {
     var body: some View {
         HStack(spacing: 14) {
             MSignIcon(data: icon)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.system(size: 21, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
-                Text(subtitle).font(.system(size: 15, design: .monospaced)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
-                Text(badge).font(.system(size: 12))
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(Color.white.opacity(0.06)).foregroundStyle(Theme.subtle).clipShape(Capsule())
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
+                Text(subtitle).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
+                Text(badge).font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(badgeAccented ? accent : Theme.subtle)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(badgeAccented ? accent.opacity(0.14) : Color.white.opacity(0.06))
+                    .overlay(Capsule().stroke(badgeAccented ? accent.opacity(0.32) : .clear, lineWidth: 1))
+                    .clipShape(Capsule())
             }
             Spacer(minLength: 8)
             if busy { ProgressView().tint(accent) }
             else {
                 Button(action: onAction) {
-                    Image(systemName: "arrow.up.forward").font(.system(size: 20, weight: .semibold)).foregroundStyle(accent)
+                    Image(systemName: "arrow.up.right").font(.system(size: 15, weight: .semibold)).foregroundStyle(accent.opacity(0.95))
                         .frame(width: 40, height: 40).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, 14).padding(.horizontal, 4)
+        .padding(.vertical, 12).padding(.horizontal, 4)
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
     }
+}
+
+/// mSign's relative wording: "Just now" · "5m ago" · "2h ago" · "3d ago" · short date.
+func msignRelative(_ date: Date) -> String {
+    let diff = Int(Date().timeIntervalSince(date))
+    if diff < 60 { return "Just now" }
+    if diff < 3600 { return "\(diff / 60)m ago" }
+    if diff < 86400 { return "\(diff / 3600)h ago" }
+    if diff < 604800 { return "\(diff / 86400)d ago" }
+    let f = DateFormatter(); f.dateStyle = .short; f.timeStyle = .none
+    return f.string(from: date)
 }
 
 struct MSignIcon: View {

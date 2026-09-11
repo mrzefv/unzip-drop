@@ -42,7 +42,7 @@ struct LibraryView: View {
                             MSignRow(
                                 icon: it.icon,
                                 title: it.name,
-                                subtitle: "\(it.version) · \(it.bundle)",
+                                subtitle: "\(it.version) • \(it.bundle)",
                                 badge: "Downloaded",
                                 busy: installing == it.id,
                                 onAction: { sheetItem = it },

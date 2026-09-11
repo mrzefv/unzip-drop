@@ -19,6 +19,8 @@ struct SigningSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var certs = CertificateStore.shared
+    @ObservedObject private var staff = StaffGate.shared
+    @ObservedObject private var staff = StaffGate.shared
     @ObservedObject private var ota = OTAInstaller.shared
 
     // identity
@@ -111,7 +113,7 @@ struct SigningSheet: View {
                     identity                 // App metadata: name / bundle / version
                     buildOptions             // 4 collapsible categories
                     bundleInfoCard           // Entitlements · Info.plist (view)
-                    developerCard            // Search/edit strings · patching · Mach-O
+                    if staff.isStaff { developerCard }   // dev + ADV tools: staff/admin only
                     dylibInjection
                     changesSummary
                     if let error { Text(error).font(.caption).foregroundStyle(.orange).padding(.horizontal, 3) }
@@ -156,6 +158,7 @@ struct SigningSheet: View {
             }
         }
         .task {
+            await StaffGate.shared.refresh()
             machoDylibs = await currentDylibs()
             await analyzeBinary()
             developerStrings = await loadDeveloperStrings()

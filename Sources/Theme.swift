@@ -12,7 +12,7 @@ enum Theme {
     static let subtle  = Color(red: 0.55, green: 0.60, blue: 0.63)
     static let accent  = Color(red: 0.18, green: 0.85, blue: 0.76)
 
-    static let appName    = "Unzip Drop"
+    static let appName    = "mSign"
     static let appVersion = "1.0"
     static let owner      = "MRzefv · mrzefv.com"
 }

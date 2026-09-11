@@ -1,0 +1,46 @@
+# .github/workflows/copilot-tweak.yml
+# Compiles a Copilot-generated raw Objective-C swizzle source (copilot-tweaks/*.m)
+# into an iOS arm64 .dylib with plain clang + the iOS SDK — no Theos, no Logos.
+# The .dylib is uploaded as an artifact the app downloads, injects, and signs.
+name: copilot-tweak
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Path to the .m inside the repo (e.g. copilot-tweaks/FooTweak.m)"
+        required: true
+        default: "copilot-tweaks/Tweak.m"
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile with clang → arm64 .dylib
+        run: |
+          SRC="${{ github.event.inputs.source }}"
+          NAME=$(basename "$SRC" .m)
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          mkdir -p out
+          # Objective-C runtime swizzle: link Foundation (+ UIKit, harmless if unused).
+          xcrun --sdk iphoneos clang \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=12.0 \
+            -dynamiclib \
+            -fobjc-arc \
+            -framework Foundation \
+            -framework UIKit \
+            -o "out/$NAME.dylib" \
+            "$SRC"
+          # ad-hoc codesign so it loads under a signed app after re-sign
+          codesign -f -s - "out/$NAME.dylib" || true
+          otool -L "out/$NAME.dylib" || true
+
+      - name: Upload dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-dylib
+          path: "out/*.dylib"
+          if-no-files-found: error

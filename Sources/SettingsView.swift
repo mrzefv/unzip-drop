@@ -30,6 +30,7 @@ struct SettingsView: View {
     @EnvironmentObject var config: Config
     @EnvironmentObject var session: Session
     @ObservedObject private var certs = CertificateStore.shared
+    @ObservedObject private var staff = StaffGate.shared
     @State private var screen: Screen?
 
     var body: some View {
@@ -63,15 +64,17 @@ struct SettingsView: View {
                             SettingsRow(icon: "key.fill",
                                         title: "Access token",
                                         subtitle: config.hasToken ? "GitHub PAT stored in Keychain" : "No token set") { screen = .token }
-                            SettingsRow(icon: "lock.doc.fill",
-                                        title: "Recover hidden data",
-                                        subtitle: "Decrypt an Mcrypted payload from any signed IPA") { screen = .recoverData }
-                            SettingsRow(icon: "sparkles",
-                                        title: "Copilot",
-                                        subtitle: Copilot.hasKey ? "\(Copilot.provider.label) key set" : "Add API key for AI dylib authoring") { screen = .copilot }
-                            SettingsRow(icon: "cube.transparent",
-                                        title: "mv1E Live (3D view debugger)",
-                                        subtitle: "Render a live UIView hierarchy captured from an injected app") { screen = .live3d }
+                            if staff.isStaff {
+                                SettingsRow(icon: "lock.doc.fill",
+                                            title: "Recover hidden data",
+                                            subtitle: "Decrypt an Mcrypted payload from any signed IPA") { screen = .recoverData }
+                                SettingsRow(icon: "sparkles",
+                                            title: "Copilot",
+                                            subtitle: Copilot.hasKey ? "\(Copilot.provider.label) key set" : "Add API key for AI dylib authoring") { screen = .copilot }
+                                SettingsRow(icon: "cube.transparent",
+                                            title: "mv1E Live (3D view debugger)",
+                                            subtitle: "Render a live UIView hierarchy captured from an injected app") { screen = .live3d }
+                            }
                         }
 
                         SettingsSection("Signing") {
@@ -108,6 +111,14 @@ struct SettingsView: View {
                                          url: URL(string: "https://github.com/mrzefv")!)
                         }
 
+                        SettingsSection(staff.isStaff ? "Staff (\(staff.role.title))" : "Access") {
+                            SettingsRow(icon: staff.isStaff ? "checkmark.shield.fill" : "lock.fill",
+                                        title: staff.isStaff ? "Staff tools unlocked" : "Standard access",
+                                        subtitle: "Your MDID: \(staff.mdid)") {
+                                UIPasteboard.general.string = staff.mdid
+                            }
+                        }
+
                         StatusFooter()
                             .padding(.top, 26)
                     }
@@ -120,6 +131,7 @@ struct SettingsView: View {
                     Text("\(Theme.appName.uppercased()) \(Theme.appVersion)").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
                 }
             }
+            .task { await StaffGate.shared.refresh() }
         }
         .fullScreenCover(item: $screen) { s in
             Group {
@@ -304,7 +316,7 @@ private struct DetailScreen<Content: View>: View {
             ZStack {
                 HStack(spacing: 8) {
                     Image(systemName: "archivebox.fill").foregroundStyle(Theme.accent)
-                    Text("UNZIP DROP")
+                    Text("MSIGN")
                         .font(.system(size: 15, weight: .heavy, design: .rounded))
                         .kerning(1).foregroundStyle(Theme.text)
                     Spacer()
@@ -858,7 +870,7 @@ struct OTADomainScreen: View {
                 }
 
                 Section {
-                    TNav(icon: "folder", title: "Exported files", subtitle: st.files.isEmpty ? "Nothing exported yet" : "\(st.files.count) file\(st.files.count == 1 ? "" : "s") · Files › On My iPhone › unzip-drop › OTA Certs") { OTAFilesScreen(st: st) }
+                    TNav(icon: "folder", title: "Exported files", subtitle: st.files.isEmpty ? "Nothing exported yet" : "\(st.files.count) file\(st.files.count == 1 ? "" : "s") · Files › On My iPhone › mSign › OTA Certs") { OTAFilesScreen(st: st) }
                 } footer: {
                     Text("Certs, chains and the trust profile are copied into a folder the Files app can see whenever you issue or install. Private keys never leave the Keychain.").foregroundStyle(Theme.subtle)
                 }
@@ -1056,7 +1068,7 @@ private struct OTAFilesScreen: View {
     var body: some View {
         TableScreen(title: "Exported files") {
             Section {
-                TRow(k: "Folder", v: "Files › On My iPhone › unzip-drop › OTA Certs")
+                TRow(k: "Folder", v: "Files › On My iPhone › mSign › OTA Certs")
                 if let u = OTAFiles.filesAppURL {
                     TButton(title: "Open in Files", icon: "folder") { openURL(u) }
                 }

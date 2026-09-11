@@ -46,5 +46,20 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>CFBundleDisplayName</key>
+	<string>mSign</string>
+	<key>CFBundleName</key>
+	<string>mSign</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>ms.msign.party</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>msign</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

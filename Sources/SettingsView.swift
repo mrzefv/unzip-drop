@@ -14,13 +14,13 @@ import UniformTypeIdentifiers
 private enum Screen: Identifiable, Hashable {
     case about, repo, token
     case dylibTemplate, ipaTemplate
-    case certificates, otaDomain, certInspector, transparency
+    case certificates, otaDomain, certInspector, transparency, recoverData
     case tutorials
     var id: String {
         switch self {
         case .about: return "about"; case .repo: return "repo"; case .token: return "token"
         case .dylibTemplate: return "tpl-dylib"; case .ipaTemplate: return "tpl-ipa"
-        case .certificates: return "certs"; case .otaDomain: return "ota"; case .certInspector: return "inspect"; case .transparency: return "transparency"
+        case .certificates: return "certs"; case .otaDomain: return "ota"; case .certInspector: return "inspect"; case .transparency: return "transparency"; case .recoverData: return "recover"
         case .tutorials: return "tutorials"
         }
     }
@@ -63,6 +63,9 @@ struct SettingsView: View {
                             SettingsRow(icon: "key.fill",
                                         title: "Access token",
                                         subtitle: config.hasToken ? "GitHub PAT stored in Keychain" : "No token set") { screen = .token }
+                            SettingsRow(icon: "lock.doc.fill",
+                                        title: "Recover hidden data",
+                                        subtitle: "Decrypt an Mcrypted payload from any signed IPA") { screen = .recoverData }
                         }
 
                         SettingsSection("Signing") {
@@ -122,6 +125,7 @@ struct SettingsView: View {
                 case .otaDomain:     OTADomainScreen()
                 case .certInspector: CertInspectorScreen()
                 case .transparency:  TransparencyScreen()
+                case .recoverData:   McryptedRecoverView()
                 case .dylibTemplate: DylibTemplateScreen()
                 case .ipaTemplate:   IPATemplateScreen()
                 case .tutorials: TutorialsListScreen()

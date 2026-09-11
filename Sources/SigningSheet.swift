@@ -1461,6 +1461,9 @@ struct DeveloperToolSheet: View {
                     .font(.caption).foregroundStyle(Theme.subtle)
                 Button { Task { await extractPayload() } } label: { Label("Extract hidden payload", systemImage: "lock.open.fill") }
                     .disabled(injectEntropy == nil)
+                NavigationLink { McryptedRecoverView(embeddedInSheet: true) } label: {
+                    Label("Recover from another IPA…", systemImage: "app.badge")
+                }
                 if let extracted {
                     HStack {
                         Label("\(extracted.name) · \(ByteCountFormatter.string(fromByteCount: Int64(extracted.data.count), countStyle: .file))", systemImage: "doc.fill")

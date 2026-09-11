@@ -275,6 +275,7 @@ private struct StatusFooter: View {
     @ObservedObject private var staff = StaffGate.shared
     @State private var checking = false
     @State private var didCopyMDID = false
+    @State private var mdidResetWorkItem: DispatchWorkItem?
 
     private var footerIdentity: (roleLabel: String, roleColor: Color, accountURL: URL, accountLabel: String, accountIcon: String) {
         if staff.isStaff {
@@ -344,6 +345,13 @@ private struct StatusFooter: View {
                     UIPasteboard.general.string = staff.mdid
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     didCopyMDID = true
+                    mdidResetWorkItem?.cancel()
+                    let workItem = DispatchWorkItem {
+                        didCopyMDID = false
+                        mdidResetWorkItem = nil
+                    }
+                    mdidResetWorkItem = workItem
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: workItem)
                 } label: {
                     (Text("MDID: ")
                         .font(.system(size: 14, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
@@ -360,6 +368,10 @@ private struct StatusFooter: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .onDisappear {
+            mdidResetWorkItem?.cancel()
+            mdidResetWorkItem = nil
+        }
     }
 }
 

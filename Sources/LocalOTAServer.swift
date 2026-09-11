@@ -887,3 +887,83 @@ nonisolated final class LocalOTAServer: Identifiable, @unchecked Sendable {
         app.shutdown()
     }
 }
+
+
+// MARK: - VPS status + install analytics (api.zefv.dev/ota/status.php · event.php)
+
+nonisolated enum ZefvVPS {
+    /// Derived from the cert source URL so a custom source moves everything together.
+    private static func endpoint(_ file: String) -> URL? {
+        guard let base = URL(string: ServerConfig.certSourceURL) else { return nil }
+        return base.deletingLastPathComponent().appendingPathComponent(file)
+    }
+    private static func request(_ url: URL, method: String = "GET", body: Data? = nil) -> URLRequest {
+        var r = URLRequest(url: url); r.httpMethod = method; r.timeoutInterval = 15
+        r.cachePolicy = .reloadIgnoringLocalCacheData
+        r.setValue(ServerConfig.certSourceToken, forHTTPHeaderField: "X-OTA-Token")
+        r.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+        if let body { r.httpBody = body; r.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        return r
+    }
+
+    // Status ----------------------------------------------------------------
+
+    struct LastRenew: Decodable, Sendable { let ok: Bool?; let at: String?; let source: String? }
+    struct Status: Decodable, Sendable {
+        let server_time: String?
+        let not_after: String?
+        let days_left: Int?
+        let issuer: String?
+        let sans: [String]?
+        let cert_mtime: String?
+        let last_renew: LastRenew?
+        let error: String?
+
+        var notAfter: Date? { not_after.flatMap { ISO8601DateFormatter().date(from: $0) } }
+        var renewedAt: Date? {
+            guard let a = last_renew?.at else { return nil }
+            if let d = ISO8601DateFormatter().date(from: a) { return d }
+            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"; f.timeZone = TimeZone(identifier: "UTC")
+            return f.date(from: a)
+        }
+    }
+
+    static func status() async throws -> Status {
+        guard let u = endpoint("status.php") else { throw ZefvCert.CertError.badPack("bad cert source URL") }
+        let (d, r) = try await URLSession.shared.data(for: request(u))
+        let code = (r as? HTTPURLResponse)?.statusCode ?? 0
+        guard code < 400 else { throw ZefvCert.CertError.badPack("\(u.host ?? "VPS") status → HTTP \(code)") }
+        return try JSONDecoder().decode(Status.self, from: d)
+    }
+
+    // Analytics ---------------------------------------------------------------
+
+    static var analyticsEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: "uzd_analytics") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "uzd_analytics") }
+    }
+    /// Anonymous per-install id — not tied to the device or any account.
+    static var deviceToken: String {
+        if let t = UserDefaults.standard.string(forKey: "uzd_analytics_id") { return t }
+        let t = UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "").prefix(16).description
+        UserDefaults.standard.set(t, forKey: "uzd_analytics_id"); return t
+    }
+
+    /// Fire-and-forget. `stage`: "prompted" (itms-services handed to iOS) or "installed" (installd fetched the IPA).
+    static func report(bundle: String, version: String, name: String, stage: String) {
+        guard analyticsEnabled, let u = endpoint("event.php") else { return }
+        let body: [String: String] = ["bundle": bundle, "version": version, "name": name,
+                                      "mode": ServerConfig.certMode, "stage": stage, "device": deviceToken]
+        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
+        Task.detached { _ = try? await URLSession.shared.data(for: request(u, method: "POST", body: data)) }
+    }
+
+    /// Install counts for every bundle the VPS has seen.
+    static func installCounts() async -> [String: Int] {
+        guard let u = endpoint("event.php") else { return [:] }
+        guard let (d, r) = try? await URLSession.shared.data(for: request(u)),
+              ((r as? HTTPURLResponse)?.statusCode ?? 0) < 400,
+              let dict = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return [:] }
+        return dict.compactMapValues { $0 as? Int }
+    }
+}

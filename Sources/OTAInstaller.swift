@@ -122,6 +122,7 @@ final class OTAInstaller: ObservableObject {
         lastReport = nil; tracing = true
         let opened = await UIApplication.shared.open(server.itmsServicesURL)
         guard opened else { tearDown(); tracing = false; throw InstallError.openFailed }
+        ZefvVPS.report(bundle: bundleID, version: version, name: name, stage: "prompted")
 
         let ipaSize = (try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int64) ?? 0
         let activeCertName = CertificateStore.shared.active?.name
@@ -134,6 +135,7 @@ final class OTAInstaller: ObservableObject {
             let t = OTATrace.shared
             self.lastReport = Report(requests: t.all, diagnosis: t.diagnosis(ipaSize: ipaSize), profileNote: profileNote)
             self.tracing = false
+            if t.ipaFetched { ZefvVPS.report(bundle: bundleID, version: version, name: name, stage: "installed") }
         }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 90 * 1_000_000_000)

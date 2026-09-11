@@ -342,6 +342,7 @@ private struct StatusFooter: View {
                 Button {
                     UIPasteboard.general.string = staff.mdid
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    UIAccessibility.post(notification: .announcement, argument: "MDID copied")
                 } label: {
                     (Text("MDID: ")
                         .font(.system(size: 14, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)

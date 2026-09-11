@@ -20,21 +20,19 @@ struct SignedView: View {
         return q.isEmpty ? signed.entries : signed.entries.filter { $0.name.lowercased().contains(q) || $0.bundleID.lowercased().contains(q) }
     }
 
+    @State private var installCounts: [String: Int] = [:]
+
     var body: some View {
         ZStack {
             Theme.bg.ignoresSafeArea()
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 12) {
+                LazyVStack(spacing: 0) {
                     if signed.entries.isEmpty {
                         Card { Text("Nothing signed yet. Library tab › pick an IPA › Sign.").font(.caption).foregroundStyle(Theme.subtle) }
                     } else {
-                        TextField("Search", text: $search)
-                            .autocorrectionDisabled().textInputAutocapitalization(.never)
-                            .padding(10).background(Theme.card).foregroundStyle(Theme.text)
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        MSignSearchField(placeholder: "Search", text: $search)
                     }
-                    if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) } }
+                    if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) }.padding(.bottom, 8) }
                     if ota.tracing {
                         Card { HStack(spacing: 10) { ProgressView().tint(Theme.accent); Text("Watching installd… report in ~25s.").font(.caption).foregroundStyle(Theme.subtle) } }
                     }
@@ -55,13 +53,22 @@ struct SignedView: View {
                             }
                         }
                     }
-                    ForEach(entries) { e in row(e) }
+                    ForEach(Array(entries.enumerated()), id: \.element.id) { idx, e in
+                        row(e)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) { signed.delete(e) } label: { Label("Delete", systemImage: "trash") }
+                            }
+                        if idx < entries.count - 1 {
+                            Divider().overlay(Theme.stroke).padding(.leading, 78)
+                        }
+                    }
                 }
-                .padding(16)
+                .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 20)
             }
+            .task { installCounts = await ZefvVPS.installCounts() }
             .safeAreaInset(edge: .top, spacing: 0) {
-                TabTitleBar(title: "Signed") {
-                    Text("\(signed.entries.count)").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
+                TabTitleBar(title: "Signed", center: "\(signed.entries.count) Apps") {
+                    EmptyView()
                 }
             }
         }
@@ -89,32 +96,22 @@ struct SignedView: View {
     }
 
     private func row(_ e: SignedEntry) -> some View {
-        HStack(spacing: 12) {
-            icon(e.iconURL.flatMap { try? Data(contentsOf: $0) })
-            VStack(alignment: .leading, spacing: 2) {
-                Text(e.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
-                Text("\(e.bundleID) · v\(e.version)\(e.sizeString.isEmpty ? "" : " · \(e.sizeString)")").font(.caption.monospaced()).foregroundStyle(Theme.subtle).lineLimit(1)
-                Text("\(e.certName) · \(e.signedAt.formatted(date: .abbreviated, time: .shortened))").font(.caption2).foregroundStyle(Theme.subtle)
-            }
-            Spacer()
-            if installing == e.id { ProgressView().tint(Theme.accent) }
-            else {
-                Image(systemName: "arrow.up.forward").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent)
-            }
-        }
-        .padding(12).background(Theme.card)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .contentShape(Rectangle())
-        .onTapGesture { sheetEntry = e }
+        MSignRow(
+            icon: e.iconURL.flatMap { try? Data(contentsOf: $0) },
+            title: e.name,
+            subtitle: "\(e.version) · \(e.bundleID)",
+            badge: signedBadge(e),
+            busy: installing == e.id,
+            accent: Theme.accent,
+            onAction: { sheetEntry = e },
+            onTap: { sheetEntry = e }
+        )
     }
 
-    private func icon(_ data: Data?) -> some View {
-        Group {
-            if let data, let img = UIImage(data: data) { Image(uiImage: img).resizable().scaledToFill() }
-            else { RoundedRectangle(cornerRadius: 9).fill(Theme.accent.opacity(0.15)).overlay(Image(systemName: "app.fill").foregroundStyle(Theme.accent)) }
-        }
-        .frame(width: 42, height: 42).clipShape(RoundedRectangle(cornerRadius: 9))
+    private func signedBadge(_ e: SignedEntry) -> String {
+        let rel = e.signedAt.formatted(.relative(presentation: .named))
+        let installs = installCounts[e.bundleID].map { " · \($0) install\($0 == 1 ? "" : "s")" } ?? ""
+        return "Signed \(rel)\(installs)"
     }
 
     private func install(_ e: SignedEntry) async {

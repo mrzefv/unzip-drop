@@ -1,24 +1,11 @@
 //
 //  LibraryView.swift
-//  Library tab — downloaded (from Browse) and imported .ipa files sitting in
-//  the inbox. Each row opens the same mSign-style bottom action sheet as the
-//  Signed tab: Install / Sign. Import adds an .ipa from Files.
+//  Library tab — imported/downloaded IPAs, mSign-style rows in floating glass chrome.
 //
 
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
-
-struct LibraryItem: Identifiable, Equatable {
-    let id: String            // file path
-    let url: URL
-    let name: String
-    let bundle: String
-    let version: String
-    let sizeBytes: Int64
-    let icon: Data?
-    var sizeString: String { sizeBytes > 0 ? ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file) : "" }
-}
 
 struct LibraryView: View {
     @ObservedObject private var ota = OTAInstaller.shared
@@ -30,7 +17,6 @@ struct LibraryView: View {
     @State private var error: String?
     @State private var sheetItem: LibraryItem?
 
-    private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
     private var inbox: URL { AppPaths.dir("inbox") }
 
     private var filtered: [LibraryItem] {
@@ -42,24 +28,36 @@ struct LibraryView: View {
         ZStack {
             Theme.bg.ignoresSafeArea()
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 12) {
+                LazyVStack(spacing: 0) {
                     if !items.isEmpty {
-                        TextField("Search", text: $search)
-                            .autocorrectionDisabled().textInputAutocapitalization(.never)
-                            .padding(10).background(Theme.card).foregroundStyle(Theme.text)
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        MSignSearchField(placeholder: "Search", text: $search).padding(.bottom, 8)
                     }
-                    if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) } }
+                    if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) }.padding(.bottom, 8) }
                     if loading {
-                        HStack { Spacer(); ProgressView().tint(Theme.accent); Spacer() }.padding(.top, 40)
+                        HStack { Spacer(); ProgressView().tint(Theme.accent); Spacer() }.padding(.top, 60)
                     } else if items.isEmpty {
                         Card { Text("No apps yet. Download one in Browse, or tap + to import an .ipa.").font(.caption).foregroundStyle(Theme.subtle) }
                     } else {
-                        ForEach(filtered) { row($0) }
+                        ForEach(Array(filtered.enumerated()), id: \.element.id) { idx, it in
+                            MSignRow(
+                                icon: it.icon,
+                                title: it.name,
+                                subtitle: "\(it.version) · \(it.bundle)",
+                                badge: "Downloaded",
+                                busy: installing == it.id,
+                                onAction: { sheetItem = it },
+                                onTap: { sheetItem = it }
+                            )
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) { delete(it) } label: { Label("Delete", systemImage: "trash") }
+                            }
+                            if idx < filtered.count - 1 {
+                                Divider().overlay(Theme.stroke).padding(.leading, 78)
+                            }
+                        }
                     }
                 }
-                .padding(16)
+                .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 20)
             }
             .safeAreaInset(edge: .top, spacing: 0) { header }
         }
@@ -76,7 +74,7 @@ struct LibraryView: View {
                     .init(title: "Install", icon: "square.and.arrow.down", role: .normal) {
                         sheetItem = nil; Task { await install(it) }
                     },
-                    .init(title: "Sign", icon: "checkmark.seal", role: .normal) {
+                    .init(title: "Sign", icon: "signature", role: .normal) {
                         sheetItem = nil; SignQueue.shared.enqueue(it.url)
                     },
                     .init(title: "Delete", icon: "trash", role: .destructive) {
@@ -91,42 +89,11 @@ struct LibraryView: View {
     }
 
     private var header: some View {
-        TabTitleBar(title: "Library") {
-            Text("\(items.count) Apps").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
+        TabTitleBar(title: "Library", center: "\(items.count) Apps") {
             Button { importing = true } label: {
-                Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accent).padding(.leading, 4)
+                Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accent)
             }
         }
-    }
-
-    private func row(_ it: LibraryItem) -> some View {
-        HStack(spacing: 12) {
-            icon(it.icon)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(it.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
-                Text("\(it.version) · \(it.bundle)\(it.sizeString.isEmpty ? "" : " · \(it.sizeString)")")
-                    .font(.caption.monospaced()).foregroundStyle(Theme.subtle).lineLimit(1)
-                Text("Downloaded").font(.caption2)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Theme.card).foregroundStyle(Theme.subtle).clipShape(Capsule())
-            }
-            Spacer()
-            if installing == it.id { ProgressView().tint(Theme.accent) }
-            else { Image(systemName: "arrow.up.forward").font(.system(size: 18, weight: .semibold)).foregroundStyle(blue) }
-        }
-        .padding(12).background(Theme.card)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.stroke, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .contentShape(Rectangle())
-        .onTapGesture { sheetItem = it }
-    }
-
-    private func icon(_ data: Data?) -> some View {
-        Group {
-            if let data, let img = UIImage(data: data) { Image(uiImage: img).resizable().scaledToFill() }
-            else { RoundedRectangle(cornerRadius: 12).fill(Theme.accent.opacity(0.15)).overlay(Image(systemName: "app.fill").foregroundStyle(Theme.accent)) }
-        }
-        .frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - Data

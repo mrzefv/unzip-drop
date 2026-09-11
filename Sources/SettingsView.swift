@@ -1105,7 +1105,7 @@ private struct LocalCAScreen: View {
                 Text("Generates a root CA on this device (OpenSSL), signs a leaf for your OTA host, and serves installs with it. Private keys stay in the Keychain (ThisDeviceOnly) — public certs are mirrored to iCloud Keychain so a reinstall keeps the same root.").foregroundStyle(Theme.subtle)
             }
 
-            Section("1 · Host & leaf") {
+            Section {
                 TField(label: "OTA host", text: $host, placeholder: ServerConfig.defaultInstallHost, keyboard: .URL)
                 HStack(spacing: 10) {
                     Image(systemName: dnsChecking ? "hourglass" : (dnsLoopback == true ? "checkmark.circle.fill" : (dnsLoopback == false ? "xmark.octagon.fill" : "questionmark.circle")))
@@ -1117,6 +1117,8 @@ private struct LocalCAScreen: View {
                 }
                 .listRowBackground(Theme.card)
                 TButton(title: working ? "Working…" : (st.hasLeaf ? "Re-issue leaf for host" : "Create CA & issue leaf"), icon: "checkmark.seal.fill", busy: working) { Task { await issue() } }
+            } header: {
+                Text("1 · Host & leaf")
             } footer: {
                 Text("The leaf covers this host and *.<host>. The host must ALSO resolve to 127.0.0.1 (A record, or a free name like 127-0-0-1.nip.io) or the install prompt never appears.").foregroundStyle(Theme.subtle)
             }

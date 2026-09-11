@@ -336,6 +336,7 @@ private struct StatusFooter: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Copy MDID")
+                .accessibilityValue(staff.mdid)
                 .accessibilityHint("Copies your device identifier")
 
                 Spacer(minLength: 0)

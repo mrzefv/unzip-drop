@@ -275,7 +275,8 @@ private struct StatusFooter: View {
     @ObservedObject private var staff = StaffGate.shared
     @State private var checking = false
     @State private var didCopyMDID = false
-    @State private var mdidResetWorkItem: DispatchWorkItem?
+    @State private var mdidResetTask: Task<Void, Never>?
+    @State private var mdidResetToken = UUID()
 
     private var footerIdentity: (roleLabel: String, roleColor: Color, accountURL: URL, accountLabel: String, accountIcon: String) {
         if staff.isStaff {
@@ -345,13 +346,15 @@ private struct StatusFooter: View {
                     UIPasteboard.general.string = staff.mdid
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     didCopyMDID = true
-                    mdidResetWorkItem?.cancel()
-                    let workItem = DispatchWorkItem {
+                    mdidResetTask?.cancel()
+                    let token = UUID()
+                    mdidResetToken = token
+                    mdidResetTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        guard !Task.isCancelled, mdidResetToken == token else { return }
                         didCopyMDID = false
-                        mdidResetWorkItem = nil
+                        mdidResetTask = nil
                     }
-                    mdidResetWorkItem = workItem
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: workItem)
                 } label: {
                     (Text("MDID: ")
                         .font(.system(size: 14, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
@@ -369,8 +372,8 @@ private struct StatusFooter: View {
         }
         .frame(maxWidth: .infinity)
         .onDisappear {
-            mdidResetWorkItem?.cancel()
-            mdidResetWorkItem = nil
+            mdidResetTask?.cancel()
+            mdidResetTask = nil
         }
     }
 }

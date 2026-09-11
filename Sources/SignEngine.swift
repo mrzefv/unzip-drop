@@ -10,6 +10,12 @@ import Foundation
 import Darwin
 import ZIPFoundation
 
+nonisolated func xmlPlistData(fromMobileProvision data: Data) -> Data? {
+    guard let start = data.range(of: Data("<?xml".utf8)),
+          let end = data.range(of: Data("</plist>".utf8)) else { return nil }
+    return data.subdata(in: start.lowerBound..<end.upperBound)
+}
+
 /// Parallel DAG signing toggle — pushed into the zsign engine via ZSignSetParallel.
 /// Independent frameworks/dylibs/plugins are signed concurrently (dispatch_apply),
 /// which is the main speedup on multi-framework apps. Default ON.

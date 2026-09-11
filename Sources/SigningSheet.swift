@@ -1030,12 +1030,6 @@ struct SigningSheet: View {
         return "\(value)"
     }
 
-    private func xmlPlistData(fromMobileProvision data: Data) -> Data? {
-        guard let start = data.range(of: Data("<?xml".utf8)),
-              let end = data.range(of: Data("</plist>".utf8)) else { return nil }
-        return data.subdata(in: start.lowerBound..<end.upperBound)
-    }
-
     private func randomSuffix(_ count: Int) -> String {
         let chars = Array("abcdefghijklmnopqrstuvwxyz0123456789")
         return String((0..<count).compactMap { _ in chars.randomElement() })

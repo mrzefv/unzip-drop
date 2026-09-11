@@ -43,10 +43,15 @@ struct RootView: View {
                 .padding(.leading, 26).padding(.top, 8)
                 .allowsHitTesting(false)
                 .popover(isPresented: $theme.panelShown, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
-                    ThemePanel()
-                        .presentationCompactAdaptation(.popover)
-                        .presentationBackground(Theme.bg)
-                        .preferredColorScheme(theme.colorScheme)
+                    if #available(iOS 16.4, *) {
+                        ThemePanel()
+                            .presentationCompactAdaptation(.popover)
+                            .presentationBackground(Theme.bg)
+                            .preferredColorScheme(theme.colorScheme)
+                    } else {
+                        ThemePanel()
+                            .preferredColorScheme(theme.colorScheme)
+                    }
                 }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {

@@ -1407,7 +1407,7 @@ struct DeveloperToolSheet: View {
     // MARK: Inject Data (Mcrypted-512)
 
     @State private var showInjectPicker = false
-    @State private var injectWords: [String] = []       // active recovery key (12 words)
+    @State private var injectWords: [String] = []       // active recovery key (24 words, 256-bit)
     @State private var injectEntropy: Data? = nil
     @State private var showKeyScreen = false
     @State private var enterWords = ""                  // paste box for an existing key
@@ -1419,7 +1419,7 @@ struct DeveloperToolSheet: View {
     private var injectDataView: some View {
         List {
             Section {
-                Text("Hide a picture or document inside the app binary. It's encrypted with Mcrypted-512 (AES-256-GCM + HMAC-SHA-512) using a 12-word recovery key and appended to the main Mach-O before signing, so it rides inside the signed app.")
+                Text("Hide a picture or document inside the app binary. It's encrypted with Mcrypted-512 (AES-256-GCM + HMAC-SHA-512) using a 24-word (256-bit) recovery key and appended to the main Mach-O before signing, so it rides inside the signed app.")
                     .font(.caption).foregroundStyle(Theme.subtle)
             }.listRowBackground(Color(white: 0.08))
 
@@ -1495,16 +1495,16 @@ struct DeveloperToolSheet: View {
 
     private var enterKeyView: some View {
         List {
-            Section("Enter your 12 words") {
-                TextField("word1 word2 … word12", text: $enterWords, axis: .vertical)
+            Section("Enter your 24 words") {
+                TextField("word1 word2 … word24", text: $enterWords, axis: .vertical)
                     .font(.system(size: 14, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled()
                 Button("Use this key") {
                     let ws = enterWords.lowercased().split(whereSeparator: { $0 == " " || $0 == "\n" }).map(String.init)
                     if let e = Mcrypted512.entropy(fromWords: ws) {
                         injectWords = ws; injectEntropy = e; injectError = nil
-                    } else { injectError = "Invalid key — need 12 valid words." }
+                    } else { injectError = "Invalid key — need 24 valid words." }
                 }
-                .disabled(enterWords.split(separator: " ").count < 12)
+                .disabled(enterWords.split(separator: " ").count < 24)
                 if let injectError { Text(injectError).font(.caption).foregroundStyle(.orange) }
             }.listRowBackground(Color(white: 0.08))
         }

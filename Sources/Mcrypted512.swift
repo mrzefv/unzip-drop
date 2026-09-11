@@ -38,22 +38,26 @@ nonisolated enum Mcrypted512 {
 
     // MARK: - Recovery key (12 words = the encryption secret, Model A)
     //
-    //  128 bits of CSPRNG entropy -> 12 words from the Mcrypted wordlist (11 bits each).
-    //  The words ARE the secret; the KDF runs on the recovered 16-byte entropy, so any
-    //  device that enters the same 12 words derives the same keys. Not a BIP-39 seed.
+    //  256 bits of CSPRNG entropy -> 24 words from the Mcrypted wordlist (11 bits each,
+    //  264 bits capacity; the low 8 bits of the last word are random padding). The words
+    //  ARE the secret; the KDF runs on the recovered 32-byte entropy, so any device that
+    //  enters the same 24 words derives the same keys. Not a BIP-39 seed.
+
+    static let wordCount = 24
+    static let entropyBytes = 32   // 256-bit recovery secret
 
     static func newRecoveryKey() -> (words: [String], entropy: Data) {
-        var entropy = Data(count: 16)
-        _ = entropy.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        var entropy = Data(count: entropyBytes)
+        _ = entropy.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, entropyBytes, $0.baseAddress!) }
         return (words(fromEntropy: entropy), entropy)
     }
 
     static func words(fromEntropy entropy: Data) -> [String] {
         var bits: [Bool] = []
         for byte in entropy { for i in (0..<8).reversed() { bits.append((byte >> i) & 1 == 1) } }
-        while bits.count < 12 * 11 { bits.append(Bool.random()) }
+        while bits.count < wordCount * 11 { bits.append(Bool.random()) }
         var out: [String] = []
-        for w in 0..<12 {
+        for w in 0..<wordCount {
             var idx = 0
             for b in 0..<11 { idx = (idx << 1) | (bits[w*11 + b] ? 1 : 0) }
             out.append(McryptedWordlist.words[idx])
@@ -63,14 +67,14 @@ nonisolated enum Mcrypted512 {
 
     static func entropy(fromWords raw: [String]) -> Data? {
         let ws = raw.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        guard ws.count == 12 else { return nil }
+        guard ws.count == wordCount else { return nil }
         var bits: [Bool] = []
         for w in ws {
             guard let idx = McryptedWordlist.index[w] else { return nil }
             for b in (0..<11).reversed() { bits.append((idx >> b) & 1 == 1) }
         }
-        var bytes = [UInt8](repeating: 0, count: 16)
-        for i in 0..<128 { if bits[i] { bytes[i/8] |= (1 << (7 - (i%8))) } }
+        var bytes = [UInt8](repeating: 0, count: entropyBytes)
+        for i in 0..<(entropyBytes * 8) { if bits[i] { bytes[i/8] |= (1 << (7 - (i%8))) } }
         return Data(bytes)
     }
 

@@ -302,6 +302,15 @@ struct SigningSheet: View {
                 }
             }
             .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
+
+            sectionLabel("ADV EXPERIMENTAL")
+            VStack(spacing: 0) {
+                bundleRow("mv1E Engine", "cpu.fill", "Class dump") {
+                    developerToolMode = .mv1e
+                    showDeveloperTool = true
+                }
+            }
+            .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -1173,7 +1182,7 @@ struct BundleInfoEditorSheet: View {
 }
 
 struct DeveloperToolSheet: View {
-    enum Mode { case strings, patchFunctions, dependencies, disassemble, injectData }
+    enum Mode { case strings, patchFunctions, dependencies, disassemble, injectData, mv1e }
 
     let mode: Mode
     let ipaURL: URL
@@ -1215,6 +1224,7 @@ struct DeveloperToolSheet: View {
                 case .dependencies:   dependenciesView
                 case .disassemble:    disassembleView
                 case .injectData:     injectDataView
+                case .mv1e:           mv1eView
                 }
             }
             .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
@@ -1241,6 +1251,7 @@ struct DeveloperToolSheet: View {
         case .dependencies: return "Mach-O Dependencies"
         case .disassemble: return "Disassemble ARM64"
         case .injectData: return "Inject Data"
+        case .mv1e: return "mv1E Engine"
         }
     }
 
@@ -1549,6 +1560,116 @@ struct DeveloperToolSheet: View {
             extracted = (name: r.filename, data: r.payload)
         } catch { injectError = error.localizedDescription }
         _ = ctx
+    }
+
+
+    // MARK: mv1E Engine (static class dump)
+
+    @State private var mv1eResult: MV1E.DumpResult?
+    @State private var mv1eLoading = false
+    @State private var mv1eQuery = ""
+    @State private var mv1eShowSwift = false
+
+    private var mv1eClasses: [MV1E.DumpedClass] {
+        let all = mv1eResult?.classes ?? []
+        let q = mv1eQuery.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return all }
+        return all.filter { $0.name.localizedCaseInsensitiveContains(q)
+            || ($0.superName?.localizedCaseInsensitiveContains(q) ?? false)
+            || $0.methods.contains { $0.name.localizedCaseInsensitiveContains(q) } }
+    }
+
+    private var mv1eView: some View {
+        List {
+            Section {
+                Text("Static class dump — reads Objective-C classes, methods, ivars, properties, protocols and Swift type names straight from the app binary. No emulation; the app never runs.")
+                    .font(.caption).foregroundStyle(Theme.subtle)
+            }.listRowBackground(Color(white: 0.08))
+
+            if mv1eResult == nil {
+                Section {
+                    Button { Task { await runMv1e() } } label: {
+                        HStack { if mv1eLoading { ProgressView().tint(blue) } else { Image(systemName: "cpu") }
+                            Text(mv1eLoading ? "Scanning binary…" : "Scan app").fontWeight(.semibold) }
+                    }.disabled(mv1eLoading)
+                }.listRowBackground(Color(white: 0.08))
+            } else {
+                Section {
+                    TextField("Search classes / methods", text: $mv1eQuery)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    if let r = mv1eResult {
+                        Text("\(r.classes.count) ObjC classes · \(r.swiftTypes.count) Swift types · \(r.elapsedMs)ms")
+                            .font(.caption).foregroundStyle(Theme.subtle)
+                    }
+                }.listRowBackground(Color(white: 0.08))
+
+                Section("Classes (\(mv1eClasses.count))") {
+                    ForEach(mv1eClasses) { cls in
+                        NavigationLink { mv1eClassDetail(cls) } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(cls.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
+                                HStack(spacing: 6) {
+                                    if let s = cls.superName { Text(": \(s)").font(.system(size: 12, design: .monospaced)).foregroundStyle(blue) }
+                                    Spacer()
+                                    Text("\(cls.methods.count)m · \(cls.ivars.count)i").font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.subtle)
+                                }
+                            }
+                        }.listRowBackground(Color(white: 0.08))
+                    }
+                }
+
+                if let sw = mv1eResult?.swiftTypes, !sw.isEmpty {
+                    Section("Swift types (\(sw.count))") {
+                        ForEach(sw.filter { mv1eQuery.isEmpty || $0.localizedCaseInsensitiveContains(mv1eQuery) }, id: \.self) { t in
+                            Text(t).font(.system(size: 14, design: .monospaced)).foregroundStyle(Theme.text)
+                                .listRowBackground(Color(white: 0.08))
+                        }
+                    }
+                }
+            }
+        }
+        .scrollContentBackground(.hidden).background(Color.black)
+    }
+
+    private func mv1eClassDetail(_ cls: MV1E.DumpedClass) -> some View {
+        List {
+            Section("@interface") {
+                Text("\(cls.name)\(cls.superName.map { " : \($0)" } ?? "")")
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced)).foregroundStyle(Theme.text)
+                if !cls.protocols.isEmpty {
+                    Text("<\(cls.protocols.joined(separator: ", "))>").font(.system(size: 12, design: .monospaced)).foregroundStyle(blue)
+                }
+            }.listRowBackground(Color(white: 0.08))
+
+            if !cls.ivars.isEmpty {
+                Section("Ivars (\(cls.ivars.count))") {
+                    ForEach(cls.ivars) { iv in
+                        HStack { Text(iv.name).font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.text)
+                            Spacer(); Text(iv.type).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.subtle).lineLimit(1) }
+                    }.listRowBackground(Color(white: 0.08))
+                }
+            }
+            if !cls.properties.isEmpty {
+                Section("Properties (\(cls.properties.count))") {
+                    ForEach(cls.properties) { p in
+                        Text("@property \(p.name)").font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.text)
+                    }.listRowBackground(Color(white: 0.08))
+                }
+            }
+            Section("Methods (\(cls.methods.count))") {
+                ForEach(cls.methods) { m in
+                    Text(m.signature).font(.system(size: 13, design: .monospaced)).foregroundStyle(m.isClassMethod ? blue : Theme.text)
+                }.listRowBackground(Color(white: 0.08))
+            }
+        }
+        .scrollContentBackground(.hidden).background(Color.black)
+        .navigationTitle(cls.name).navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func runMv1e() async {
+        mv1eLoading = true
+        mv1eResult = await MV1E.dump(ipaURL: ipaURL)
+        mv1eLoading = false
     }
 
     // MARK: Engine calls

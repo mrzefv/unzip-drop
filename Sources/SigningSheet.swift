@@ -73,7 +73,9 @@ struct SigningSheet: View {
 
     struct DylibItem: Identifiable, Equatable { let id = UUID(); let url: URL; var weak = false }
     struct ExtraToggles {
-        var disableATS = false, forceMinIOS12 = false, disableFileSharing = false, forcePortrait = false, skipIPad = false
+        var removeExistingLibraries = false, thinToArm64Only = false, randomizeBundleID = false, disableATS = false
+        var weakDylibReferences = false, sha256Only = false, forceResign = true, surgicalMode = true
+        var forceMinIOS12 = false, disableFileSharing = false, forcePortrait = false, skipIPad = false
         var stripSCInfo = false, stripPrivacy = false, stripWatch = false, stripExtensions = false, removeURLSchemes = false
         var replaceIcon = true
     }
@@ -510,16 +512,19 @@ struct SigningSheet: View {
         VStack(alignment: .leading, spacing: 6) {
             sectionLabel("BUILD OPTIONS")
             group("general", "slider.horizontal.3", "General", badge: generalCount > 0 ? "\(generalCount) active" : nil) {
+                toggle("Remove existing libraries", $o.removeExistingLibraries, note: "Strip pre-existing dylibs and frameworks before injection")
+                toggle("Thin to arm64 only", Binding(get: { false }, set: { _ in }), disabled: true, note: "coming soon")
+                toggle("Randomize bundle ID", $o.randomizeBundleID, note: "append a random suffix so it can coexist with the original app")
                 toggle("Disable ATS (allow HTTP)", $o.disableATS)
-                toggle("Parallel signing (faster)", Binding(
-                    get: { ParallelSigning.isEnabled },
-                    set: { ParallelSigning.set($0) }), note: "signs frameworks concurrently — mSign's speed path")
-                toggle("Skip embedded provision", Binding(get: { false }, set: { _ in }), disabled: true, note: "on-device signer always embeds")
+                toggle("Weak dylib references", $o.weakDylibReferences, note: "use LC_LOAD_WEAK_DYLIB for injected libraries")
+                toggle("Remove Watch apps", $o.stripWatch)
+                toggle("SHA256 only", Binding(get: { false }, set: { _ in }), disabled: true, note: "coming soon")
+                toggle("Force re-sign", Binding(get: { true }, set: { _ in }), disabled: true, note: "always on in current signer")
+                toggle("Surgical mode", $o.surgicalMode, note: "70–85% faster; auto-disabled when injecting dylibs")
             }
             group("strip", "scissors", "Strip Content", badge: "\(stripCount)") {
                 toggle("Strip SC_Info", $o.stripSCInfo)
                 toggle("Strip privacy manifests", $o.stripPrivacy)
-                toggle("Remove Watch app", $o.stripWatch)
                 toggle("Remove app extensions (PlugIns)", $o.stripExtensions)
                 toggle("Remove URL schemes", $o.removeURLSchemes)
             }
@@ -532,8 +537,10 @@ struct SigningSheet: View {
         }
     }
 
-    private var generalCount: Int { o.disableATS ? 1 : 0 }
-    private var stripCount: Int { [o.stripSCInfo, o.stripPrivacy, o.stripWatch, o.stripExtensions, o.removeURLSchemes].filter { $0 }.count }
+    private var generalCount: Int {
+        [o.removeExistingLibraries, o.randomizeBundleID, o.disableATS, o.weakDylibReferences, o.stripWatch, o.surgicalMode].filter { $0 }.count
+    }
+    private var stripCount: Int { [o.stripSCInfo, o.stripPrivacy, o.stripExtensions, o.removeURLSchemes].filter { $0 }.count }
     private var plistCount: Int { [o.forceMinIOS12, o.disableFileSharing, o.forcePortrait, o.skipIPad].filter { $0 }.count }
 
     @ViewBuilder
@@ -659,7 +666,7 @@ struct SigningSheet: View {
                      version != meta.version ? "Version → \(version)" : nil,
                      iconPNG != nil ? "Replace icon" : nil].compactMap { $0 }
         let dy = dylibs.map { "Inject \($0.url.lastPathComponent)" } + removeDylibs.map { "Remove \(($0 as NSString).lastPathComponent)" }
-        let build = strip + plistList + (o.disableATS ? ["Disable ATS"] : [])
+        let build = strip + plistList + generalSummary
         return Group {
             if ident.isEmpty && dy.isEmpty && build.isEmpty {
                 EmptyView()
@@ -679,8 +686,16 @@ struct SigningSheet: View {
 
     private var strip: [String] {
         [o.stripSCInfo ? "Strip SC_Info" : nil, o.stripPrivacy ? "Strip privacy manifests" : nil,
-         o.stripWatch ? "Remove Watch app" : nil, o.stripExtensions ? "Remove extensions" : nil,
+         o.stripExtensions ? "Remove extensions" : nil,
          o.removeURLSchemes ? "Remove URL schemes" : nil].compactMap { $0 }
+    }
+    private var generalSummary: [String] {
+        [o.removeExistingLibraries ? "Remove existing libraries" : nil,
+         o.randomizeBundleID ? "Randomize bundle ID" : nil,
+         o.disableATS ? "Disable ATS" : nil,
+         o.weakDylibReferences ? "Weak dylib references" : nil,
+         o.stripWatch ? "Remove Watch apps" : nil,
+         o.surgicalMode ? (dylibs.isEmpty ? "Surgical mode" : "Surgical mode (auto-disabled: dylibs)") : nil].compactMap { $0 }
     }
     private var plistList: [String] {
         [o.forceMinIOS12 ? "MinimumOSVersion 12.0" : nil, o.disableFileSharing ? "Disable file sharing" : nil,
@@ -790,23 +805,34 @@ struct SigningSheet: View {
         // Override only when the user changed it (mSign passes the field through as-is
         // once it differs from the read value; unchanged → let the signer keep the app's own).
         let b = bundle.trimmingCharacters(in: .whitespaces)
-        s.bundleID = (b.isEmpty || b == meta.bundleID) ? nil : b
+        var bundleOut = (b.isEmpty || b == meta.bundleID) ? nil : b
+        if o.randomizeBundleID {
+            let base = (bundleOut ?? (b.isEmpty ? meta.bundleID : b)).trimmingCharacters(in: .whitespaces)
+            if !base.isEmpty { bundleOut = base + "." + randomSuffix(6) }
+        }
+        s.bundleID = bundleOut
         s.version = version.isEmpty ? nil : version
         s.iconPNG = iconPNG
-        s.injectDylibs = dylibs.map { ($0.url, $0.weak) }
+        s.injectDylibs = dylibs.map { ($0.url, o.weakDylibReferences ? true : $0.weak) }
         s.injectPath = injectPath; s.injectFolder = injectFolder
-        s.removeDylibs = Array(removeDylibs)
+        s.removeDylibs = Array(Set((o.removeExistingLibraries ? machoDylibs : []) + Array(removeDylibs)))
         s.forceMinIOS = o.forceMinIOS12 ? "12.0" : nil
         s.disableFileSharing = o.disableFileSharing
         s.forcePortrait = o.forcePortrait
         s.skipIPad = o.skipIPad
         s.disableATS = o.disableATS
+        s.surgicalMode = o.surgicalMode
         s.stripSCInfo = o.stripSCInfo
         s.stripPrivacyManifests = o.stripPrivacy
         s.stripWatchApps = o.stripWatch
         s.stripExtensions = o.stripExtensions
         s.removeURLSchemes = o.removeURLSchemes
         return s
+    }
+
+    private func randomSuffix(_ count: Int) -> String {
+        let chars = Array("abcdefghijklmnopqrstuvwxyz0123456789")
+        return String((0..<count).compactMap { _ in chars.randomElement() })
     }
 
     private func sign() async {

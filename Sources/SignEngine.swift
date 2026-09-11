@@ -197,6 +197,7 @@ nonisolated struct SignOptions: Sendable {
     var removeURLSchemes = false
 
     var skipEmbeddedProvision = false
+    var surgicalMode = true
 
     static let none = SignOptions()
 
@@ -259,7 +260,7 @@ nonisolated enum Signer {
         capture?.start()
         do {
             // Parallel DAG signing (mSign's speed path). Safe: disjoint subtrees.
-            ZSignSetParallel(ParallelSigning.isEnabled)
+            ZSignSetParallel(o.surgicalMode && o.injectDylibs.isEmpty)
             try ZsignSigner.signAppBundle(
                 appBundlePath: appURL.path,
                 provisionPath: provURL.path,

@@ -170,6 +170,20 @@ nonisolated struct SignOutcome: Sendable {
     var sizeBytes: Int64 = 0
 }
 
+/// A raw byte edit to the app's main Mach-O, resolved from a virtual address.
+/// `fileOffset` is into the THIN arm64 slice; the engine maps it back into the
+/// fat binary on disk if needed. `original` lets us verify before writing.
+nonisolated struct BinaryPatch: Sendable, Identifiable, Equatable {
+    let id: UUID
+    let label: String          // human description for the log
+    let fileOffset: Int        // offset into the thin arm64 slice
+    let bytes: [UInt8]         // replacement bytes
+    let original: [UInt8]      // expected current bytes (verify guard); empty = skip check
+    init(id: UUID = UUID(), label: String, fileOffset: Int, bytes: [UInt8], original: [UInt8] = []) {
+        self.id = id; self.label = label; self.fileOffset = fileOffset; self.bytes = bytes; self.original = original
+    }
+}
+
 nonisolated struct SignOptions: Sendable {
     // identity
     var name: String?
@@ -182,6 +196,7 @@ nonisolated struct SignOptions: Sendable {
     var injectPath = "@executable_path"        // or @rpath
     var injectFolder = "/"                       // "/" (next to binary) or "Frameworks/"
     var removeDylibs: [String] = []              // load-command paths to strip
+    var binaryPatches: [BinaryPatch] = []        // raw byte edits (string rewrites / insn patches) applied to the thin binary
 
     // Info.plist tweaks
     var plistSet: [String: String] = [:]         // key → string value (bool as "true"/"false")
@@ -216,7 +231,7 @@ nonisolated struct SignOptions: Sendable {
 
     var isEmpty: Bool {
         name == nil && bundleID == nil && version == nil && iconPNG == nil
-        && injectDylibs.isEmpty && removeDylibs.isEmpty && plistSet.isEmpty && entitlementsPlistData == nil
+        && injectDylibs.isEmpty && removeDylibs.isEmpty && binaryPatches.isEmpty && plistSet.isEmpty && entitlementsPlistData == nil
         && forceMinIOS == nil && !disableFileSharing && !forcePortrait && !skipIPad && !disableATS
         && !stripSCInfo && !stripPrivacyManifests && !stripWatchApps && !stripExtensions && !removeURLSchemes
         && !stripBitcode && !stripDebugSymbols
@@ -426,6 +441,10 @@ nonisolated enum Signer {
         if !o.removeDylibs.isEmpty, fm.fileExists(atPath: binURL.path) {
             _ = ZsignSigner.removeDylibs(inMachO: binURL.path, o.removeDylibs)
             onLog?(">>> removed \(o.removeDylibs.count) dylib load command(s)")
+        }
+        if !o.binaryPatches.isEmpty, fm.fileExists(atPath: binURL.path) {
+            let applied = LocalBinaryScanner.applyPatches(o.binaryPatches, toBinaryAt: binURL.path)
+            onLog?(">>> applied \(applied)/\(o.binaryPatches.count) binary patch(es)")
         }
         if !o.injectDylibs.isEmpty, fm.fileExists(atPath: binURL.path) {
             // Substrate-linked tweaks (built against CydiaSubstrate / MSHookFunction /

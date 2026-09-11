@@ -480,7 +480,30 @@ enum LocalBinaryScanner {
     /// disasm/xref don't re-extract the executable from the IPA on every call.
     private static var ctxCache: (key: String, thin: Data, sections: [MachOTools.Section], segments: [MachOTools.Segment])?
 
-    static func binaryContext(ipaURL: URL?, localPath: String?) async
+    /// Applies raw byte patches to the app's main Mach-O on disk. `fileOffset` in each
+    /// patch is into the THIN arm64 slice; we add the slice's base offset within the fat
+    /// binary so the write lands in the right place. Verifies `original` bytes when provided.
+    /// Returns the count successfully written.
+    @discardableResult
+    static func applyPatches(_ patches: [BinaryPatch], toBinaryAt path: String) -> Int {
+        guard !patches.isEmpty, var data = FileManager.default.contents(atPath: path) else { return 0 }
+        let (_, base) = MachOTools.arm64SliceWithOffset(data)
+        var wrote = 0
+        for p in patches {
+            let at = base + p.fileOffset
+            guard at >= 0, at + p.bytes.count <= data.count else { continue }
+            if !p.original.isEmpty {
+                let current = Array(data[at ..< at + p.original.count])
+                if current != p.original { continue }   // moved / already patched — skip
+            }
+            for (i, b) in p.bytes.enumerated() { data[at + i] = b }
+            wrote += 1
+        }
+        guard wrote > 0 else { return 0 }
+        do { try data.write(to: URL(fileURLWithPath: path)); return wrote } catch { return 0 }
+    }
+
+        static func binaryContext(ipaURL: URL?, localPath: String?) async
         -> (thin: Data, sections: [MachOTools.Section], segments: [MachOTools.Segment])? {
         let key = localPath ?? ipaURL?.absoluteString ?? ""
         if let c = ctxCache, c.key == key { return (c.thin, c.sections, c.segments) }

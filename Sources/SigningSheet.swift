@@ -53,6 +53,7 @@ struct SigningSheet: View {
     @State private var showDeveloperTool = false
     @State private var developerToolMode: DeveloperToolSheet.Mode = .strings
     @State private var developerStrings: [DeveloperStringEntry] = []
+    @State private var binaryPatches: [BinaryPatch] = []
 
     // binary analysis
     @State private var macho: MachOReport?
@@ -174,9 +175,10 @@ struct SigningSheet: View {
         .sheet(isPresented: $showDeveloperTool) {
             DeveloperToolSheet(
                 mode: developerToolMode,
-                strings: developerStrings,
+                ipaURL: ipaURL,
                 macho: macho,
-                machoError: machoError
+                machoError: machoError,
+                patches: $binaryPatches
             )
         }
         .fullScreenCover(item: $settingsJump) { j in
@@ -947,6 +949,7 @@ struct SigningSheet: View {
         s.injectDylibs = dylibs.map { ($0.url, o.weakDylibReferences ? true : $0.weak) }
         s.injectPath = injectPath; s.injectFolder = injectFolder
         s.removeDylibs = Array(Set((o.removeExistingLibraries ? machoDylibs : []) + Array(removeDylibs)))
+        s.binaryPatches = binaryPatches
         s.plistSet = plistSetValues
         s.forceMinIOS = o.forceMinIOS12 ? "12.0" : nil
         s.disableFileSharing = o.disableFileSharing
@@ -1169,50 +1172,51 @@ struct DeveloperToolSheet: View {
     enum Mode { case strings, patchFunctions, dependencies, disassemble }
 
     let mode: Mode
-    let strings: [DeveloperStringEntry]
+    let ipaURL: URL
     let macho: MachOReport?
     let machoError: String?
+    @Binding var patches: [BinaryPatch]
 
     @Environment(\.dismiss) private var dismiss
+    @State private var loading = true
+    @State private var hits: [AVXScanHit] = []
     @State private var query = ""
+    @State private var editHit: AVXScanHit?
+    @State private var disasm: [DecodedInsn] = []
+    @State private var disasmVA = ""
 
-    private var filteredStrings: [DeveloperStringEntry] {
+    private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
+
+    private var filtered: [AVXScanHit] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return strings }
-        return strings.filter {
-            $0.value.localizedCaseInsensitiveContains(q) || $0.source.localizedCaseInsensitiveContains(q)
-        }
+        guard !q.isEmpty else { return hits }
+        return hits.filter { $0.string.localizedCaseInsensitiveContains(q) || $0.address.localizedCaseInsensitiveContains(q) }
     }
 
     var body: some View {
         NavigationStack {
             Group {
                 switch mode {
-                case .strings:
-                    developerStringsView
-                case .patchFunctions:
-                    developerNoticeView(
-                        title: "Patch Functions",
-                        body: "Function patching is not wired into the signer yet. This placeholder keeps the signing sheet layout aligned with the requested developer section."
-                    )
-                case .dependencies:
-                    developerDependenciesView
-                case .disassemble:
-                    developerNoticeView(
-                        title: "Disassemble ARM64",
-                        body: arm64Summary
-                    )
+                case .strings:        stringsView
+                case .patchFunctions: patchView
+                case .dependencies:   dependenciesView
+                case .disassemble:    disassembleView
                 }
             }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
+            .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
         .preferredColorScheme(.dark)
+        .task { await runScan() }
+        .sheet(item: $editHit) { hit in
+            StringEditSheet(hit: hit, blue: blue) { patch in
+                patches.removeAll { $0.fileOffset == patch.fileOffset }
+                patches.append(patch)
+                editHit = nil
+            }
+            .presentationDetents([.height(300)])
+            .preferredColorScheme(.dark)
+        }
     }
 
     private var title: String {
@@ -1224,125 +1228,222 @@ struct DeveloperToolSheet: View {
         }
     }
 
-    private var arm64Summary: String {
-        if let err = machoError { return err }
-        guard let slice = macho?.arm64 else { return "No arm64 or arm64e slice was found in the IPA." }
-        return [
-            "\(slice.arch) \(slice.fileType)",
-            slice.platform.map { "\($0) · min \(slice.minOS ?? "—") · SDK \(slice.sdk ?? "—")" } ?? "Minimum OS \(slice.minOS ?? "—")",
-            slice.encrypted ? "FairPlay-encrypted (cryptid=\(slice.cryptID))" : "Decrypted and ready to re-sign",
-            "Load commands: \(slice.loadCommandCount)",
-            "Linked dylibs: \(slice.dylibs.count + slice.weakDylibs.count)",
-            "RPaths: \(slice.rpaths.count)"
-        ].joined(separator: "\n")
-    }
+    // MARK: Strings
 
-    private var developerStringsView: some View {
+    private var stringsView: some View {
         List {
             Section {
                 TextField("Search strings", text: $query)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
-            .listRowBackground(Color(white: 0.08))
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+            }.listRowBackground(Color(white: 0.08))
 
-            if filteredStrings.isEmpty {
-                Section {
-                    Text(strings.isEmpty ? "No printable strings found yet." : "No matching strings.")
-                        .foregroundStyle(Theme.subtle)
-                }
-                .listRowBackground(Color(white: 0.08))
-            } else {
-                ForEach(filteredStrings) { entry in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(entry.source)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.subtle)
-                        Text(entry.value)
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundStyle(.white)
-                            .textSelection(.enabled)
-                    }
-                    .padding(.vertical, 4)
+            if loading {
+                Section { HStack { Spacer(); ProgressView().tint(blue); Spacer() } }.listRowBackground(Color.clear)
+            } else if filtered.isEmpty {
+                Section { Text(hits.isEmpty ? "No editable strings found." : "No matches.").foregroundStyle(Theme.subtle) }
                     .listRowBackground(Color(white: 0.08))
-                }
-            }
-        }
-        .scrollContentBackground(.hidden)
-        .background(Color.black)
-    }
-
-    private var developerDependenciesView: some View {
-        List {
-            if let err = machoError {
-                Section {
-                    Text(err).foregroundStyle(.orange)
-                }
-                .listRowBackground(Color(white: 0.08))
-            } else if let macho {
-                Section {
-                    ForEach(macho.slices) { slice in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text(slice.arch)
-                                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(.white)
-                                Spacer()
-                                Text("\(slice.dylibs.count + slice.weakDylibs.count)")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Theme.subtle)
-                            }
-                            if slice.dylibs.isEmpty && slice.weakDylibs.isEmpty {
-                                Text("No non-system dependencies found.")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.subtle)
-                            } else {
-                                ForEach(slice.dylibs + slice.weakDylibs.map { "(weak) " + $0 }, id: \.self) { dep in
-                                    Text(dep)
-                                        .font(.system(size: 12, design: .monospaced))
-                                        .foregroundStyle(.white)
-                                        .textSelection(.enabled)
+            } else {
+                Section("\(filtered.count) strings · \(patches.count) pending patch\(patches.count == 1 ? "" : "es")") {
+                    ForEach(filtered) { hit in
+                        Button { if hit.editable == "yes" { editHit = hit } } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Text(hit.address).font(.system(size: 11, design: .monospaced)).foregroundStyle(blue)
+                                    Spacer()
+                                    editBadge(hit.editable)
+                                }
+                                Text(hit.string).font(.system(size: 14)).foregroundStyle(Theme.text).lineLimit(3)
+                                if patches.contains(where: { $0.fileOffset == hitOffset(hit) }) {
+                                    Text("→ patched (applies at sign)").font(.system(size: 11)).foregroundStyle(.green)
                                 }
                             }
                         }
-                        .padding(.vertical, 4)
+                        .buttonStyle(.plain)
+                        .listRowBackground(Color(white: 0.08))
                     }
                 }
-                .listRowBackground(Color(white: 0.08))
-            } else {
-                Section {
-                    HStack(spacing: 8) {
-                        ProgressView().tint(Theme.accent)
-                        Text("Reading Mach-O headers…").foregroundStyle(Theme.subtle)
-                    }
-                }
-                .listRowBackground(Color(white: 0.08))
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(Color.black)
+        .scrollContentBackground(.hidden).background(Color.black)
     }
 
-    private func developerNoticeView(title: String, body: String) -> some View {
+    private func editBadge(_ e: String?) -> some View {
+        let (t, c): (String, Color) = e == "yes" ? ("EDITABLE", .green)
+            : e == "limited" ? ("LIMITED", .orange)
+            : e == "resource" ? ("RESOURCE", blue) : ("READ-ONLY", Theme.subtle)
+        return Text(t).font(.system(size: 8.5, weight: .heavy, design: .monospaced)).kerning(0.5)
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .background(c.opacity(0.18)).foregroundStyle(c).clipShape(Capsule())
+    }
+
+    private func hitOffset(_ h: AVXScanHit) -> Int { Int(h.address.replacingOccurrences(of: "0x", with: ""), radix: 16) ?? -1 }
+
+    // MARK: Dependencies
+
+    private var dependenciesView: some View {
+        List {
+            if let err = machoError { Section { Text(err).foregroundStyle(.orange) }.listRowBackground(Color(white: 0.08)) }
+            if let slice = macho?.arm64 {
+                Section("Linked (\(slice.dylibs.count))") {
+                    ForEach(slice.dylibs, id: \.self) { Text($0).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.text) }
+                }.listRowBackground(Color(white: 0.08))
+                if !slice.weakDylibs.isEmpty {
+                    Section("Weak (\(slice.weakDylibs.count))") {
+                        ForEach(slice.weakDylibs, id: \.self) { Text($0).font(.system(size: 12, design: .monospaced)).foregroundStyle(.orange) }
+                    }.listRowBackground(Color(white: 0.08))
+                }
+                if !slice.rpaths.isEmpty {
+                    Section("RPaths (\(slice.rpaths.count))") {
+                        ForEach(slice.rpaths, id: \.self) { Text($0).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.subtle) }
+                    }.listRowBackground(Color(white: 0.08))
+                }
+            } else {
+                Section { Text("No arm64 slice found.").foregroundStyle(Theme.subtle) }.listRowBackground(Color(white: 0.08))
+            }
+        }
+        .scrollContentBackground(.hidden).background(Color.black)
+    }
+
+    // MARK: Disassemble
+
+    private var disassembleView: some View {
         List {
             Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(title)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
-                    Text(body)
-                        .font(.system(size: 14))
-                        .foregroundStyle(Theme.subtle)
-                        .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    TextField("VA e.g. 0x100004abc", text: $disasmVA)
+                        .font(.system(size: 13, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Button("Go") { Task { await disassembleAt() } }.foregroundStyle(blue)
                 }
-                .padding(.vertical, 8)
+            }.listRowBackground(Color(white: 0.08))
+            if disasm.isEmpty {
+                Section { Text("Enter a virtual address to disassemble 96 instructions.").font(.caption).foregroundStyle(Theme.subtle) }
+                    .listRowBackground(Color(white: 0.08))
+            } else {
+                Section {
+                    ForEach(Array(disasm.enumerated()), id: \.offset) { _, insn in
+                        HStack(spacing: 10) {
+                            Text(String(format: "0x%llx", insn.va)).font(.system(size: 11, design: .monospaced)).foregroundStyle(blue)
+                            Text("\(insn.mnem) \(insn.ops)").font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.text)
+                            Spacer()
+                        }
+                    }
+                }.listRowBackground(Color(white: 0.08))
             }
-            .listRowBackground(Color(white: 0.08))
         }
-        .scrollContentBackground(.hidden)
-        .background(Color.black)
+        .scrollContentBackground(.hidden).background(Color.black)
+    }
+
+    // MARK: Patch Functions
+
+    private var patchView: some View {
+        List {
+            Section {
+                Text("Disassemble a function (Disassemble ARM64), then NOP or RET its entry to neutralize it. Patches apply to the binary at sign time.")
+                    .font(.caption).foregroundStyle(Theme.subtle)
+            }.listRowBackground(Color(white: 0.08))
+            Section {
+                HStack {
+                    TextField("Entry VA e.g. 0x100004abc", text: $disasmVA)
+                        .font(.system(size: 13, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                }
+                Button { Task { await patchFunc(ret: false) } } label: { Label("NOP first instruction", systemImage: "scissors") }.foregroundStyle(blue)
+                Button { Task { await patchFunc(ret: true) } } label: { Label("RET first instruction (return early)", systemImage: "arrow.uturn.backward") }.foregroundStyle(blue)
+            }.listRowBackground(Color(white: 0.08))
+            if !patches.isEmpty {
+                Section("Pending patches (\(patches.count))") {
+                    ForEach(patches) { p in
+                        HStack {
+                            Text(p.label).font(.system(size: 12)).foregroundStyle(Theme.text)
+                            Spacer()
+                            Button { patches.removeAll { $0.id == p.id } } label: { Image(systemName: "trash").foregroundStyle(.red) }
+                        }
+                    }
+                }.listRowBackground(Color(white: 0.08))
+            }
+        }
+        .scrollContentBackground(.hidden).background(Color.black)
+    }
+
+    // MARK: Engine calls
+
+    private func runScan() async {
+        loading = true
+        if let r = await LocalBinaryScanner.scan(ipaURL: ipaURL, localPath: nil) { hits = r.hits }
+        loading = false
+    }
+
+    private func disassembleAt() async {
+        guard let va = UInt64(disasmVA.replacingOccurrences(of: "0x", with: ""), radix: 16),
+              let ctx = await LocalBinaryScanner.binaryContext(ipaURL: ipaURL, localPath: nil) else { disasm = []; return }
+        disasm = AVXDisassembler.disassemble(atVA: va, count: 96, thin: ctx.thin, segments: ctx.segments)
+    }
+
+    private func patchFunc(ret: Bool) async {
+        guard let va = UInt64(disasmVA.replacingOccurrences(of: "0x", with: ""), radix: 16),
+              let ctx = await LocalBinaryScanner.binaryContext(ipaURL: ipaURL, localPath: nil),
+              let off = MachOTools.fileOffset(forVA: va, segments: ctx.segments) else { return }
+        // NOP = 0x1F2003D5 (little-endian D503201F), RET = 0xC0035FD6.
+        let bytes: [UInt8] = ret ? [0xC0, 0x03, 0x5F, 0xD6] : [0x1F, 0x20, 0x03, 0xD5]
+        let orig = off + 4 <= ctx.thin.count ? Array(ctx.thin[off ..< off + 4]) : []
+        let p = BinaryPatch(label: "\(ret ? "RET" : "NOP") @ \(disasmVA)", fileOffset: off, bytes: bytes, original: orig)
+        patches.removeAll { $0.fileOffset == off }
+        patches.append(p)
     }
 }
+
+// MARK: - In-place string editor (length-guarded)
+
+struct StringEditSheet: View {
+    let hit: AVXScanHit
+    let blue: Color
+    let onSave: (BinaryPatch) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var text: String
+
+    init(hit: AVXScanHit, blue: Color, onSave: @escaping (BinaryPatch) -> Void) {
+        self.hit = hit; self.blue = blue; self.onSave = onSave
+        _text = State(initialValue: hit.string)
+    }
+
+    private var capacity: Int { hit.string.utf8.count }           // must fit in original byte length
+    private var fits: Bool { text.utf8.count <= capacity }
+    private var offset: Int { Int(hit.address.replacingOccurrences(of: "0x", with: ""), radix: 16) ?? -1 }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Original") { Text(hit.string).font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.subtle) }
+                    .listRowBackground(Color(white: 0.08))
+                Section("Replacement") {
+                    TextField("New string", text: $text, axis: .vertical)
+                        .font(.system(size: 14)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Text(fits ? "Fits in-place (\(text.utf8.count)/\(capacity) bytes)"
+                              : "Too long — must be ≤ \(capacity) bytes (\(text.utf8.count) now)")
+                        .font(.caption).foregroundStyle(fits ? .green : .orange)
+                }.listRowBackground(Color(white: 0.08))
+            }
+            .scrollContentBackground(.hidden).background(Color.black)
+            .navigationTitle("Edit String").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        // NUL-terminate + pad to the original byte length so surrounding data is preserved.
+                        var b = Array(text.utf8)
+                        b.append(0)
+                        while b.count < capacity + 1 { b.append(0) }
+                        let orig = Array(hit.string.utf8) + [0]
+                        onSave(BinaryPatch(label: "str \(hit.address): \"\(text.prefix(20))\"", fileOffset: offset, bytes: b, original: orig))
+                        dismiss()
+                    }.disabled(!fits).foregroundStyle(fits ? blue : Theme.subtle)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
 
 private struct KeyValueEditorList: View {
     let title: String

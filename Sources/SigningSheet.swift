@@ -50,6 +50,9 @@ struct SigningSheet: View {
     @State private var entitlementValues: [String: String] = [:]
     @State private var entitlementTypeHints: [String: String] = [:]
     @State private var plistSetValues: [String: String] = [:]
+    @State private var showDeveloperTool = false
+    @State private var developerToolMode: DeveloperToolSheet.Mode = .strings
+    @State private var developerStrings: [DeveloperStringEntry] = []
 
     // binary analysis
     @State private var macho: MachOReport?
@@ -100,7 +103,7 @@ struct SigningSheet: View {
                     identity                 // App metadata: name / bundle / version
                     buildOptions             // 4 collapsible categories
                     bundleInfoCard           // Entitlements · Info.plist (view)
-                    binaryCard               // Mach-O / binary analysis
+                    developerCard            // Search/edit strings · patching · Mach-O
                     dylibInjection
                     changesSummary
                     if let error { Text(error).font(.caption).foregroundStyle(.orange).padding(.horizontal, 3) }
@@ -147,6 +150,7 @@ struct SigningSheet: View {
         .task {
             machoDylibs = await currentDylibs()
             await analyzeBinary()
+            developerStrings = await loadDeveloperStrings()
         }
         .sheet(isPresented: $showDylibPicker) {
             DocPicker(types: [UTType(filenameExtension: "dylib") ?? .item, UTType(filenameExtension: "framework") ?? .item, UTType(filenameExtension: "deb") ?? .item]) { urls in
@@ -161,6 +165,14 @@ struct SigningSheet: View {
             ) { removedKey in
                 entitlementTypeHints.removeValue(forKey: removedKey)
             }
+        }
+        .sheet(isPresented: $showDeveloperTool) {
+            DeveloperToolSheet(
+                mode: developerToolMode,
+                strings: developerStrings,
+                macho: macho,
+                machoError: machoError
+            )
         }
         .sheet(isPresented: $showIconPicker) {
             DocPicker(types: [.png, .jpeg, .image]) { urls in
@@ -219,8 +231,6 @@ struct SigningSheet: View {
                     bundleInfoMode = .infoPlist
                     showBundleInfo = true
                 }
-                Divider().overlay(Theme.stroke).padding(.leading, 39)
-                bundleRow("Mach-O dependencies", "point.3.connected.trianglepath.dotted", macho.map { "\($0.arm64?.dylibs.count ?? 0)" } ?? "—") {}
             }
             .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
         }
@@ -238,6 +248,36 @@ struct SigningSheet: View {
             .padding(10.5)
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: Developer options
+
+    private var developerCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionLabel("DEVELOPER")
+            VStack(spacing: 0) {
+                bundleRow("Search / Edit Strings", "magnifyingglass", developerStrings.isEmpty ? "View" : "\(developerStrings.count)") {
+                    developerToolMode = .strings
+                    showDeveloperTool = true
+                }
+                Divider().overlay(Theme.stroke).padding(.leading, 39)
+                bundleRow("Patch Functions", "scissors", "View") {
+                    developerToolMode = .patchFunctions
+                    showDeveloperTool = true
+                }
+                Divider().overlay(Theme.stroke).padding(.leading, 39)
+                bundleRow("Mach-O Dependencies", "point.3.connected.trianglepath.dotted", macho.map { "\($0.arm64?.dylibs.count ?? 0)" } ?? "0") {
+                    developerToolMode = .dependencies
+                    showDeveloperTool = true
+                }
+                Divider().overlay(Theme.stroke).padding(.leading, 39)
+                bundleRow("Disassemble ARM64", "chevron.left.forwardslash.chevron.right", "View") {
+                    developerToolMode = .disassemble
+                    showDeveloperTool = true
+                }
+            }
+            .background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
+        }
     }
 
     // MARK: Binary analysis (hand-rolled Mach-O reader)
@@ -815,6 +855,44 @@ struct SigningSheet: View {
         }.value
     }
 
+    private func loadDeveloperStrings() async -> [DeveloperStringEntry] {
+        let url = ipaURL
+        return await Task.detached { () -> [DeveloperStringEntry] in
+            let fm = FileManager.default
+            let work = fm.temporaryDirectory.appendingPathComponent("strings-" + UUID().uuidString, isDirectory: true)
+            defer { try? fm.removeItem(at: work) }
+            do {
+                try fm.createDirectory(at: work, withIntermediateDirectories: true)
+                try fm.unzipItem(at: url, to: work)
+                let payload = work.appendingPathComponent("Payload", isDirectory: true)
+                guard let app = try fm.contentsOfDirectory(at: payload, includingPropertiesForKeys: nil).first(where: { $0.pathExtension == "app" }) else { return [] }
+                let info = NSDictionary(contentsOf: app.appendingPathComponent("Info.plist")) as? [String: Any]
+                let bin = (info?["CFBundleExecutable"] as? String) ?? app.deletingPathExtension().lastPathComponent
+                let binaryURL = app.appendingPathComponent(bin)
+
+                var seen = Set<String>()
+                var out: [DeveloperStringEntry] = []
+                for value in flattenedPlistStrings(info) {
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard trimmed.count >= 4 else { continue }
+                    if seen.insert("plist:\(trimmed)").inserted {
+                        out.append(DeveloperStringEntry(source: "Info.plist", value: trimmed))
+                    }
+                }
+                if let data = try? Data(contentsOf: binaryURL) {
+                    for value in printableStrings(in: data).prefix(200) {
+                        if seen.insert("bin:\(value)").inserted {
+                            out.append(DeveloperStringEntry(source: bin, value: value))
+                        }
+                    }
+                }
+                return out
+            } catch {
+                return []
+            }
+        }.value
+    }
+
     private func buildOptionsValue() -> SignOptions {
         var s = SignOptions()
         s.name = name.isEmpty ? nil : name
@@ -960,6 +1038,47 @@ struct SigningSheet: View {
     }
 }
 
+nonisolated struct DeveloperStringEntry: Identifiable, Hashable, Sendable {
+    let source: String
+    let value: String
+    var id: String { source + "::" + value }
+}
+
+private func printableStrings(in data: Data, minimumLength: Int = 4) -> [String] {
+    var values: [String] = []
+    var current: [UInt8] = []
+    current.reserveCapacity(64)
+    for byte in data {
+        if (32...126).contains(byte) {
+            current.append(byte)
+        } else {
+            if current.count >= minimumLength {
+                values.append(String(decoding: current, as: UTF8.self))
+            }
+            current.removeAll(keepingCapacity: true)
+        }
+    }
+    if current.count >= minimumLength {
+        values.append(String(decoding: current, as: UTF8.self))
+    }
+    return Array(NSOrderedSet(array: values)) as? [String] ?? values
+}
+
+private func flattenedPlistStrings(_ value: Any?) -> [String] {
+    switch value {
+    case let dict as [String: Any]:
+        return dict.flatMap { [String(describing: $0.key)] + flattenedPlistStrings($0.value) }
+    case let array as [Any]:
+        return array.flatMap(flattenedPlistStrings)
+    case let string as String:
+        return [string]
+    case let number as NSNumber:
+        return [number.stringValue]
+    default:
+        return []
+    }
+}
+
 // MARK: - Document picker
 
 struct BundleInfoEditorSheet: View {
@@ -998,6 +1117,185 @@ struct BundleInfoEditorSheet: View {
             }
         }
         .preferredColorScheme(.dark)
+    }
+}
+
+struct DeveloperToolSheet: View {
+    enum Mode { case strings, patchFunctions, dependencies, disassemble }
+
+    let mode: Mode
+    let strings: [DeveloperStringEntry]
+    let macho: MachOReport?
+    let machoError: String?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var filteredStrings: [DeveloperStringEntry] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return strings }
+        return strings.filter {
+            $0.value.localizedCaseInsensitiveContains(q) || $0.source.localizedCaseInsensitiveContains(q)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                switch mode {
+                case .strings:
+                    developerStringsView
+                case .patchFunctions:
+                    developerNoticeView(
+                        title: "Patch Functions",
+                        body: "Function patching is not wired into the signer yet. This placeholder keeps the signing sheet layout aligned with the requested developer section."
+                    )
+                case .dependencies:
+                    developerDependenciesView
+                case .disassemble:
+                    developerNoticeView(
+                        title: "Disassemble ARM64",
+                        body: arm64Summary
+                    )
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var title: String {
+        switch mode {
+        case .strings: return "Search / Edit Strings"
+        case .patchFunctions: return "Patch Functions"
+        case .dependencies: return "Mach-O Dependencies"
+        case .disassemble: return "Disassemble ARM64"
+        }
+    }
+
+    private var arm64Summary: String {
+        if let err = machoError { return err }
+        guard let slice = macho?.arm64 else { return "No arm64 or arm64e slice was found in the IPA." }
+        return [
+            "\(slice.arch) \(slice.fileType)",
+            slice.platform.map { "\($0) · min \(slice.minOS ?? "—") · SDK \(slice.sdk ?? "—")" } ?? "Minimum OS \(slice.minOS ?? "—")",
+            slice.encrypted ? "FairPlay-encrypted (cryptid=\(slice.cryptID))" : "Decrypted and ready to re-sign",
+            "Load commands: \(slice.loadCommandCount)",
+            "Linked dylibs: \(slice.dylibs.count + slice.weakDylibs.count)",
+            "RPaths: \(slice.rpaths.count)"
+        ].joined(separator: "\n")
+    }
+
+    private var developerStringsView: some View {
+        List {
+            Section {
+                TextField("Search strings", text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+            .listRowBackground(Color(white: 0.08))
+
+            if filteredStrings.isEmpty {
+                Section {
+                    Text(strings.isEmpty ? "No printable strings found yet." : "No matching strings.")
+                        .foregroundStyle(Theme.subtle)
+                }
+                .listRowBackground(Color(white: 0.08))
+            } else {
+                ForEach(filteredStrings) { entry in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(entry.source)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.subtle)
+                        Text(entry.value)
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .textSelection(.enabled)
+                    }
+                    .padding(.vertical, 4)
+                    .listRowBackground(Color(white: 0.08))
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Color.black)
+    }
+
+    private var developerDependenciesView: some View {
+        List {
+            if let err = machoError {
+                Section {
+                    Text(err).foregroundStyle(.orange)
+                }
+                .listRowBackground(Color(white: 0.08))
+            } else if let macho {
+                Section {
+                    ForEach(macho.slices) { slice in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(slice.arch)
+                                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(.white)
+                                Spacer()
+                                Text("\(slice.dylibs.count + slice.weakDylibs.count)")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.subtle)
+                            }
+                            if slice.dylibs.isEmpty && slice.weakDylibs.isEmpty {
+                                Text("No non-system dependencies found.")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.subtle)
+                            } else {
+                                ForEach(slice.dylibs + slice.weakDylibs.map { "(weak) " + $0 }, id: \.self) { dep in
+                                    Text(dep)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundStyle(.white)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                .listRowBackground(Color(white: 0.08))
+            } else {
+                Section {
+                    HStack(spacing: 8) {
+                        ProgressView().tint(Theme.accent)
+                        Text("Reading Mach-O headers…").foregroundStyle(Theme.subtle)
+                    }
+                }
+                .listRowBackground(Color(white: 0.08))
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Color.black)
+    }
+
+    private func developerNoticeView(title: String, body: String) -> some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(title)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text(body)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.subtle)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 8)
+            }
+            .listRowBackground(Color(white: 0.08))
+        }
+        .scrollContentBackground(.hidden)
+        .background(Color.black)
     }
 }
 

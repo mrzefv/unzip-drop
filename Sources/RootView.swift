@@ -96,10 +96,6 @@ private struct TabBar: View {
                     }
                     .foregroundStyle(selected == i ? Theme.accent : Theme.subtle)
                     .frame(maxWidth: .infinity).frame(height: 52)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(Theme.accent.opacity(selected == i ? 0.16 : 0))
-                    )
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

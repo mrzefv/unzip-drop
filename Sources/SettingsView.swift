@@ -769,7 +769,7 @@ private final class OTAState: ObservableObject {
 
 // MARK: - On-Device OTA (root table)
 
-private struct OTADomainScreen: View {
+struct OTADomainScreen: View {
     @EnvironmentObject var config: Config
     @StateObject private var st = OTAState()
 

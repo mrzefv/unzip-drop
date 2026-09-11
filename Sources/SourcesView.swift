@@ -508,7 +508,7 @@ private struct SourceDetailScreen: View {
                                     Circle().trim(from: 0, to: max(0.05, progress)).stroke(Theme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round)).rotationEffect(.degrees(-90))
                                 }
                             } else if have {
-                                Image(systemName: "checkmark").font(.system(size: 20, weight: .bold))
+                                Image(systemName: "sdcard.fill").font(.system(size: 20, weight: .bold))
                             } else {
                                 Image(systemName: "arrow.down").font(.system(size: 20, weight: .bold))
                             }
@@ -818,7 +818,7 @@ struct AppDetailSheet: View {
                 Label("Downloading to device…", systemImage: "arrow.down.square.fill").font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.subtle)
                 Label(source.url.host ?? source.name, systemImage: "globe").font(.system(size: 13, design: .monospaced)).foregroundStyle(blue)
                 if onDevice {
-                    Label("\(ByteCountFormatter.string(fromByteCount: IPAInbox.size(app), countStyle: .file)) on device — no re-download at sign", systemImage: "checkmark.square.fill")
+                    Label("\(ByteCountFormatter.string(fromByteCount: IPAInbox.size(app), countStyle: .file)) on device — no re-download at sign", systemImage: "sdcard.fill")
                         .font(.system(size: 13, design: .monospaced)).foregroundStyle(blue)
                 }
             }
@@ -831,7 +831,7 @@ struct AppDetailSheet: View {
             Button { Task { await download() } } label: {
                 VStack(spacing: 4) {
                     if downloading { ProgressView().tint(blue).frame(height: 26) }
-                    else if onDevice { Image(systemName: "checkmark.circle.fill").font(.system(size: 26)) }
+                    else if onDevice { Image(systemName: "sdcard.fill").font(.system(size: 24)) }
                     else { Image(systemName: "arrow.down.circle").font(.system(size: 26)) }
                     Text(downloading ? "Downloading" : (onDevice ? "Downloaded" : "Download")).font(.system(size: 13, weight: .semibold))
                 }

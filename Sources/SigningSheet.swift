@@ -61,6 +61,8 @@ struct SigningSheet: View {
     // signing
     @State private var signing = false
     @State private var showTerminal = false
+    @State private var settingsJump: SettingsJump?
+    private enum SettingsJump: String, Identifiable { case ota, certs; var id: String { rawValue } }
     @State private var log: [String] = []
     @State private var lastEntitlements: [String: String] = [:]
     @State private var lastSizeBytes: Int64 = 0
@@ -173,6 +175,15 @@ struct SigningSheet: View {
                 macho: macho,
                 machoError: machoError
             )
+        }
+        .fullScreenCover(item: $settingsJump) { j in
+            Group {
+                switch j {
+                case .ota:   OTADomainScreen()
+                case .certs: CertificatesScreen()
+                }
+            }
+            .preferredColorScheme(.dark)
         }
         .sheet(isPresented: $showIconPicker) {
             DocPicker(types: [.png, .jpeg, .image]) { urls in
@@ -407,27 +418,33 @@ struct SigningSheet: View {
                 }
                 .padding(.horizontal, 6)
                 HStack(alignment: .top, spacing: 0) {
-                    detailTile(
-                        icon: "globe",
-                        iconColor: blue,
-                        iconBackground: blue.opacity(0.16),
-                        title: "DISTRIBUTED IDENTITY",
-                        titleColor: blue,
-                        primary: ServerConfig.installHost,
-                        secondary: "https://\(ServerConfig.installHost)",
-                        tertiary: "This is the public URL where your app will be available."
-                    )
+                    Button { settingsJump = .ota } label: {
+                        detailTile(
+                            icon: "globe",
+                            iconColor: blue,
+                            iconBackground: blue.opacity(0.16),
+                            title: "DISTRIBUTED IDENTITY",
+                            titleColor: blue,
+                            primary: ServerConfig.installHost,
+                            secondary: "https://\(ServerConfig.installHost)",
+                            tertiary: "This is the public URL where your app will be available."
+                        )
+                    }
+                    .buttonStyle(.plain)
                     Rectangle().fill(Theme.stroke).frame(width: 1).padding(.vertical, 18)
-                    detailTile(
-                        icon: "lock.fill",
-                        iconColor: success,
-                        iconBackground: success.opacity(0.16),
-                        title: "CERTIFICATE",
-                        titleColor: success,
-                        primary: ServerConfig.certMode == "local" ? "Local CA" : (ServerConfig.certMode == "custom" ? "Own cert" : "Let's Encrypt"),
-                        secondary: certStatusTitle,
-                        tertiary: certStatusSubtitle
-                    )
+                    Button { settingsJump = .certs } label: {
+                        detailTile(
+                            icon: "signature.zh",
+                            iconColor: success,
+                            iconBackground: success.opacity(0.16),
+                            title: "CERTIFICATE",
+                            titleColor: success,
+                            primary: ServerConfig.certMode == "local" ? "Local CA" : (ServerConfig.certMode == "custom" ? "Own cert" : "Let's Encrypt"),
+                            secondary: certStatusTitle,
+                            tertiary: certStatusSubtitle
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
                 .background(surface)
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))

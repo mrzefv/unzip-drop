@@ -69,7 +69,7 @@ private extension Data {
 
 // MARK: - Mach-O tools (shared by scanner + patcher)
 
-enum MachOTools {
+nonisolated enum MachOTools {
 
     struct Section { let segment: String; let name: String; let addr: UInt64; let offset: UInt64; let size: UInt64 }
     struct Segment { let name: String; let vmaddr: UInt64; let vmsize: UInt64; let fileoff: UInt64; let filesize: UInt64 }

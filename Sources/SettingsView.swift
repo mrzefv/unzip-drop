@@ -343,18 +343,8 @@ private struct StatusFooter: View {
                     .clipShape(Capsule())
 
                 Button {
-                    UIPasteboard.general.string = staff.mdid
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    didCopyMDID = true
-                    mdidResetTask?.cancel()
-                    mdidResetTask = nil
-                    let token = UUID()
-                    mdidResetToken = token
-                    mdidResetTask = Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 1_500_000_000)
-                        guard !Task.isCancelled, mdidResetToken == token else { return }
-                        didCopyMDID = false
-                        mdidResetTask = nil
+                    Task { @MainActor in
+                        copyMDID()
                     }
                 } label: {
                     (Text("MDID: ")
@@ -374,6 +364,23 @@ private struct StatusFooter: View {
         .frame(maxWidth: .infinity)
         .onDisappear {
             mdidResetTask?.cancel()
+            mdidResetTask = nil
+        }
+    }
+
+    @MainActor
+    private func copyMDID() {
+        UIPasteboard.general.string = staff.mdid
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        didCopyMDID = true
+        mdidResetTask?.cancel()
+        mdidResetTask = nil
+        let token = UUID()
+        mdidResetToken = token
+        mdidResetTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled, mdidResetToken == token else { return }
+            didCopyMDID = false
             mdidResetTask = nil
         }
     }

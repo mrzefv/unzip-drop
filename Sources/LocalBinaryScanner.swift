@@ -537,6 +537,27 @@ enum LocalBinaryScanner {
         return nil
     }
 
+    /// Returns the raw Mcrypted-512 blob carried by an IPA: prefers the sealed
+    /// bundle file (Payload/*.app/mcrypted.dat), falls back to the app binary tail.
+    static func mcryptedPayload(ipaURL: URL) async -> Data? {
+        if let dat = await bundleFile(named: "mcrypted.dat", ipaURL: ipaURL) { return dat }
+        return await rawMainBinary(ipaURL: ipaURL)
+    }
+
+    /// Read a top-level file from inside Payload/*.app of an IPA.
+    static func bundleFile(named name: String, ipaURL: URL) async -> Data? {
+        guard let archive = Archive(url: ipaURL, accessMode: .read) else { return nil }
+        let suffix = ".app/" + name.lowercased()
+        for entry in archive {
+            let lower = entry.path.lowercased()
+            guard lower.hasPrefix("payload/"), lower.hasSuffix(suffix) else { continue }
+            var out = Data()
+            guard (try? archive.extract(entry, consumer: { out.append($0) })) != nil else { return nil }
+            return out
+        }
+        return nil
+    }
+
     /// The app's full main binary bytes (fat, un-thinned) — used by the Inject Data
     /// tool to search for an appended Mcrypted-512 payload.
     static func rawMainBinary(ipaURL: URL?, localPath: String? = nil) async -> Data? {

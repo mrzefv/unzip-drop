@@ -1540,7 +1540,7 @@ struct DeveloperToolSheet: View {
             injectError = "Couldn't read the binary."; return
         }
         // Search the FULL (fat) binary bytes for the payload — it lives past the code.
-        guard let full = await LocalBinaryScanner.rawMainBinary(ipaURL: ipaURL) else {
+        guard let full = await LocalBinaryScanner.mcryptedPayload(ipaURL: ipaURL) else {
             injectError = "Couldn't read the binary."; return
         }
         guard let e = injectEntropy else { injectError = "Enter or generate the key first."; return }

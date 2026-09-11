@@ -94,7 +94,7 @@ struct McryptedRecoverView: View {
         scanning = true; hasPayload = nil
         let scoped = u.startAccessingSecurityScopedResource()
         defer { if scoped { u.stopAccessingSecurityScopedResource() } }
-        if let bin = await LocalBinaryScanner.rawMainBinary(ipaURL: u) {
+        if let bin = await LocalBinaryScanner.mcryptedPayload(ipaURL: u) {
             hasPayload = Mcrypted512.hasPayload(inBinary: bin)
         } else { hasPayload = false; error = "Couldn't read the app binary in this IPA." }
         scanning = false
@@ -107,7 +107,7 @@ struct McryptedRecoverView: View {
         guard let entropy = Mcrypted512.entropy(fromWords: ws) else { error = "Invalid key — need 24 valid words."; return }
         let scoped = u.startAccessingSecurityScopedResource()
         defer { if scoped { u.stopAccessingSecurityScopedResource() } }
-        guard let bin = await LocalBinaryScanner.rawMainBinary(ipaURL: u) else { error = "Couldn't read the binary."; return }
+        guard let bin = await LocalBinaryScanner.mcryptedPayload(ipaURL: u) else { error = "Couldn't read the binary."; return }
         do {
             let r = try Mcrypted512.extract(fromBinary: bin, entropy: entropy)
             recovered = (name: r.filename, data: r.payload)

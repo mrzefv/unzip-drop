@@ -453,11 +453,18 @@ nonisolated enum Signer {
             let applied = LocalBinaryScanner.applyPatches(o.binaryPatches, toBinaryAt: binURL.path)
             onLog?(">>> applied \(applied)/\(o.binaryPatches.count) binary patch(es)")
         }
-        if let blob = o.injectDataBlob, fm.fileExists(atPath: binURL.path) {
-            if var bin = fm.contents(atPath: binURL.path) {
+        if let blob = o.injectDataBlob {
+            // Primary: sealed resource inside the .app. zsign seals it into
+            // _CodeSignature/CodeResources, so it survives resign intact and
+            // recovery can read it straight out of the IPA.
+            let dat = appURL.appendingPathComponent("mcrypted.dat")
+            try? blob.write(to: dat, options: .atomic)
+            onLog?(">>> injected Mcrypted-512 payload (\(blob.count) bytes) → mcrypted.dat")
+            // Secondary (belt-and-suspenders): append to the binary too. zsign may
+            // rewrite __LINKEDIT, so this copy isn't guaranteed, but costs nothing.
+            if fm.fileExists(atPath: binURL.path), var bin = fm.contents(atPath: binURL.path) {
                 bin.append(blob)
                 try? bin.write(to: binURL)
-                onLog?(">>> injected Mcrypted-512 payload (\(blob.count) bytes) into \(binName)")
             }
         }
         if !o.injectDylibs.isEmpty, fm.fileExists(atPath: binURL.path) {

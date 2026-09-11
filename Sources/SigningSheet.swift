@@ -178,11 +178,14 @@ struct SigningSheet: View {
             DeveloperToolSheet(
                 mode: developerToolMode,
                 ipaURL: ipaURL,
+                appName: meta.name,
+                appBundleID: meta.bundleID,
                 macho: macho,
                 machoError: machoError,
                 patches: $binaryPatches,
                 injectBlob: $injectDataBlob,
-                injectName: $injectDataName
+                injectName: $injectDataName,
+                stageDylib: { url in dylibs.append(DylibItem(url: url)); showDeveloperTool = false }
             )
         }
         .fullScreenCover(item: $settingsJump) { j in
@@ -1186,11 +1189,14 @@ struct DeveloperToolSheet: View {
 
     let mode: Mode
     let ipaURL: URL
+    let appName: String
+    let appBundleID: String
     let macho: MachOReport?
     let machoError: String?
     @Binding var patches: [BinaryPatch]
     @Binding var injectBlob: Data?
     @Binding var injectName: String
+    var stageDylib: (URL) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
     @State private var loading = true
@@ -1569,6 +1575,8 @@ struct DeveloperToolSheet: View {
     @State private var mv1eLoading = false
     @State private var mv1eQuery = ""
     @State private var mv1eShowSwift = false
+    @State private var liveBuilding = false
+    @State private var liveMsg: String?
 
     private var mv1eClasses: [MV1E.DumpedClass] {
         let all = mv1eResult?.classes ?? []
@@ -1584,6 +1592,16 @@ struct DeveloperToolSheet: View {
             Section {
                 Text("Static class dump — reads Objective-C classes, methods, ivars, properties, protocols and Swift type names straight from the app binary. No emulation; the app never runs.")
                     .font(.caption).foregroundStyle(Theme.subtle)
+            }.listRowBackground(Color(white: 0.08))
+
+            Section("Live inspector") {
+                Text("Inject the mv1E Live companion, sign & install — then the app's real view hierarchy + 3D debugger show in Settings › mv1E Live, and live objects link back to these classes.")
+                    .font(.caption).foregroundStyle(Theme.subtle)
+                Button { Task { await injectLive() } } label: {
+                    HStack { if liveBuilding { ProgressView().tint(blue) } else { Image(systemName: "cube.transparent") }
+                        Text(liveBuilding ? "Dispatching build…" : "Inject Live inspector (build on Actions)").fontWeight(.semibold) }
+                }.disabled(liveBuilding)
+                if let liveMsg { Text(liveMsg).font(.caption).foregroundStyle(liveMsg.hasPrefix("✓") ? .green : .orange) }
             }.listRowBackground(Color(white: 0.08))
 
             if mv1eResult == nil {
@@ -1661,6 +1679,15 @@ struct DeveloperToolSheet: View {
                     Text(m.signature).font(.system(size: 13, design: .monospaced)).foregroundStyle(m.isClassMethod ? blue : Theme.text)
                 }.listRowBackground(Color(white: 0.08))
             }
+            Section {
+                NavigationLink {
+                    CopilotView(app: appName, bundleID: appBundleID, cls: cls, ipaURL: ipaURL, stageDylib: stageDylib)
+                } label: { Label("Ask Copilot to write a dylib", systemImage: "sparkles") }
+                    .listRowBackground(Color(white: 0.08))
+            } footer: {
+                Text("Copilot gets this class's structure (selectors, ivars, protocols) — not the binary — and writes a tweak targeting it.")
+                    .foregroundStyle(Theme.subtle)
+            }
         }
         .scrollContentBackground(.hidden).background(Color.black)
         .navigationTitle(cls.name).navigationBarTitleDisplayMode(.inline)
@@ -1670,6 +1697,25 @@ struct DeveloperToolSheet: View {
         mv1eLoading = true
         mv1eResult = await MV1E.dump(ipaURL: ipaURL)
         mv1eLoading = false
+    }
+
+    private func injectLive() async {
+        liveBuilding = true; liveMsg = nil
+        guard let url = Bundle.main.url(forResource: "MV1ELive", withExtension: "xm"),
+              let src = try? String(contentsOf: url) else {
+            liveMsg = "MV1ELive.xm not bundled in the app."; liveBuilding = false; return
+        }
+        do {
+            let d = UserDefaults.standard
+            let owner = d.string(forKey: "uzd_owner") ?? ""
+            let repo = d.string(forKey: "uzd_repo") ?? ""
+            let branch = d.string(forKey: "uzd_branch") ?? "main"
+            let token = Keychain.get("gh_token") ?? ""
+            try await CopilotBuild.dispatch(source: src, className: "MV1ELive",
+                owner: owner, repo: repo, branch: branch, token: token)
+            liveMsg = "✓ Pushed + dispatched. Watch the Build tab; the .dylib arrives as an artifact, then inject it here."
+        } catch { liveMsg = error.localizedDescription }
+        liveBuilding = false
     }
 
     // MARK: Engine calls

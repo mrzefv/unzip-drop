@@ -18,6 +18,12 @@ struct MV1ELiveView: View {
     @State private var localURL = ""
     @State private var mode = 0     // 0 = 3D, 1 = tree
     @State private var selected: LiveNode?
+    @State private var dumped: [MV1E.DumpedClass] = []
+    @State private var localIPA: URL?
+    @State private var dumping = false
+    @State private var copilotTarget: MV1E.DumpedClass?
+    @State private var jumpClass: MV1E.DumpedClass?
+    @EnvironmentObject private var config: Config
 
     private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
 
@@ -28,6 +34,13 @@ struct MV1ELiveView: View {
             }
             .background(Color.black.ignoresSafeArea())
             .navigationTitle("mv1E Live").navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $jumpClass) { c in NavigationStack { staticDetail(c) }.preferredColorScheme(.dark) }
+            .sheet(item: $copilotTarget) { c in
+                NavigationStack {
+                    CopilotView(app: capture?.app ?? c.name, bundleID: capture?.bundle ?? "", cls: c,
+                                ipaURL: localIPA ?? URL(fileURLWithPath: "/dev/null"), stageDylib: { _ in })
+                }.preferredColorScheme(.dark)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Done") { dismiss() } }
                 if capture != nil {
@@ -85,11 +98,23 @@ struct MV1ELiveView: View {
                     SceneView(scene: buildScene(cap), options: [.allowsCameraControl, .autoenablesDefaultLighting])
                         .background(Color.black)
                     if let s = selected {
-                        VStack(alignment: .leading, spacing: 4) {
+                        let match = MV1EBridge.match(s.cls, in: dumped)
+                        VStack(alignment: .leading, spacing: 6) {
                             Text(s.cls).font(.system(size: 15, weight: .bold, design: .monospaced)).foregroundStyle(blue)
                             Text(String(format: "{%.0f, %.0f, %.0f × %.0f}", s.x, s.y, s.w, s.h))
                                 .font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.text)
                             if let t = s.text, !t.isEmpty { Text("\"\(t)\"").font(.caption).foregroundStyle(Theme.subtle).lineLimit(2) }
+                            if dumping { HStack(spacing: 6) { ProgressView().tint(blue); Text("Dumping classes…").font(.caption2).foregroundStyle(Theme.subtle) } }
+                            else if let m = match {
+                                HStack(spacing: 10) {
+                                    Button { jumpClass = m } label: { Label("\(m.methods.count) methods", systemImage: "list.bullet.rectangle").font(.caption) }
+                                    Button { copilotTarget = m } label: { Label("Ask Copilot", systemImage: "sparkles").font(.caption).foregroundStyle(blue) }
+                                }
+                            } else if !dumped.isEmpty {
+                                Text("No static match — class may be private/stripped.").font(.caption2).foregroundStyle(.orange)
+                            } else if localIPA == nil {
+                                Text("Import this app's IPA to Library to link static classes.").font(.caption2).foregroundStyle(Theme.subtle)
+                            }
                         }
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                         .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12)).padding()
@@ -165,17 +190,61 @@ struct MV1ELiveView: View {
         return scene
     }
 
+
+    // Static class detail reached by tapping a live object (reuses the dump).
+    private func staticDetail(_ cls: MV1E.DumpedClass) -> some View {
+        List {
+            Section("@interface") {
+                Text("\(cls.name)\(cls.superName.map { " : \($0)" } ?? "")")
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced)).foregroundStyle(Theme.text)
+                if !cls.protocols.isEmpty {
+                    Text("<\(cls.protocols.joined(separator: ", "))>").font(.system(size: 12, design: .monospaced)).foregroundStyle(blue)
+                }
+            }.listRowBackground(Color(white: 0.08))
+            if !cls.ivars.isEmpty {
+                Section("Ivars (\(cls.ivars.count))") {
+                    ForEach(cls.ivars) { iv in
+                        HStack { Text(iv.name).font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.text)
+                            Spacer(); Text(iv.type).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.subtle).lineLimit(1) }
+                    }.listRowBackground(Color(white: 0.08))
+                }
+            }
+            Section("Methods (\(cls.methods.count))") {
+                ForEach(cls.methods) { m in
+                    Text(m.signature).font(.system(size: 13, design: .monospaced)).foregroundStyle(m.isClassMethod ? blue : Theme.text)
+                }.listRowBackground(Color(white: 0.08))
+            }
+            Section {
+                Button { copilotTarget = cls; jumpClass = nil } label: { Label("Ask Copilot to write a dylib", systemImage: "sparkles") }
+                    .listRowBackground(Color(white: 0.08))
+            }
+        }
+        .scrollContentBackground(.hidden).background(Color.black)
+        .navigationTitle(cls.name).navigationBarTitleDisplayMode(.inline)
+    }
+
     // MARK: Data
 
     private func refreshIndex() async { loading = true; index = await MV1ELive.index(); loading = false }
     private func load(bundle: String) async {
         loading = true; error = nil
-        do { capture = try await MV1ELive.fetch(bundle: bundle) } catch { self.error = error.localizedDescription }
+        do { capture = try await MV1ELive.fetch(bundle: bundle); await autoDump(bundle: bundle) }
+        catch { self.error = error.localizedDescription }
         loading = false
+    }
+
+    /// Background class-dump of the SAME app's local IPA, so live taps can jump to
+    /// the static class + Copilot. Silent if the IPA isn't in the inbox.
+    private func autoDump(bundle: String) async {
+        guard let ipa = MV1EBridge.localIPA(forBundle: bundle) else { dumped = []; localIPA = nil; return }
+        localIPA = ipa; dumping = true
+        if let r = await MV1E.dump(ipaURL: ipa) { dumped = r.classes }
+        dumping = false
     }
     private func loadLocal() async {
         loading = true; error = nil
-        do { capture = try await MV1ELive.fetchLocal(urlString: localURL) } catch { self.error = error.localizedDescription }
+        do { let c = try await MV1ELive.fetchLocal(urlString: localURL); capture = c; await autoDump(bundle: c.bundle) }
+        catch { self.error = error.localizedDescription }
         loading = false
     }
 }

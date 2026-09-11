@@ -102,3 +102,32 @@ nonisolated enum MV1ELive {
         return out
     }
 }
+
+// MARK: - Live ↔ static bridge
+
+nonisolated enum MV1EBridge {
+    /// Bare class name after the last "." (drops Swift module prefix like
+    /// "audiomack_iphone.PaywallSlimTableViewCell" → "PaywallSlimTableViewCell").
+    static func bareName(_ runtime: String) -> String {
+        runtime.split(separator: ".").last.map(String.init) ?? runtime
+    }
+
+    /// Find the static DumpedClass matching a live node's runtime class name.
+    /// Exact match first, then suffix-after-last-dot, then case-insensitive fuzzy.
+    static func match(_ liveClass: String, in classes: [MV1E.DumpedClass]) -> MV1E.DumpedClass? {
+        if let exact = classes.first(where: { $0.name == liveClass }) { return exact }
+        let bare = bareName(liveClass)
+        if let byBare = classes.first(where: { bareName($0.name) == bare }) { return byBare }
+        return classes.first { $0.name.caseInsensitiveCompare(bare) == .orderedSame
+            || bareName($0.name).caseInsensitiveCompare(bare) == .orderedSame }
+    }
+
+    /// Resolve a bundle id to a local IPA in the inbox (so we can auto class-dump it).
+    static func localIPA(forBundle bundle: String) -> URL? {
+        let dir = AppPaths.dir("inbox")
+        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter({ $0.pathExtension.lowercased() == "ipa" }) else { return nil }
+        for u in files { if let m = try? IPAMeta.read(u), m.bundleID == bundle { return u } }
+        return nil
+    }
+}

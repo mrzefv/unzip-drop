@@ -21,6 +21,7 @@ struct SignedView: View {
     }
 
     @State private var installCounts: [String: Int] = [:]
+    @State private var showSearch = false
 
     var body: some View {
         ZStack {
@@ -29,30 +30,10 @@ struct SignedView: View {
                 LazyVStack(spacing: 0) {
                     if signed.entries.isEmpty {
                         Card { Text("Nothing signed yet. Library tab › pick an IPA › Sign.").font(.caption).foregroundStyle(Theme.subtle) }
-                    } else {
-                        MSignSearchField(placeholder: "Search", text: $search)
+                    } else if showSearch {
+                        MSignSearchField(placeholder: "Search", text: $search).padding(.bottom, 8)
                     }
                     if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) }.padding(.bottom, 8) }
-                    if ota.tracing {
-                        Card { HStack(spacing: 10) { ProgressView().tint(Theme.accent); Text("Watching installd… report in ~25s.").font(.caption).foregroundStyle(Theme.subtle) } }
-                    }
-                    if let r = ota.lastReport {
-                        Card {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Label("Install trace", systemImage: "waveform.path.ecg").font(.headline).foregroundStyle(Theme.text)
-                                    Spacer()
-                                    Text(r.delivered ? "IPA DELIVERED" : "NOT DELIVERED")
-                                        .font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(0.5)
-                                        .padding(.horizontal, 7).padding(.vertical, 3)
-                                        .background((r.delivered ? Color.green : Color.orange).opacity(0.18))
-                                        .foregroundStyle(r.delivered ? .green : .orange).clipShape(Capsule())
-                                }
-                                Text(r.diagnosis).font(.system(size: 13)).foregroundStyle(Theme.text)
-                                if let p = r.profileNote { Text(p).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.subtle) }
-                            }
-                        }
-                    }
                     ForEach(Array(entries.enumerated()), id: \.element.id) { idx, e in
                         row(e)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -68,7 +49,12 @@ struct SignedView: View {
             .task { installCounts = await ZefvVPS.installCounts() }
             .safeAreaInset(edge: .top, spacing: 0) {
                 TabTitleBar(title: "Signed", center: "\(signed.entries.count) Apps") {
-                    EmptyView()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.16)) { showSearch.toggle(); if !showSearch { search = "" } }
+                    } label: {
+                        Image(systemName: showSearch ? "xmark" : "magnifyingglass")
+                            .font(.system(size: 18, weight: .semibold)).foregroundStyle(SSTheme.tintColor)
+                    }
                 }
             }
         }

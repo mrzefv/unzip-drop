@@ -1636,14 +1636,17 @@ struct InstallPromptOverlay: View {
                         Text("\(source) | ᴍʀZefv").font(.system(size: 12, weight: .semibold)).foregroundStyle(blue).padding(.vertical, 12)
                     }
                 }
-                .frame(maxHeight: 520)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxHeight: 460)
                 Divider().overlay(Color.white.opacity(0.10))
                 HStack(spacing: 0) {
-                    Button(action: onCancel) { Text("Cancel").font(.system(size: 16)).foregroundStyle(blue).frame(maxWidth: .infinity).padding(.vertical, 14) }
-                    Rectangle().fill(Color.white.opacity(0.10)).frame(width: 1)
-                    Button(action: onInstall) { Text("Install").font(.system(size: 16, weight: .bold)).foregroundStyle(blue).frame(maxWidth: .infinity).padding(.vertical, 14) }
+                    Button(action: onCancel) { Text("Cancel").font(.system(size: 16)).foregroundStyle(blue).frame(maxWidth: .infinity, minHeight: 52) }
+                    Rectangle().fill(Color.white.opacity(0.10)).frame(width: 1, height: 52)
+                    Button(action: onInstall) { Text("Install").font(.system(size: 16, weight: .bold)).foregroundStyle(blue).frame(maxWidth: .infinity, minHeight: 52) }
                 }
+                .frame(height: 52)
             }
+            .fixedSize(horizontal: false, vertical: true)
             .background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .frame(maxWidth: 360)
             .padding(24)
@@ -1742,33 +1745,33 @@ struct SentToHomeOverlay: View {
     var body: some View {
         ZStack {
             Color.black.opacity(0.5).ignoresSafeArea()
-            VStack(spacing: 12) {
+            VStack(spacing: 9) {
                 ZStack(alignment: .bottomTrailing) {
-                    iconThumb(78)
+                    iconThumb(60)
                     ZStack {
-                        Circle().fill(Color.black).frame(width: 28, height: 28)
-                        Image(systemName: "checkmark.circle.fill").font(.system(size: 26))
+                        Circle().fill(Color.black).frame(width: 22, height: 22)
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 20))
                             .foregroundStyle(Color(red: 0.2, green: 1.0, blue: 0.45))
                     }
-                    .offset(x: 6, y: 6)
+                    .offset(x: 5, y: 5)
                 }
-                Text(name).font(.system(size: 14)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
-                Text("Sent to Home Screen").font(.system(size: 26, weight: .bold)).foregroundStyle(.white)
+                Text(name).font(.system(size: 13)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                Text("Sent to Home Screen").font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
                     .multilineTextAlignment(.center)
-                Text(host).font(.system(size: 15, weight: .semibold, design: .monospaced))
+                Text(host).font(.system(size: 13, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.85))
-                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .padding(.horizontal, 14).padding(.vertical, 6)
                     .background(Color(white: 0.18)).clipShape(Capsule())
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.12)).frame(height: 6)
-                        Capsule().fill(blue).frame(width: g.size.width * progress, height: 6)
+                        Capsule().fill(Color.white.opacity(0.12)).frame(height: 5)
+                        Capsule().fill(blue).frame(width: g.size.width * progress, height: 5)
                     }
                 }
-                .frame(height: 6).padding(.horizontal, 24).padding(.top, 4)
+                .frame(height: 5).padding(.horizontal, 20).padding(.top, 2)
             }
-            .padding(.vertical, 28).padding(.horizontal, 28)
-            .frame(maxWidth: 320)
+            .padding(.vertical, 20).padding(.horizontal, 22)
+            .frame(maxWidth: 270)
             .background(Color(white: 0.11)).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .onAppear { withAnimation(.easeInOut(duration: 2.4)) { progress = 1 } }
         }

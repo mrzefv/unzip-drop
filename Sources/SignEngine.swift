@@ -427,6 +427,12 @@ nonisolated enum Signer {
             _ = ZsignSigner.removeDylibs(inMachO: binURL.path, o.removeDylibs)
             onLog?(">>> removed \(o.removeDylibs.count) dylib load command(s)")
         }
+        if !o.injectDylibs.isEmpty, fm.fileExists(atPath: binURL.path) {
+            // Substrate-linked tweaks (built against CydiaSubstrate / MSHookFunction /
+            // %hook) need ElleKit's shim present in Frameworks/ or they silently fail to
+            // load at launch. Stage it once before injecting the user's dylibs.
+            Signer.installSubstrate(into: appURL, mainExe: binURL, onLog: onLog)
+        }
         for d in o.injectDylibs {
             let folder = o.injectFolder == "Frameworks/" ? appURL.appendingPathComponent("Frameworks", isDirectory: true) : appURL
             try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -439,6 +445,39 @@ nonisolated enum Signer {
         }
     }
 
+
+    // MARK: - ElleKit (CydiaSubstrate shim)
+
+    /// Unzips the bundled `CydiaSubstrate.framework.zip` into `App.app/Frameworks/`
+    /// and weak-links it into the main executable, so tweaks that depend on
+    /// `@rpath/CydiaSubstrate.framework/CydiaSubstrate` (ElleKit / substrate hooks)
+    /// resolve at launch. No-op if the framework is already present or the zip
+    /// isn't bundled in the app.
+    nonisolated static func installSubstrate(into appURL: URL, mainExe exeURL: URL, onLog: ((String) -> Void)?) {
+        let fm = FileManager.default
+        let frameworks = appURL.appendingPathComponent("Frameworks", isDirectory: true)
+        let dest = frameworks.appendingPathComponent("CydiaSubstrate.framework", isDirectory: true)
+
+        if !fm.fileExists(atPath: dest.path) {
+            guard let zip = Bundle.main.url(forResource: "CydiaSubstrate.framework", withExtension: "zip") else {
+                onLog?(">>> note: CydiaSubstrate.framework.zip not bundled — substrate tweaks may not load")
+                return
+            }
+            try? fm.createDirectory(at: frameworks, withIntermediateDirectories: true)
+            do { try fm.unzipItem(at: zip, to: frameworks) }
+            catch { onLog?(">>> failed to stage ElleKit: \(error.localizedDescription)"); return }
+            onLog?(">>> staged ElleKit CydiaSubstrate.framework → Frameworks/")
+        }
+
+        let fwExe = dest.appendingPathComponent("CydiaSubstrate")
+        guard fm.fileExists(atPath: fwExe.path) else { return }
+        try? ZsignSigner.injectDylib(
+            intoMachO: exeURL.path,
+            dylibPath: "@executable_path/Frameworks/CydiaSubstrate.framework/CydiaSubstrate",
+            weak: true, createIfMissing: true
+        )
+        onLog?(">>> linked @executable_path/Frameworks/CydiaSubstrate.framework/CydiaSubstrate")
+    }
 
     // MARK: - Entitlement scrubbers
 

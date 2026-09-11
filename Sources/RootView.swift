@@ -84,24 +84,30 @@ private struct TabBar: View {
     ]
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             ForEach(Array(tabs.enumerated()), id: \.offset) { i, t in
-                Button { selected = i } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: t.icon).font(.system(size: 20))
-                        Text(t.label).font(.system(size: 11, weight: .medium))
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selected = i }
+                    UISelectionFeedbackGenerator().selectionChanged()
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: t.icon).font(.system(size: 19, weight: .semibold))
+                        Text(t.label).font(.system(size: 10.5, weight: .semibold))
                     }
                     .foregroundStyle(selected == i ? Theme.accent : Theme.subtle)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity).frame(height: 52)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(Theme.accent.opacity(selected == i ? 0.16 : 0))
+                    )
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .frame(height: 50)
-        .padding(.top, 8)
-        .background(BarBlur())
-        .overlay(Rectangle().fill(Theme.stroke).frame(height: 0.5), alignment: .top)
+        .padding(4)
+        // Floating Liquid Glass capsule; the tabs' scroll views run underneath it.
+        .floatingGlassBar(edge: .bottom, cornerRadius: 30)
     }
 }
 
@@ -147,9 +153,8 @@ struct GitHubHubScreen: View {
                     }
                 }
             }
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .background(Theme.bg)
-            .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .floatingGlassBar(edge: .top)
 
             // Segmented pages
             HStack(spacing: 6) {

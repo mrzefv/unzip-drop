@@ -383,8 +383,7 @@ private struct SourceDetailScreen: View {
                         .padding(.horizontal, 16).padding(.vertical, 8)
                 }
             }
-            .background(BarBlur())
-            .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
+            .floatingGlassBar(edge: .top)
         }
         .background(Color.black.ignoresSafeArea())
         .task { await load() }
@@ -679,8 +678,7 @@ struct AppDetailSheet: View {
                 }
             }
             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 10)
-            .background(BarBlur())
-            .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
+            .floatingGlassBar(edge: .top)
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
@@ -712,7 +710,7 @@ struct AppDetailSheet: View {
                 .padding(16)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                bottomBar.background(BarBlur())
+                bottomBar.floatingGlassBar(edge: .bottom)
             }
         }
         .background(Color.black.ignoresSafeArea())
@@ -874,14 +872,54 @@ struct AppDetailSheet: View {
 }
 
 
-// MARK: - Bar blur: system blur tinted blackish-grey so bars blend with the black background
+// MARK: - Liquid Glass bars
+//
+// Real `.glassEffect` on iOS 26; on 16–18 a material with a glass rim + drop
+// shadow so it reads the same. Bars are meant to FLOAT: put them in
+// `.safeAreaInset(edge:)` so the scroll content slides underneath them.
 
+struct GlassSurface: ViewModifier {
+    var cornerRadius: CGFloat = 26
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(.regular, in: shape)
+                .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
+        } else {
+            content
+                .background(.ultraThinMaterial, in: shape)
+                .background(Color(white: 0.08).opacity(0.35), in: shape)
+                .overlay(shape.strokeBorder(
+                    LinearGradient(colors: [.white.opacity(0.32), .white.opacity(0.06), .white.opacity(0.14)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8))
+                .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
+        }
+    }
+}
+
+extension View {
+    /// Glass pill/card surface.
+    func liquidGlass(cornerRadius: CGFloat = 26) -> some View { modifier(GlassSurface(cornerRadius: cornerRadius)) }
+
+    /// Floating glass bar inset from the screen edges. Use inside `.safeAreaInset(edge:)`
+    /// so content scrolls beneath it; the bar itself sits in the safe area.
+    func floatingGlassBar(edge: Edge = .bottom, cornerRadius: CGFloat = 26) -> some View {
+        self.liquidGlass(cornerRadius: cornerRadius)
+            .padding(.horizontal, 12)
+            .padding(edge == .top ? .bottom : .top, 6)
+            .padding(edge == .top ? .top : .bottom, 2)
+    }
+}
+
+/// Edge-to-edge glass (kept for full-width bars that aren't meant to float).
 struct BarBlur: View {
     var body: some View {
         ZStack {
             Rectangle().fill(.ultraThinMaterial)
-            Color(white: 0.06).opacity(0.52)
+            Color(white: 0.06).opacity(0.35)
         }
+        .overlay(Rectangle().fill(.white.opacity(0.10)).frame(height: 0.5), alignment: .bottom)
         .ignoresSafeArea()
     }
 }

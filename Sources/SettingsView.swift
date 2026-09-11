@@ -278,7 +278,12 @@ private struct DetailScreen<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 14) { content }
+                .padding(16)
+        }
+        // Floating glass header — content scrolls underneath it.
+        .safeAreaInset(edge: .top, spacing: 0) {
             ZStack {
                 HStack(spacing: 8) {
                     Image(systemName: "archivebox.fill").foregroundStyle(Theme.accent)
@@ -304,14 +309,8 @@ private struct DetailScreen<Content: View>: View {
                     }
                 }
             }
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .background(BarBlur())
-            .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
-
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 14) { content }
-                    .padding(16)
-            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .floatingGlassBar(edge: .top)
         }
         .background(Theme.bg.ignoresSafeArea())
         .scrollDismissesKeyboard(.interactively)

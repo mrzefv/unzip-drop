@@ -111,7 +111,7 @@ struct SigningSheet: View {
                 }
                 .padding(12)
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) { signBar.background(BarBlur()) }
+            .safeAreaInset(edge: .bottom, spacing: 0) { signBar.floatingGlassBar(edge: .bottom) }
         }
         .background(Color.black.ignoresSafeArea())
         .fullScreenCover(isPresented: $showTerminal) {

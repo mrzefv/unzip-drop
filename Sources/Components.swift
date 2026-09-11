@@ -33,8 +33,7 @@ struct TopBar: View {
             Spacer()
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(BarBlur())
-        .overlay(Rectangle().fill(Theme.stroke).frame(height: 1), alignment: .bottom)
+        .floatingGlassBar(edge: .top)
     }
 }
 

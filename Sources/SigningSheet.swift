@@ -20,7 +20,6 @@ struct SigningSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var certs = CertificateStore.shared
     @ObservedObject private var staff = StaffGate.shared
-    @ObservedObject private var staff = StaffGate.shared
     @ObservedObject private var ota = OTAInstaller.shared
 
     // identity

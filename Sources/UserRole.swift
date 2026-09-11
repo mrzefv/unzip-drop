@@ -2,17 +2,14 @@
 //  UserRole.swift
 //  SIPA / msign
 //
-//  Local, server-independent role model.
-//
-//  Everyone is `.member` by default. `.developer` and `.admin` are granted
-//  on-device via an unlock code (see MSAccountService.unlock) and the grant
-//  is persisted in the Keychain (AVXIDManager), so it survives app updates
-//  and delete/reinstall — no API involved.
+//  Role model. Everyone is `.member` by default; `.developer` / `.admin` are
+//  decided server-side by StaffGate (VPS allowlist keyed on the device MDID)
+//  and cached in the Keychain.
 //
 
 import SwiftUI
 
-enum UserRole: String, Codable, CaseIterable, Comparable {
+nonisolated enum UserRole: String, Codable, CaseIterable, Comparable, Sendable {
     case member
     case developer
     case admin
@@ -80,8 +77,9 @@ extension View {
     ///     SomeAdminRow().roleGated(.admin)
     ///     advancedSection.roleGated(.developer)
     @ViewBuilder
+    @MainActor
     func roleGated(_ min: UserRole) -> some View {
-        if MSAccountService.shared.role >= min {
+        if StaffGate.shared.role >= min {
             self
         }
     }

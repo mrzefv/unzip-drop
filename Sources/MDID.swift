@@ -6,7 +6,7 @@
 //
 //  Roles are NO LONGER granted by on-device unlock codes — that shipped the code
 //  hashes in the binary. Role is decided server-side by StaffGate (VPS allowlist
-//  keyed on this MDID). UserRole is kept for the UI gates.
+//  keyed on this MDID). UserRole lives in UserRole.swift.
 //
 
 import Foundation
@@ -14,17 +14,6 @@ import Security
 import UIKit
 import CommonCrypto
 import Darwin
-
-// MARK: - UserRole
-
-nonisolated enum UserRole: String, Codable, CaseIterable, Comparable {
-    case member, developer, admin
-    var rank: Int { self == .member ? 0 : (self == .developer ? 1 : 2) }
-    static func < (l: UserRole, r: UserRole) -> Bool { l.rank < r.rank }
-    var title: String { self == .member ? "Member" : (self == .developer ? "Developer" : "Admin") }
-    var isElevated: Bool { self >= .developer }   // devs + admins see dev/inspection tools
-    var isAdmin: Bool { self == .admin }
-}
 
 // MARK: - Device fingerprint → MDID
 
@@ -98,4 +87,11 @@ nonisolated final class MDIDManager {
         guard SecItemCopyMatching(q as CFDictionary, &r) == errSecSuccess, let d = r as? Data else { return nil }
         return String(data: d, encoding: .utf8)
     }
+}
+
+// MARK: - Convenience accessor
+
+nonisolated enum MDID {
+    /// The device's stable MDID (MS-XXXXXX-XX).
+    static var current: String { MDIDManager.shared.mdid() }
 }

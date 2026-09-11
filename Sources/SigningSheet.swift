@@ -341,15 +341,12 @@ struct SigningSheet: View {
                         Text(certSubtitle(c)).font(.system(size: 12.5, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    Button {} label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 48, height: 48)
-                            .background(Color.white.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 48, height: 48)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 .padding(.horizontal, 6)
                 HStack(alignment: .top, spacing: 0) {

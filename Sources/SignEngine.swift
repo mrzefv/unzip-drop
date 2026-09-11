@@ -10,7 +10,7 @@ import Foundation
 import Darwin
 import ZIPFoundation
 
-nonisolated func xmlPlistData(fromMobileProvision data: Data) -> Data? {
+func xmlPlistData(fromMobileProvision data: Data) -> Data? {
     guard let start = data.range(of: Data("<?xml".utf8)),
           let end = data.range(of: Data("</plist>".utf8)) else { return nil }
     return data.subdata(in: start.lowerBound..<end.upperBound)

@@ -825,7 +825,7 @@ private struct OTADomainScreen: View {
                     }
                 }
 
-                Section("Setup") {
+                Section {
                     if st.mode != "local" {
                         TNav(icon: "network", title: "Install host & DNS", subtitle: st.host) { OTAHostScreen(st: st) }
                     }
@@ -837,6 +837,8 @@ private struct OTADomainScreen: View {
                     default:
                         TNav(icon: "arrow.triangle.2.circlepath.circle", title: "zefv.dev certificate", subtitle: st.cached ? "Pulled from VPS · \(st.fetchedAt?.formatted(date: .abbreviated, time: .shortened) ?? "")" : "Bundled in IPA · pull from VPS to refresh") { VPSCertScreen(st: st) }
                     }
+                } header: {
+                    Text("Setup")
                 }
 
                 Section {
@@ -886,7 +888,7 @@ private struct OTAHostScreen: View {
                 .foregroundStyle(Theme.subtle)
             }
 
-            Section("DNS") {
+            Section {
                 HStack(spacing: 10) {
                     Image(systemName: checking ? "hourglass" : (dnsLoopback == true ? "checkmark.circle.fill" : (dnsLoopback == false ? "xmark.octagon.fill" : "questionmark.circle")))
                         .foregroundStyle(dnsLoopback == true ? .green : (dnsLoopback == false ? .red : Theme.subtle))
@@ -898,6 +900,8 @@ private struct OTAHostScreen: View {
                 }
                 .listRowBackground(Theme.card)
                 TButton(title: "Check DNS", icon: "arrow.clockwise", busy: checking, enabled: domainOK) { Task { await check() } }
+            } header: {
+                Text("DNS")
             }
 
             Section {
@@ -953,7 +957,7 @@ private struct VPSCertScreen: View {
                 Text("certbot on the VPS renews *.zefv.dev through the Cloudflare DNS API; the app auto-pulls on install when within \(ServerConfig.refreshBufferDays) days of expiry. Pull latest forces it now.").foregroundStyle(Theme.subtle)
             }
 
-            Section("Cert source") {
+            Section {
                 TField(label: "URL", text: $sourceURL, placeholder: ServerConfig.defaultCertSourceURL, keyboard: .URL)
                 TField(label: "Token", text: $sourceToken, placeholder: ServerConfig.defaultCertSourceToken, keyboard: .asciiCapable)
                 TButton(title: sourceSaved ? "Saved" : "Save source", icon: sourceSaved ? "checkmark.circle.fill" : "server.rack") {
@@ -962,6 +966,8 @@ private struct VPSCertScreen: View {
                     sourceURL = ServerConfig.certSourceURL; sourceToken = ServerConfig.certSourceToken; sourceSaved = true
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                 }
+            } header: {
+                Text("Cert source")
             }
         }
         .onChange(of: sourceURL) { _ in sourceSaved = false }
@@ -1043,7 +1049,7 @@ private struct OTAFilesScreen: View {
                     st.reload(); UINotificationFeedbackGenerator().notificationOccurred(.success)
                 }
             }
-            Section("Files") {
+            Section {
                 if st.files.isEmpty {
                     Text("Nothing exported yet.").foregroundStyle(Theme.subtle).listRowBackground(Theme.card)
                 }
@@ -1062,6 +1068,8 @@ private struct OTAFilesScreen: View {
                     }
                     .listRowBackground(Theme.card)
                 }
+            } header: {
+                Text("Files")
             }
             if !st.files.isEmpty {
                 Section { TButton(title: "Clear folder", icon: "trash", role: .destructive) { OTAFiles.clear(); st.reload() } }
@@ -1105,7 +1113,7 @@ private struct LocalCAScreen: View {
                 Text("Generates a root CA on this device (OpenSSL), signs a leaf for your OTA host, and serves installs with it. Private keys stay in the Keychain (ThisDeviceOnly) — public certs are mirrored to iCloud Keychain so a reinstall keeps the same root.").foregroundStyle(Theme.subtle)
             }
 
-            Section("1 · Host & leaf") {
+            Section {
                 TField(label: "OTA host", text: $host, placeholder: ServerConfig.defaultInstallHost, keyboard: .URL)
                 HStack(spacing: 10) {
                     Image(systemName: dnsChecking ? "hourglass" : (dnsLoopback == true ? "checkmark.circle.fill" : (dnsLoopback == false ? "xmark.octagon.fill" : "questionmark.circle")))
@@ -1117,23 +1125,27 @@ private struct LocalCAScreen: View {
                 }
                 .listRowBackground(Theme.card)
                 TButton(title: working ? "Working…" : (st.hasLeaf ? "Re-issue leaf for host" : "Create CA & issue leaf"), icon: "checkmark.seal.fill", busy: working) { Task { await issue() } }
+            } header: {
+                Text("1 · Host & leaf")
             } footer: {
                 Text("The leaf covers this host and *.<host>. The host must ALSO resolve to 127.0.0.1 (A record, or a free name like 127-0-0-1.nip.io) or the install prompt never appears.").foregroundStyle(Theme.subtle)
             }
 
             if st.hasRoot {
-                Section("2 · Trust profile") {
+                Section {
                     TButton(title: "Install trust profile", icon: "square.and.arrow.down") {
                         OTAFiles.exportLocalCA()
                         if let u = LocalCAManager.writeMobileConfig() { share = URLItem(url: u) } else { error = "Couldn't build the profile." }
                         st.reload()
                     }
                     TButton(title: "View profile contents", icon: "doc.text.magnifyingglass") { showProfileText = true }
+                } header: {
+                    Text("2 · Trust profile")
                 } footer: {
                     Text("One payload: the root cert as a trusted-root payload. Unsigned, plain text. After installing, enable it in Settings › General › About › Certificate Trust Settings — the status above flips green on its own.").foregroundStyle(Theme.subtle)
                 }
 
-                Section("Root details") {
+                Section {
                     TRow(k: "Subject", v: "MRvEK Local Root CA")
                     TRow(k: "Fingerprint", v: fingerprint)
                     if let m = LocalCAManager.meta {
@@ -1142,6 +1154,8 @@ private struct LocalCAScreen: View {
                     }
                     TRow(k: "Leaf expires", v: LocalCAManager.leafExpiry.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
                     TRow(k: "Key storage", v: "Keychain · ThisDeviceOnly")
+                } header: {
+                    Text("Root details")
                 }
 
                 Section {

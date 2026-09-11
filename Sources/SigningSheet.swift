@@ -1544,8 +1544,10 @@ struct DeveloperToolSheet: View {
             injectError = "Couldn't read the binary."; return
         }
         guard let e = injectEntropy else { injectError = "Enter or generate the key first."; return }
-        do { extracted = try Mcrypted512.extract(fromBinary: full, entropy: e) }
-        catch { injectError = error.localizedDescription }
+        do {
+            let r = try Mcrypted512.extract(fromBinary: full, entropy: e)
+            extracted = (name: r.filename, data: r.payload)
+        } catch { injectError = error.localizedDescription }
         _ = ctx
     }
 

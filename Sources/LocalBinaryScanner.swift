@@ -537,6 +537,12 @@ enum LocalBinaryScanner {
         return nil
     }
 
+    /// The app's full main binary bytes (fat, un-thinned) — used by the Inject Data
+    /// tool to search for an appended Mcrypted-512 payload.
+    static func rawMainBinary(ipaURL: URL?, localPath: String? = nil) async -> Data? {
+        await mainBinary(ipaURL: ipaURL, localPath: localPath)
+    }
+
     private static func mainBinary(ipaURL: URL?, localPath: String?) async -> Data? {
         guard let url = await resolveURL(ipaURL: ipaURL, localPath: localPath),
               let archive = Archive(url: url, accessMode: .read) else { return nil }

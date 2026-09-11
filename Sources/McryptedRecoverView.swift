@@ -108,7 +108,9 @@ struct McryptedRecoverView: View {
         let scoped = u.startAccessingSecurityScopedResource()
         defer { if scoped { u.stopAccessingSecurityScopedResource() } }
         guard let bin = await LocalBinaryScanner.rawMainBinary(ipaURL: u) else { error = "Couldn't read the binary."; return }
-        do { recovered = try Mcrypted512.extract(fromBinary: bin, entropy: entropy) }
-        catch { self.error = error.localizedDescription }
+        do {
+            let r = try Mcrypted512.extract(fromBinary: bin, entropy: entropy)
+            recovered = (name: r.filename, data: r.payload)
+        } catch { self.error = error.localizedDescription }
     }
 }

@@ -240,18 +240,6 @@ struct SourcesView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
-                HStack {
-                    Text("Sources").font(.title2.bold()).foregroundStyle(Theme.text)
-                    Spacer()
-                    Button(editing ? "Done" : "Edit") { withAnimation { editing.toggle() } }
-                        .font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.accent)
-                    Button { adding = true } label: {
-                        Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accent)
-                    }
-                    .padding(.leading, 14)
-                }
-                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
-
                 List {
                     ForEach(store.sources) { s in
                         NavigationLink(value: s) { sourceRow(s) }
@@ -268,6 +256,16 @@ struct SourcesView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .environment(\.editMode, .constant(editing ? .active : .inactive))
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    TabTitleBar(title: "Sources") {
+                        Button(editing ? "Done" : "Edit") { withAnimation { editing.toggle() } }
+                            .font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.accent)
+                        Button { adding = true } label: {
+                            Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accent)
+                        }
+                        .padding(.leading, 6)
+                    }
+                }
             }
         }
         .alert("Add source", isPresented: $adding) {
@@ -661,25 +659,26 @@ struct AppDetailSheet: View {
 
     private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
 
-    var body: some View {
-        VStack(spacing: 0) {
-            // Title bar
-            ZStack {
-                HStack(spacing: 8) {
-                    SourceIcon(url: source.iconURL, side: 22, fallback: source.name)
-                    Text(source.name.uppercased()).font(.system(size: 15, weight: .bold)).kerning(1).foregroundStyle(Theme.text)
-                }
-                HStack {
-                    Spacer()
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.text)
-                            .frame(width: 32, height: 32).background(Theme.card).clipShape(Circle())
-                    }
+    private var detailTitleBar: some View {
+        ZStack {
+            HStack(spacing: 8) {
+                SourceIcon(url: source.iconURL, side: 22, fallback: source.name)
+                Text(source.name.uppercased()).font(.system(size: 15, weight: .bold)).kerning(1).foregroundStyle(Theme.text)
+            }
+            HStack {
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.text)
+                        .frame(width: 32, height: 32).background(Color.white.opacity(0.12)).clipShape(Circle())
                 }
             }
-            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 10)
-            .floatingGlassBar(edge: .top)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .floatingGlassBar(edge: .top)
+    }
 
+    var body: some View {
+        VStack(spacing: 0) {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
                     infoCard
@@ -709,6 +708,7 @@ struct AppDetailSheet: View {
                 }
                 .padding(16)
             }
+            .safeAreaInset(edge: .top, spacing: 0) { detailTitleBar }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 bottomBar.floatingGlassBar(edge: .bottom)
             }

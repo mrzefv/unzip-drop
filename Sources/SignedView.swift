@@ -25,11 +25,6 @@ struct SignedView: View {
             Theme.bg.ignoresSafeArea()
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Signed").font(.title2.bold()).foregroundStyle(Theme.text)
-                        Spacer()
-                        Text("\(signed.entries.count)").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
-                    }
                     if signed.entries.isEmpty {
                         Card { Text("Nothing signed yet. Library tab › pick an IPA › Sign.").font(.caption).foregroundStyle(Theme.subtle) }
                     } else {
@@ -63,6 +58,11 @@ struct SignedView: View {
                     ForEach(entries) { e in row(e) }
                 }
                 .padding(16)
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                TabTitleBar(title: "Signed") {
+                    Text("\(signed.entries.count)").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
+                }
             }
         }
         .sheet(item: $share) { ShareSheet(items: [$0.url]) }

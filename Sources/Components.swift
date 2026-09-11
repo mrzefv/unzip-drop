@@ -23,6 +23,21 @@ struct DirExporter: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: UIDocumentPickerViewController, context: Context) {}
 }
 
+/// Floating glass title bar for the four tabs. Put it in `.safeAreaInset(edge: .top)`.
+struct TabTitleBar<Trailing: View>: View {
+    let title: String
+    @ViewBuilder var trailing: Trailing
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text)
+            Spacer()
+            trailing
+        }
+        .padding(.horizontal, 18).padding(.vertical, 12)
+        .floatingGlassBar(edge: .top, cornerRadius: 28)
+    }
+}
+
 struct TopBar: View {
     var body: some View {
         HStack(spacing: 8) {

@@ -43,7 +43,6 @@ struct LibraryView: View {
             Theme.bg.ignoresSafeArea()
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
-                    header
                     if !items.isEmpty {
                         TextField("Search", text: $search)
                             .autocorrectionDisabled().textInputAutocapitalization(.never)
@@ -62,6 +61,7 @@ struct LibraryView: View {
                 }
                 .padding(16)
             }
+            .safeAreaInset(edge: .top, spacing: 0) { header }
         }
         .task { await reload() }
         .sheet(isPresented: $importing) {
@@ -91,12 +91,10 @@ struct LibraryView: View {
     }
 
     private var header: some View {
-        HStack {
-            Text("Library").font(.title2.bold()).foregroundStyle(Theme.text)
-            Spacer()
+        TabTitleBar(title: "Library") {
             Text("\(items.count) Apps").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
             Button { importing = true } label: {
-                Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(blue).padding(.leading, 12)
+                Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accent).padding(.leading, 4)
             }
         }
     }

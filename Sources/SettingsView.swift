@@ -38,7 +38,7 @@ struct SettingsView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
 
-                        SettingsSection("General", trailing: "\(Theme.appName.uppercased()) \(Theme.appVersion)") {
+                        SettingsSection("General") {
                             SettingsRow(icon: "info.circle.fill", title: "About", subtitle: "App information and version") { screen = .about }
                         }
 
@@ -105,6 +105,11 @@ struct SettingsView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 6)
                     .padding(.bottom, 20)
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                TabTitleBar(title: "Settings") {
+                    Text("\(Theme.appName.uppercased()) \(Theme.appVersion)").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
+                }
             }
         }
         .fullScreenCover(item: $screen) { s in

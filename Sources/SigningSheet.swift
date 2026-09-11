@@ -68,9 +68,9 @@ struct SigningSheet: View {
     @State private var installing = false
 
     private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
-    private let accent = Color(red: 0.74, green: 0.22, blue: 0.12)
-    private let accentSoft = Color(red: 0.89, green: 0.44, blue: 0.27)
-    private let accentTint = Color(red: 0.21, green: 0.08, blue: 0.07)
+    private let accent = Color(red: 0.25, green: 0.55, blue: 1.0)      // same blue as the reference layout
+    private let accentSoft = Color(red: 0.45, green: 0.68, blue: 1.0)
+    private let accentTint = Color(red: 0.07, green: 0.12, blue: 0.22)
     private let surface = Color(red: 0.06, green: 0.06, blue: 0.07)
     private let surfaceRaised = Color(red: 0.09, green: 0.09, blue: 0.10)
     private let success = Color(red: 0.45, green: 0.79, blue: 0.34)
@@ -93,7 +93,6 @@ struct SigningSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            titleBar
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 16.5) {
                     signingMethodCard        // mSign: Saved / Enterprise / Apple ID
@@ -111,6 +110,7 @@ struct SigningSheet: View {
                 }
                 .padding(12)
             }
+            .safeAreaInset(edge: .top, spacing: 0) { titleBar }
             .safeAreaInset(edge: .bottom, spacing: 0) { signBar.floatingGlassBar(edge: .bottom) }
         }
         .background(Color.black.ignoresSafeArea())
@@ -176,25 +176,20 @@ struct SigningSheet: View {
     private var titleBar: some View {
         HStack(spacing: 12) {
             titleBarButton("chevron.left")
-            HStack(spacing: 11) {
-                iconThumb(iconPNG ?? meta.iconPNG, side: 44)
+            Spacer(minLength: 0)
+            HStack(spacing: 10) {
+                iconThumb(iconPNG ?? meta.iconPNG, side: 30)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(name).font(.system(size: 14, weight: .bold)).foregroundStyle(.white).lineLimit(1)
-                    Text(bundle).font(.system(size: 10.5, weight: .medium)).foregroundStyle(accent).lineLimit(1)
+                    Text(name).font(.system(size: 16, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                    Text(bundle).font(.system(size: 12)).foregroundStyle(accent).lineLimit(1)
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(surfaceRaised)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            Spacer(minLength: 0)
             titleBarButton("xmark")
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
-        .background(Color.black)
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        // Floating Liquid Glass header — the sheet scrolls underneath it.
+        .floatingGlassBar(edge: .top, cornerRadius: 30)
     }
 
     private func titleBarButton(_ icon: String) -> some View {
@@ -202,8 +197,8 @@ struct SigningSheet: View {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(surfaceRaised)
+                .frame(width: 34, height: 34)
+                .background(Color.white.opacity(0.12))
                 .clipShape(Circle())
         }
     }

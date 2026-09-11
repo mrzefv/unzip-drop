@@ -96,14 +96,13 @@ struct SignedView: View {
     }
 
     private func row(_ e: SignedEntry) -> some View {
-        MSignRow(
-            icon: e.iconURL.flatMap { try? Data(contentsOf: $0) },
+        MSignAppRow(
+            iconURL: e.iconURL,
             title: e.name,
             subtitle: "\(e.version) • \(e.bundleID)",
-            badge: signedBadge(e),
+            pill: signedBadge(e),
             busy: installing == e.id,
-            accent: Theme.accent,
-            onAction: { sheetEntry = e },
+            accent: SSTheme.tintColor,
             onTap: { sheetEntry = e }
         )
     }

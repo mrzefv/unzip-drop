@@ -45,6 +45,7 @@ struct LibraryView: View {
                                 subtitle: "\(it.version) • \(it.bundle)",
                                 badge: "Downloaded",
                                 busy: installing == it.id,
+                                accent: SSTheme.tintColor,
                                 onAction: { sheetItem = it },
                                 onTap: { sheetItem = it }
                             )
@@ -146,4 +147,17 @@ struct LibraryView: View {
         } catch { self.error = error.localizedDescription }
         installing = nil
     }
+}
+
+// MARK: - Library item (on-disk IPA in the inbox)
+
+struct LibraryItem: Identifiable, Equatable {
+    let id: String            // file path
+    let url: URL
+    let name: String
+    let bundle: String
+    let version: String
+    let sizeBytes: Int64
+    let icon: Data?
+    var sizeString: String { sizeBytes > 0 ? ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file) : "" }
 }

@@ -112,6 +112,43 @@ struct MSignIcon: View {
     }
 }
 
+/// mSign's exact Library/Signed row: 60pt SSMediaIconView · 18pt title ·
+/// 13pt "version • bundle" · capsule origin/status pill · arrow.up.right.
+/// Renders on the app's black background with a hairline divider between rows.
+struct MSignAppRow: View {
+    let iconURL: URL?
+    let title: String
+    let subtitle: String        // "1.0 • com.mrzefv.unzipdrop"
+    let pill: String            // "Downloaded" / "Signed 2h ago"
+    var pillAccented: Bool = false
+    var busy: Bool = false
+    var accent: Color = SSTheme.tintColor
+    let onTap: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            SSMediaIconView(url: iconURL, size: 60, cornerRadius: 14)
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 1))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
+                Text(subtitle).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
+                Text(pill).font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(pillAccented ? accent : Theme.subtle)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(pillAccented ? accent.opacity(0.14) : Color.white.opacity(0.06))
+                    .overlay(Capsule().stroke(pillAccented ? accent.opacity(0.32) : .clear, lineWidth: 1))
+                    .clipShape(Capsule())
+            }
+            Spacer(minLength: 8)
+            if busy { ProgressView().tint(accent) }
+            else { Image(systemName: "arrow.up.right").font(.system(size: 14, weight: .semibold)).foregroundStyle(accent.opacity(0.95)) }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+    }
+}
+
 /// mSign search field — pill, no visible border.
 struct MSignSearchField: View {
     let placeholder: String

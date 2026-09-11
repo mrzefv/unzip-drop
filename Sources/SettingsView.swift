@@ -14,13 +14,13 @@ import UniformTypeIdentifiers
 private enum Screen: Identifiable, Hashable {
     case about, repo, token
     case dylibTemplate, ipaTemplate
-    case certificates, otaDomain, certInspector, transparency, recoverData
+    case certificates, otaDomain, certInspector, transparency, recoverData, copilot, live3d
     case tutorials
     var id: String {
         switch self {
         case .about: return "about"; case .repo: return "repo"; case .token: return "token"
         case .dylibTemplate: return "tpl-dylib"; case .ipaTemplate: return "tpl-ipa"
-        case .certificates: return "certs"; case .otaDomain: return "ota"; case .certInspector: return "inspect"; case .transparency: return "transparency"; case .recoverData: return "recover"
+        case .certificates: return "certs"; case .otaDomain: return "ota"; case .certInspector: return "inspect"; case .transparency: return "transparency"; case .recoverData: return "recover"; case .copilot: return "copilot"; case .live3d: return "live3d"
         case .tutorials: return "tutorials"
         }
     }
@@ -66,6 +66,12 @@ struct SettingsView: View {
                             SettingsRow(icon: "lock.doc.fill",
                                         title: "Recover hidden data",
                                         subtitle: "Decrypt an Mcrypted payload from any signed IPA") { screen = .recoverData }
+                            SettingsRow(icon: "sparkles",
+                                        title: "Copilot",
+                                        subtitle: Copilot.hasKey ? "\(Copilot.provider.label) key set" : "Add API key for AI dylib authoring") { screen = .copilot }
+                            SettingsRow(icon: "cube.transparent",
+                                        title: "mv1E Live (3D view debugger)",
+                                        subtitle: "Render a live UIView hierarchy captured from an injected app") { screen = .live3d }
                         }
 
                         SettingsSection("Signing") {
@@ -126,6 +132,8 @@ struct SettingsView: View {
                 case .certInspector: CertInspectorScreen()
                 case .transparency:  TransparencyScreen()
                 case .recoverData:   McryptedRecoverView()
+                case .copilot:       CopilotSettingsView()
+                case .live3d:        MV1ELiveView()
                 case .dylibTemplate: DylibTemplateScreen()
                 case .ipaTemplate:   IPATemplateScreen()
                 case .tutorials: TutorialsListScreen()

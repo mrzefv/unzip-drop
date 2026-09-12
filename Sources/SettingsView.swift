@@ -353,7 +353,7 @@ private struct StatusFooter: View {
 
     private var role: UserRole { staff.isStaff ? staff.role : account.role }
     private var usernameColor: Color { Color(hex: account.usernameCustomization.colorHex) }
-    private var usernameFontDesign: Font.Design { fontDesign(account.usernameCustomization.fontStyle) }
+    private var usernameFontDesign: Font.Design { account.usernameCustomization.fontStyle.fontDesign }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -425,14 +425,6 @@ private struct StatusFooter: View {
         }
     }
 
-    private func fontDesign(_ style: UsernameFontStyle) -> Font.Design {
-        switch style {
-        case .default: return .default
-        case .rounded: return .rounded
-        case .monospaced: return .monospaced
-        case .serif: return .serif
-        }
-    }
 }
 
 // MARK: - Detail screen shell

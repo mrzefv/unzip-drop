@@ -25,7 +25,7 @@ struct AccountChip: View {
     @ObservedObject private var staff = StaffGate.shared
     private var role: UserRole { staff.isStaff ? staff.role : account.role }
     private var usernameColor: Color { Color(hex: account.usernameCustomization.colorHex) }
-    private var usernameFontDesign: Font.Design { fontDesign(account.usernameCustomization.fontStyle) }
+    private var usernameFontDesign: Font.Design { account.usernameCustomization.fontStyle.fontDesign }
 
     var body: some View {
         Button {
@@ -67,15 +67,6 @@ struct AccountChip: View {
         .buttonStyle(.plain)
         .accessibilityLabel(account.isLoggedIn ? "Account" : "Sign in")
     }
-
-    private func fontDesign(_ style: UsernameFontStyle) -> Font.Design {
-        switch style {
-        case .default: return .default
-        case .rounded: return .rounded
-        case .monospaced: return .monospaced
-        case .serif: return .serif
-        }
-    }
 }
 
 // MARK: - Dropdown
@@ -94,7 +85,7 @@ struct AccountDropdown: View {
     private let dailyQuota = 25
     private var role: UserRole { staff.isStaff ? staff.role : account.role }
     private var usernameColor: Color { Color(hex: account.usernameCustomization.colorHex) }
-    private var usernameFontDesign: Font.Design { fontDesign(account.usernameCustomization.fontStyle) }
+    private var usernameFontDesign: Font.Design { account.usernameCustomization.fontStyle.fontDesign }
     private var signsToday: Int {
         let cal = Calendar.current
         return signed.entries.filter { cal.isDateInToday($0.signedAt) }.count
@@ -177,32 +168,22 @@ struct AccountDropdown: View {
 
     private var signedIn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ZStack {
-                if account.usernameCustomization.gifBackground, let gif = AnimatedImage.named("onboarding") {
-                    gif
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 84)
-                        .opacity(0.18)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .allowsHitTesting(false)
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(Theme.accent).frame(width: 52, height: 52)
+                    Text(String((account.username ?? "?").prefix(1)).uppercased())
+                        .font(.system(size: 22, weight: .heavy, design: .rounded)).foregroundStyle(.black)
                 }
-                HStack(spacing: 12) {
-                    ZStack {
-                        Circle().fill(Theme.accent).frame(width: 52, height: 52)
-                        Text(String((account.username ?? "?").prefix(1)).uppercased())
-                            .font(.system(size: 22, weight: .heavy, design: .rounded)).foregroundStyle(.black)
-                    }
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(account.username ?? "")
-                            .font(.system(size: 18, weight: .bold, design: usernameFontDesign))
-                            .foregroundStyle(usernameColor)
-                        Text(staff.mdid).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Theme.subtle)
-                    }
-                    Spacer()
-                    HStack(spacing: 6) {
-                        Circle().fill(Color.green).frame(width: 9, height: 9)
-                        Text("Verified").font(.system(size: 14)).foregroundStyle(Theme.text)
-                    }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(account.username ?? "")
+                        .font(.system(size: 18, weight: .bold, design: usernameFontDesign))
+                        .foregroundStyle(usernameColor)
+                    Text(staff.mdid).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Theme.subtle)
+                }
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle().fill(Color.green).frame(width: 9, height: 9)
+                    Text("Verified").font(.system(size: 14)).foregroundStyle(Theme.text)
                 }
             }
             .padding(16)
@@ -331,14 +312,5 @@ struct AccountDropdown: View {
         .background(Color.white.opacity(0.05))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.stroke, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-
-    private func fontDesign(_ style: UsernameFontStyle) -> Font.Design {
-        switch style {
-        case .default: return .default
-        case .rounded: return .rounded
-        case .monospaced: return .monospaced
-        case .serif: return .serif
-        }
     }
 }

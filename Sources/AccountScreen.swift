@@ -20,7 +20,7 @@ struct AccountScreen: View {
 
     private var role: UserRole { staff.isStaff ? staff.role : account.role }
     private var usernameColor: Color { Color(hex: account.usernameCustomization.colorHex) }
-    private var usernameFontDesign: Font.Design { fontDesign(account.usernameCustomization.fontStyle) }
+    private var usernameFontDesign: Font.Design { account.usernameCustomization.fontStyle.fontDesign }
 
     var body: some View {
         ZStack {
@@ -250,14 +250,5 @@ struct AccountScreen: View {
     private func flash(_ m: String) {
         withAnimation { toast = m }
         Task { try? await Task.sleep(nanoseconds: 1_600_000_000); withAnimation { toast = nil } }
-    }
-
-    private func fontDesign(_ style: UsernameFontStyle) -> Font.Design {
-        switch style {
-        case .default: return .default
-        case .rounded: return .rounded
-        case .monospaced: return .monospaced
-        case .serif: return .serif
-        }
     }
 }

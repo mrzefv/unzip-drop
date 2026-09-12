@@ -86,7 +86,13 @@ struct LibraryView: View {
                 ]
             )
             .presentationDetents([.height(340)])
-            .presentationDragIndicator(.visible)
+            .then { view in
+                if #available(iOS 16.0, *) {
+                    view.presentationDragIndicator(.visible)
+                } else {
+                    view
+                }
+            }
             .preferredColorScheme(.dark)
         }
     }

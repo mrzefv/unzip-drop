@@ -334,16 +334,19 @@ struct AmbientGradientBackground: View {
 struct ThemeBackgroundLayer: View {
     @ObservedObject private var theme = AppTheme.shared
     var body: some View {
-        ZStack {
-            AmbientGradientBackground(primary: theme.primaryColor, secondary: theme.secondaryColor, accent: theme.accent, isDark: theme.isDark)
-            switch theme.background {
-            case .particles:
+        switch theme.background {
+        case .particles:
+            ZStack {
+                AmbientGradientBackground(primary: theme.primaryColor, secondary: theme.secondaryColor, accent: theme.accent, isDark: theme.isDark)
                 ParticleBackground(accent: theme.accent, colors: [theme.accent, theme.primaryColor, theme.secondaryColor])
-            case .grid:
-                GridBackground(primary: theme.primaryColor, secondary: theme.secondaryColor)
-            case .none:
-                EmptyView()
             }
+        case .grid:
+            ZStack {
+                AmbientGradientBackground(primary: theme.primaryColor, secondary: theme.secondaryColor, accent: theme.accent, isDark: theme.isDark)
+                GridBackground(primary: theme.primaryColor, secondary: theme.secondaryColor)
+            }
+        case .none:
+            EmptyView()
         }
     }
 }

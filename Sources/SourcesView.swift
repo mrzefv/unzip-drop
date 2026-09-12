@@ -200,7 +200,14 @@ final class SourceStore: ObservableObject {
         sources.append(s)
         save()
     }
-    func update(_ s: RepoSource) { if let i = sources.firstIndex(where: { $0.id == s.id }) { sources[i] = s; save() } }
+    func update(_ s: RepoSource) {
+        if let i = sources.firstIndex(where: { $0.id == s.id }) {
+            let oldURL = sources[i].url
+            sources[i] = s
+            if oldURL != s.url { parsedCache.removeValue(forKey: s.id) }
+            save()
+        }
+    }
     func remove(_ s: RepoSource) { sources.removeAll { $0.id == s.id }; parsedCache.removeValue(forKey: s.id); save() }
     func move(from: IndexSet, to: Int) { sources.move(fromOffsets: from, toOffset: to); save() }
     private func save() { try? JSONEncoder().encode(sources).write(to: fileURL) }
@@ -225,9 +232,11 @@ final class SourceStore: ObservableObject {
     }
 
     func prefetchSources() async {
-        let snapshot = sources
-        for source in snapshot where parsedCache[source.id] == nil {
-            _ = try? await fetch(source)
+        let snapshot = sources.filter { parsedCache[$0.id] == nil }
+        await withTaskGroup(of: Void.self) { group in
+            for source in snapshot {
+                group.addTask { _ = try? await fetch(source) }
+            }
         }
     }
 }

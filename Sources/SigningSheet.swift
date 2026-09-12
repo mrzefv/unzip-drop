@@ -2155,18 +2155,18 @@ struct SigningTerminalView: View {
 
     private var categoryStack: some View {
         VStack(spacing: 10) {
-            categoryCard("App Info", icon: "app.badge.fill", tint: blue, rows: appInfoRows)
-            categoryCard("App Binary", icon: "cpu.fill", tint: .cyan, rows: binaryRows, empty: "No binary activity yet")
-            categoryCard("Frameworks", icon: "shippingbox.fill", tint: accent, rows: frameworkRows, empty: "No framework activity yet")
-            categoryCard("Entitlements", icon: "checkmark.shield.fill", tint: green, rows: entitlementRows, empty: "No entitlement changes yet")
-            categoryCard("CodeResources", icon: "doc.badge.gearshape.fill", tint: .purple, rows: codeResourcesRows, empty: "No CodeResources activity yet")
+            categoryCard("App Info", icon: "app.badge.fill", rows: appInfoRows)
+            categoryCard("App Binary", icon: "cpu.fill", rows: binaryRows, empty: "No binary activity yet")
+            categoryCard("Frameworks", icon: "shippingbox.fill", rows: frameworkRows, empty: "No framework activity yet")
+            categoryCard("Entitlements", icon: "checkmark.shield.fill", rows: entitlementRows, empty: "No entitlement changes yet")
+            categoryCard("CodeResources", icon: "doc.badge.gearshape.fill", rows: codeResourcesRows, empty: "No CodeResources activity yet")
         }
     }
 
-    private func categoryCard(_ title: String, icon: String, tint: Color, rows: [String], empty: String? = nil) -> some View {
+    private func categoryCard(_ title: String, icon: String, rows: [String], empty: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Image(systemName: icon).foregroundStyle(tint).font(.system(size: 15, weight: .semibold))
+                Image(systemName: icon).foregroundStyle(.white.opacity(0.9)).font(.system(size: 15, weight: .semibold))
                 Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                 Spacer()
                 Text("\(rows.count)").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.white.opacity(0.45))
@@ -2189,9 +2189,9 @@ struct SigningTerminalView: View {
             }
         }
         .padding(12)
-        .background(Color.white.opacity(0.05))
+        .background(Color.white.opacity(0.03))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(tint.opacity(0.35), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
     }
 
     // Download · branding · Install
@@ -2210,10 +2210,9 @@ struct SigningTerminalView: View {
                 }
                 .disabled(result == nil)
 
-                VStack(spacing: 2) {
-                    Text("ᴍʀZefv").font(.system(size: 14, weight: .bold)).foregroundStyle(accent)
-                    Text("Powered by DELvEK.NET").font(.system(size: 9, weight: .semibold)).foregroundStyle(blue)
-                }
+                Text(done ? "Ready" : "Signing…")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.65))
                 .frame(maxWidth: .infinity)
 
                 Button {
@@ -2241,17 +2240,13 @@ struct SigningTerminalView: View {
         .frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: side * 0.22, style: .continuous))
     }
 
-    // mSign's log coloring
+    // Copilot-style terminal coloring
     private func color(for raw: String) -> Color {
         let l = raw.lowercased()
-        if raw.contains("Signed OK") || raw.contains("Done.") || raw.contains("ready to install") { return Color(red: 0.2, green: 1.0, blue: 0.45) }
-        if raw.contains("Success!") { return Color(red: 0.35, green: 0.95, blue: 0.45) }
+        if raw.contains("Signed OK") || raw.contains("Done.") || raw.contains("ready to install") { return .white.opacity(0.95) }
+        if raw.contains("Success!") { return .white.opacity(0.95) }
         if l.contains("error") || l.contains("failed") || raw.contains("❌") { return .red.opacity(0.9) }
-        if raw.contains("No Enough CodeSignature") || raw.contains("Realloc") { return accent }
-        if raw.contains("SignFolder:") { return Color(red: 0.45, green: 0.85, blue: 1.0) }
-        if raw.contains("SignFile:") { return .white.opacity(0.6) }
-        if raw.contains("Packaging") || raw.contains("Packaged") { return Color(red: 0.55, green: 0.75, blue: 1.0) }
-        if raw.hasPrefix(">>>") { return .white.opacity(0.85) }
+        if raw.hasPrefix(">>>") { return .white.opacity(0.9) }
         return .white.opacity(0.75)
     }
 

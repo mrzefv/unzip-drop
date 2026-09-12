@@ -248,6 +248,7 @@ nonisolated enum Signer {
     ) async throws -> SignOutcome {
         var o = SignOptions()
         o.name = nameOverride; o.bundleID = bundleIDOverride; o.version = versionOverride
+        o.parallelSigning = false
         return try await signDetached(ipaURL: ipaURL, material: material, options: o, onLog: onLog)
     }
 

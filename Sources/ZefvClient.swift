@@ -178,7 +178,10 @@ final class ZefvAccount: ObservableObject {
                                      gifBackground: Bool? = nil) -> Bool {
         guard let name = username, !name.isEmpty else { return false }
         var next = usernameCustomization
-        if let colorHex, let normalized = Self.normalizeHex(colorHex) { next.colorHex = normalized }
+        if let colorHex {
+            guard let normalized = Self.normalizeHex(colorHex) else { return false }
+            next.colorHex = normalized
+        }
         if let fontStyle { next.fontStyle = fontStyle }
         if let gifBackground { next.gifBackground = gifBackground }
         usernameCustomization = next

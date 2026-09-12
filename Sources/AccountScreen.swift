@@ -11,6 +11,7 @@ struct AccountScreen: View {
     @ObservedObject private var account = ZefvAccount.shared
     @ObservedObject private var staff = StaffGate.shared
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var email = ""
     @State private var curPass = ""
@@ -40,13 +41,20 @@ struct AccountScreen: View {
             VStack(spacing: 14) {
                 // Identity card
                 ZStack {
-                    if account.usernameCustomization.gifBackground, let gif = AnimatedImage.named("onboarding") {
-                        gif
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 170)
-                            .opacity(0.2)
-                            .clipShape(RoundedRectangle(cornerRadius: 18))
-                            .allowsHitTesting(false)
+                    if account.usernameCustomization.gifBackground {
+                        if reduceMotion {
+                            RoundedRectangle(cornerRadius: 18)
+                                .fill(usernameColor.opacity(0.15))
+                                .frame(height: 170)
+                                .allowsHitTesting(false)
+                        } else if let gif = AnimatedImage.named("onboarding") {
+                            gif
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 170)
+                                .opacity(0.2)
+                                .clipShape(RoundedRectangle(cornerRadius: 18))
+                                .allowsHitTesting(false)
+                        }
                     }
                     VStack(spacing: 12) {
                         ZStack {

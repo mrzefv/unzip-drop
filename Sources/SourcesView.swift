@@ -177,6 +177,7 @@ final class SourceStore: ObservableObject {
     @Published private(set) var sources: [RepoSource] = []
     private let fileURL = AppPaths.dir("sources").appendingPathComponent("sources.json")
     private var parsedCache: [String: RepoParser.ParsedRepo] = [:]
+    private var prefetchingIDs: Set<String> = []
 
     static let defaults: [RepoSource] = [
         RepoSource(id: "delvek", name: "DELvEK", url: URL(string: "https://delvek.net/repo.json")!,
@@ -243,12 +244,14 @@ final class SourceStore: ObservableObject {
     }
 
     func prefetchSources() async {
-        let snapshot = sources.filter { parsedCache[$0.id] == nil }
+        let snapshot = sources.filter { parsedCache[$0.id] == nil && !prefetchingIDs.contains($0.id) }
+        snapshot.forEach { prefetchingIDs.insert($0.id) }
         await withTaskGroup(of: (RepoSource, RepoParser.ParsedRepo?).self) { group in
             for source in snapshot {
                 group.addTask { (source, try? await Self.requestParsedRepo(for: source)) }
             }
             for await (source, parsed) in group {
+                prefetchingIDs.remove(source.id)
                 guard let parsed else { continue }
                 applyParsedRepo(parsed, to: source)
             }

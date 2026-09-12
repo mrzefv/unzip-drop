@@ -1003,6 +1003,7 @@ struct SigningSheet: View {
         s.disableATS = o.disableATS
         s.surgicalMode = o.surgicalMode
         s.parallelSigning = o.parallelSigning
+        s.parallelSigningPayloadSizeBytes = parallelSigningPayloadSize
         s.stripSCInfo = o.stripSCInfo
         s.stripPrivacyManifests = o.stripPrivacy
         s.stripWatchApps = o.stripWatch

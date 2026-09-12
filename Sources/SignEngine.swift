@@ -225,6 +225,7 @@ nonisolated struct SignOptions: Sendable {
     var skipEmbeddedProvision = false
     var surgicalMode = true             // engine default; SigningSheet overrides to opt-in
     var parallelSigning = true          // engine default; SigningSheet overrides to opt-in and zsign still disables it for guarded cases
+    var parallelSigningPayloadSizeBytes: Int64? = nil
 
     static let none = SignOptions()
 
@@ -399,7 +400,8 @@ nonisolated enum Signer {
         do {
             let parallelDecision = parallelSigningDecision(
                 options: o,
-                payloadSizeBytes: payloadSizeForParallelDecision(ipaURL: ipaURL, appURL: appURL)
+                payloadSizeBytes: o.parallelSigningPayloadSizeBytes
+                    ?? payloadSizeForParallelDecision(ipaURL: ipaURL, appURL: appURL)
             )
             if let msg = parallelDecision.logMessage { onLog?(msg) }
             ZSignSetParallel(parallelDecision.isEnabled)

@@ -219,7 +219,8 @@ final class SourceStore: ObservableObject {
     }
 
     func prefetchSources() async {
-        for source in sources where parsedCache[source.id] == nil {
+        let snapshot = sources
+        for source in snapshot where parsedCache[source.id] == nil {
             _ = try? await fetch(source)
         }
     }

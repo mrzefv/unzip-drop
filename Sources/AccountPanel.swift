@@ -41,7 +41,7 @@ struct AccountChip: View {
                             .overlay(Circle().stroke(Theme.bg, lineWidth: 1.2))
                     }
                     VStack(alignment: .leading, spacing: 1) {
-                        StyledUsername(name: account.username ?? "", style: account.style, font: .system(size: 11, weight: .bold))
+                        StyledUsername(name: account.username ?? "", style: account.style, base: 11)
                         Text(role == .member ? "REGISTERED" : role.badgeText)
                             .font(.system(size: 7, weight: .heavy, design: .monospaced)).kerning(0.8).foregroundStyle(Theme.accent)
                     }
@@ -170,7 +170,7 @@ struct AccountDropdown: View {
                         .font(.system(size: 18, weight: .heavy, design: .rounded)).foregroundStyle(.black)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    StyledUsername(name: account.username ?? "", style: account.style, font: .system(size: 16, weight: .bold))
+                    StyledUsername(name: account.username ?? "", style: account.style, base: 16)
                     Text(staff.mdid).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(Theme.subtle)
                 }
                 Spacer()

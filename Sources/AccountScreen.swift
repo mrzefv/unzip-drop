@@ -48,7 +48,7 @@ struct AccountScreen: View {
                         Text(String((account.username ?? "?").prefix(1)).uppercased())
                             .font(.system(size: 34, weight: .heavy, design: .rounded)).foregroundStyle(role.color)
                     }
-                    StyledUsername(name: account.username ?? "", style: account.style, font: .system(size: 24, weight: .bold))
+                    StyledUsername(name: account.username ?? "", style: account.style, base: 24)
                     HStack(spacing: 8) {
                         Image(systemName: role.icon).font(.system(size: 11, weight: .bold))
                         Text(role.badgeText).font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(1)
@@ -97,19 +97,48 @@ struct AccountScreen: View {
                             }
                         }
                         .tint(Theme.accent)
+                        // Font + size
+                        HStack(spacing: 10) {
+                            Menu {
+                                ForEach(UserStyle.fonts, id: \.name) { f in
+                                    Button {
+                                        draft.fontName = f.name
+                                    } label: {
+                                        if f.name == draft.fontName { Label(f.label, systemImage: "checkmark") } else { Text(f.label) }
+                                    }
+                                }
+                            } label: {
+                                pickerLabel("FONT", draft.fontLabel)
+                            }
+                            .buttonStyle(.plain)
+                            Menu {
+                                ForEach(UserStyle.sizes, id: \.step) { sz in
+                                    Button {
+                                        draft.sizeStep = sz.step
+                                    } label: {
+                                        if sz.step == draft.sizeStep { Label(sz.label, systemImage: "checkmark") } else { Text(sz.label) }
+                                    }
+                                }
+                            } label: {
+                                pickerLabel("SIZE", UserStyle.sizes.first { $0.step == draft.sizeStep }?.label ?? "M")
+                            }
+                            .buttonStyle(.plain)
+                        }
                         // Animated background
                         Text("ANIMATED BACKGROUND (GIF URL)").font(.system(size: 10, weight: .bold)).kerning(1.2).foregroundStyle(Theme.subtle)
                         field("https://…/background.gif", text: $draft.gifURL, secure: false, keyboard: .URL)
                         if draft.hasGIF, let u = URL(string: draft.gifURL) {
-                            AnimatedImageView(url: u)
-                                .frame(height: 90).frame(maxWidth: .infinity)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
+                            GeometryReader { g in
+                                AnimatedImageView(url: u).frame(width: g.size.width, height: g.size.height).clipped()
+                            }
+                            .frame(height: 90).frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
                         }
                         // Preview + save
                         HStack {
                             Text("Preview:").font(.system(size: 12)).foregroundStyle(Theme.subtle)
-                            StyledUsername(name: account.username ?? "", style: draft, font: .system(size: 16, weight: .bold))
+                            StyledUsername(name: account.username ?? "", style: draft, base: 16)
                             Spacer()
                             Button {
                                 Task { if await account.setStyle(draft) { flash("Style saved") } }
@@ -260,6 +289,23 @@ struct AccountScreen: View {
         .background(Color.white.opacity(0.05))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func pickerLabel(_ title: String, _ value: String) -> some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 9, weight: .bold)).kerning(1).foregroundStyle(Theme.subtle)
+                Text(value).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.up.chevron.down").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.subtle)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(Color.white.opacity(0.05))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .contentShape(Rectangle())
     }
 
     private func swatch(_ hex: String?) -> some View {

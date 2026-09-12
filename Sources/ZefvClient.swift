@@ -123,7 +123,8 @@ final class ZefvAccount: ObservableObject {
         busy = true; lastError = nil; defer { busy = false }
         do {
             _ = try await post("account.php", ["action": "set_style", "token": tok,
-                                               "color": st.colorHex, "rainbow": st.rainbow ? 1 : 0, "gif": st.gifURL])
+                                               "color": st.colorHex, "rainbow": st.rainbow ? 1 : 0, "gif": st.gifURL,
+                                               "font": st.fontName, "size": st.sizeStep])
             style = st; st.save(); return true
         } catch { lastError = (error as? Err)?.message ?? error.localizedDescription; return false }
     }

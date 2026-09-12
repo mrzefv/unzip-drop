@@ -691,10 +691,10 @@ private struct SourceDetailScreen: View {
     private var categoryRow: some View {
         let cats = AppCategory.allCases
         let rows = [Array(cats.prefix(4)), Array(cats.dropFirst(4))]
-        return VStack(spacing: 6) {
+        return VStack(spacing: 5) {
             ForEach(0..<rows.count, id: \.self) { r in
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         ForEach(rows[r], id: \.self) { c in categoryChip(c) }
                     }
                     .padding(.horizontal, 16)
@@ -710,14 +710,14 @@ private struct SourceDetailScreen: View {
             UISelectionFeedbackGenerator().selectionChanged()
             withAnimation(.easeInOut(duration: 0.15)) { category = c }
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: c.icon).font(.system(size: 11, weight: .bold))
-                Text(c.title).font(.system(size: 12, weight: .heavy, design: .monospaced)).kerning(0.4)
+            HStack(spacing: 4) {
+                Image(systemName: c.icon).font(.system(size: 9, weight: .bold))
+                Text(c.title).font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(0.2)
             }
             .lineLimit(1)
             .fixedSize()
             .foregroundStyle(on ? Theme.accent : Theme.text)
-            .padding(.horizontal, 11).padding(.vertical, 7)
+            .padding(.horizontal, 8).padding(.vertical, 6)
             .background(on ? Theme.accent.opacity(0.18) : Color.white.opacity(0.05))
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(on ? Theme.accent.opacity(0.7) : Theme.stroke, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 7))

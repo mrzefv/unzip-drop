@@ -226,8 +226,6 @@ nonisolated struct SignOptions: Sendable {
     var surgicalMode = true
     var parallelSigning = false
 
-    static let none = SignOptions()
-
     var isEmpty: Bool {
         name == nil && bundleID == nil && version == nil && iconPNG == nil
         && injectDylibs.isEmpty && removeDylibs.isEmpty && binaryPatches.isEmpty && injectDataBlob == nil && plistSet.isEmpty && entitlementsPlistData == nil

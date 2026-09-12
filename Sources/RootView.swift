@@ -47,8 +47,14 @@ struct RootView: View {
                 .allowsHitTesting(false)
                 .popover(isPresented: $theme.panelShown, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
                     ThemePanel()
-                        .presentationCompactAdaptation(.popover)
-                        .presentationBackground(Theme.bg)
+                        .then { view in
+                            if #available(iOS 16.4, *) {
+                                view.presentationCompactAdaptation(.popover)
+                                    .presentationBackground(Theme.bg)
+                            } else {
+                                view
+                            }
+                        }
                         .preferredColorScheme(theme.colorScheme)
                 }
         }
@@ -59,8 +65,14 @@ struct RootView: View {
                 .allowsHitTesting(false)
                 .popover(isPresented: $account.panelShown, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
                     AccountDropdown()
-                        .presentationCompactAdaptation(.popover)
-                        .presentationBackground(Theme.bg)
+                        .then { view in
+                            if #available(iOS 16.4, *) {
+                                view.presentationCompactAdaptation(.popover)
+                                    .presentationBackground(Theme.bg)
+                            } else {
+                                view
+                            }
+                        }
                         .preferredColorScheme(theme.colorScheme)
                 }
         }
@@ -109,6 +121,15 @@ struct RootView: View {
                 signError = error.localizedDescription
             }
         }
+    }
+}
+
+// MARK: - View Extensions
+
+extension View {
+    @ViewBuilder
+    func then<Content: View>(@ViewBuilder _ transform: (Self) -> Content) -> Content {
+        transform(self)
     }
 }
 

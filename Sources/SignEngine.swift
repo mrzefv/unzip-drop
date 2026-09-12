@@ -298,16 +298,9 @@ nonisolated enum Signer {
         }
     }
 
-    private nonisolated static func payloadSizeForParallelDecision(
-        ipaURL: URL,
-        appURL: URL
-    ) -> Int64? {
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: ipaURL.path),
-           let ipaSize = attrs[.size] as? Int64 {
-            return ipaSize
-        }
+    private nonisolated static func directorySize(_ root: URL) -> Int64? {
         let fm = FileManager.default
-        guard let en = fm.enumerator(at: appURL, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) else { return nil }
+        guard let en = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) else { return nil }
         var total: Int64 = 0
         for case let u as URL in en {
             let vals = try? u.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
@@ -315,6 +308,32 @@ nonisolated enum Signer {
             total += Int64(vals?.fileSize ?? 0)
         }
         return total
+    }
+
+    nonisolated static func payloadSizeForParallelDecision(
+        ipaURL: URL,
+        appURL: URL? = nil
+    ) -> Int64? {
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: ipaURL.path),
+           let ipaSize = attrs[.size] as? Int64 {
+            return ipaSize
+        }
+        if let appURL {
+            return directorySize(appURL)
+        }
+        let fm = FileManager.default
+        let work = fm.temporaryDirectory.appendingPathComponent("parallel-size-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: work) }
+        do {
+            try fm.createDirectory(at: work, withIntermediateDirectories: true)
+            try fm.unzipItem(at: ipaURL, to: work)
+            let payload = work.appendingPathComponent("Payload", isDirectory: true)
+            guard let extractedApp = try fm.contentsOfDirectory(at: payload, includingPropertiesForKeys: nil)
+                .first(where: { $0.pathExtension == "app" }) else { return nil }
+            return directorySize(extractedApp)
+        } catch {
+            return nil
+        }
     }
 
     nonisolated static func parallelSigningDecision(

@@ -61,6 +61,7 @@ struct SigningSheet: View {
     // binary analysis
     @State private var macho: MachOReport?
     @State private var machoError: String?
+    @State private var parallelSigningPayloadSize: Int64?
 
     // signing
     @State private var signing = false
@@ -158,6 +159,7 @@ struct SigningSheet: View {
         }
         .task {
             await StaffGate.shared.refresh()
+            parallelSigningPayloadSize = await loadParallelSigningPayloadSize()
             machoDylibs = await currentDylibs()
             await analyzeBinary()
             developerStrings = await loadDeveloperStrings()
@@ -821,9 +823,7 @@ struct SigningSheet: View {
         preview.surgicalMode = o.surgicalMode
         preview.parallelSigning = o.parallelSigning
         preview.injectDylibs = dylibs.map { ($0.url, o.weakDylibReferences ? true : $0.weak) }
-        let attrs = try? FileManager.default.attributesOfItem(atPath: ipaURL.path)
-        let payloadSizeBytes = attrs?[.size] as? Int64
-        return Signer.parallelSigningDecision(options: preview, payloadSizeBytes: payloadSizeBytes)
+        return Signer.parallelSigningDecision(options: preview, payloadSizeBytes: parallelSigningPayloadSize)
     }
     private var effectiveParallelSigning: Bool { currentParallelSigningDecision.isEnabled }
     private var parallelSigningNote: String { currentParallelSigningDecision.noteText }
@@ -928,6 +928,13 @@ struct SigningSheet: View {
                 return ZsignSigner.listDylibs(inMachO: app.appendingPathComponent(bin).path)
                     .filter { !$0.hasPrefix("/System") && !$0.hasPrefix("/usr/lib") }
             } catch { return [] }
+        }.value
+    }
+
+    private func loadParallelSigningPayloadSize() async -> Int64? {
+        let url = ipaURL
+        return await Task.detached {
+            Signer.payloadSizeForParallelDecision(ipaURL: url)
         }.value
     }
 

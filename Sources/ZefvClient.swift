@@ -112,7 +112,9 @@ final class ZefvAccount: ObservableObject {
         busy = true; lastError = nil; defer { busy = false }
         do {
             let o = try await call()
-            guard let tok = o["token"] as? String, let name = o["username"] as? String else {
+            guard let tok = o["token"] as? String,
+                  let name = o["username"] as? String,
+                  !name.isEmpty else {
                 lastError = "Malformed response"; return false
             }
             let r = UserRole(rawValue: (o["role"] as? String) ?? "member") ?? .member
@@ -131,10 +133,14 @@ final class ZefvAccount: ObservableObject {
         guard let tok = sessionToken, !tok.isEmpty else { return }
         do {
             let o = try await get("account.php", ["token": tok])
-            if let name = o["username"] as? String {
+            if let name = o["username"] as? String, !name.isEmpty {
                 username = name
                 _ = Keychain.set(Self.kUsername, name)
                 loadCustomization(for: name)
+            } else {
+                await clearLocal()
+                lastError = "Session expired"
+                return
             }
             email = (o["email"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             let r = UserRole(rawValue: (o["role"] as? String) ?? "member") ?? .member

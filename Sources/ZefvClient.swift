@@ -10,6 +10,7 @@
 //
 
 import Foundation
+import CryptoKit
 
 enum UsernameFontStyle: String, Codable, CaseIterable, Sendable {
     case `default`
@@ -220,7 +221,7 @@ final class ZefvAccount: ObservableObject {
     }
 
     private func customizationKey(for username: String) -> String {
-        Self.kCustomizationPrefix + username
+        Self.kCustomizationPrefix + Self.usernameDigest(username)
     }
 
     private func migrateCustomization(from oldUsername: String, to newUsername: String) {
@@ -239,6 +240,11 @@ final class ZefvAccount: ObservableObject {
         let normalized = hex.uppercased()
         guard normalized.count == 6, Int(normalized, radix: 16) != nil else { return nil }
         return normalized
+    }
+
+    private static func usernameDigest(_ username: String) -> String {
+        let digest = SHA256.hash(data: Data(username.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     enum Err: Error { case badURL, server(String)

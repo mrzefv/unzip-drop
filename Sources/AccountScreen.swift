@@ -114,24 +114,26 @@ struct AccountScreen: View {
                     }
                 }
 
-                Card {
-                    section("Username style")
-                    VStack(alignment: .leading, spacing: 12) {
-                        ColorPicker("Username color", selection: usernameColorBinding, supportsOpacity: false)
-                            .foregroundStyle(Theme.text)
-                        Picker("Username font", selection: usernameFontBinding) {
-                            ForEach(UsernameFontStyle.allCases, id: \.self) { style in
-                                Text(style.title).tag(style)
+                if account.isLoggedIn {
+                    Card {
+                        section("Username style")
+                        VStack(alignment: .leading, spacing: 12) {
+                            ColorPicker("Username color", selection: usernameColorBinding, supportsOpacity: false)
+                                .foregroundStyle(Theme.text)
+                            Picker("Username font", selection: usernameFontBinding) {
+                                ForEach(UsernameFontStyle.allCases, id: \.self) { style in
+                                    Text(style.title).tag(style)
+                                }
                             }
-                        }
-                        .pickerStyle(.menu)
-                        Toggle("Animated GIF background", isOn: gifBackgroundBinding)
-                            .foregroundStyle(Theme.text)
-                            .disabled(reduceMotion)
-                        if reduceMotion {
-                            Text("GIF backgrounds are hidden while Reduce Motion is enabled.")
-                                .font(.caption)
-                                .foregroundStyle(Theme.subtle)
+                            .pickerStyle(.menu)
+                            Toggle("Animated GIF background", isOn: gifBackgroundBinding)
+                                .foregroundStyle(Theme.text)
+                                .disabled(reduceMotion)
+                            if reduceMotion {
+                                Text("GIF backgrounds are hidden while Reduce Motion is enabled.")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.subtle)
+                            }
                         }
                     }
                 }

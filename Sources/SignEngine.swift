@@ -224,7 +224,7 @@ nonisolated struct SignOptions: Sendable {
 
     var skipEmbeddedProvision = false
     var surgicalMode = true
-    var parallelSigning = true
+    var parallelSigning = false
 
     var isEmpty: Bool {
         name == nil && bundleID == nil && version == nil && iconPNG == nil
@@ -248,6 +248,7 @@ nonisolated enum Signer {
     ) async throws -> SignOutcome {
         var o = SignOptions()
         o.name = nameOverride; o.bundleID = bundleIDOverride; o.version = versionOverride
+        o.parallelSigning = true
         return try await signDetached(ipaURL: ipaURL, material: material, options: o, onLog: onLog)
     }
 

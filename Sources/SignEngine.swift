@@ -233,6 +233,7 @@ nonisolated struct SignOptions: Sendable {
 
     var skipEmbeddedProvision = false
     var surgicalMode = true
+    var parallelSigning = ParallelSigning.isEnabled
 
     static let none = SignOptions()
 
@@ -296,8 +297,9 @@ nonisolated enum Signer {
         let capture = onLog.map { ConsoleCapture($0) }
         capture?.start()
         do {
-            // Parallel DAG signing (mSign's speed path). Safe: disjoint subtrees.
-            ZSignSetParallel(o.surgicalMode && o.injectDylibs.isEmpty)
+            // Parallel DAG signing is safe here because all bundle mutations happen
+            // before zsign starts walking disjoint subtrees.
+            ZSignSetParallel(o.parallelSigning)
             let entitlementsURL: URL?
             if let scrubbed = Self.scrubbedEntitlements(o.entitlementsPlistData, options: o, profile: material.provision, onLog: onLog) {
                 let u = work.appendingPathComponent("entitlements.plist")

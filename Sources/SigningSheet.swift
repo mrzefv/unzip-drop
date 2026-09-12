@@ -87,7 +87,7 @@ struct SigningSheet: View {
     struct DylibItem: Identifiable, Equatable { let id = UUID(); let url: URL; var weak = false }
     struct ExtraToggles {
         var removeExistingLibraries = false, thinToArm64Only = false, randomizeBundleID = false, disableATS = false
-        var weakDylibReferences = false, sha256Only = false, forceResign = true, surgicalMode = true
+        var weakDylibReferences = false, sha256Only = false, forceResign = true, surgicalMode = true, parallelSigning = ParallelSigning.isEnabled
         var forceMinIOS12 = false, disableFileSharing = false, forcePortrait = false, skipIPad = false
         var stripSCInfo = false, stripPrivacy = false, stripWatch = false, stripExtensions = false, removeURLSchemes = false
         var stripBitcode = false, stripDebugSymbols = false
@@ -620,7 +620,8 @@ struct SigningSheet: View {
                 toggle("Remove Watch apps", $o.stripWatch, note: "Strip the embedded watchOS bundle for smaller IPAs")
                 toggle("SHA256 only", $o.sha256Only, note: "Skip SHA1 hashes — modern iOS verifies faster, ~5% smaller CodeResources")
                 toggle("Force re-sign", $o.forceResign, note: "Override existing signatures even on already-signed IPAs")
-                toggle("Surgical mode", $o.surgicalMode, note: "70–85% faster signing — auto-disabled if injecting dylibs")
+                toggle("Surgical mode", $o.surgicalMode, note: "Use the faster signing prep path when possible")
+                toggle("Parallel signing", $o.parallelSigning, note: "Signs sibling frameworks and binaries concurrently inside zsign")
             }
             group("strip", "scissors", "Strip Content", badge: "\(stripCount)") {
                 toggle("Strip PlugIns", $o.stripExtensions, note: "Remove app extensions (Today widget, share sheet) — required for some sideloads")
@@ -649,7 +650,7 @@ struct SigningSheet: View {
 
     private var generalCount: Int {
         [o.removeExistingLibraries, o.thinToArm64Only, o.randomizeBundleID, o.disableATS,
-         o.weakDylibReferences, o.stripWatch, o.sha256Only, o.forceResign, o.surgicalMode].filter { $0 }.count
+         o.weakDylibReferences, o.stripWatch, o.sha256Only, o.forceResign, o.surgicalMode, o.parallelSigning].filter { $0 }.count
     }
     private var stripCount: Int { [o.stripExtensions, o.stripSCInfo, o.stripPrivacy, o.stripBitcode, o.stripDebugSymbols].filter { $0 }.count }
     private var scrubCount: Int { [o.autoFixEntitlements, o.disablePush, o.disableAppGroups, o.disableiCloud, o.disableSiri, o.disableBackgroundModes].filter { $0 }.count }
@@ -811,7 +812,8 @@ struct SigningSheet: View {
          o.weakDylibReferences ? "Weak dylib references" : nil,
          o.stripWatch ? "Remove Watch apps" : nil,
          o.thinToArm64Only ? "Thin to arm64" : nil, o.sha256Only ? "SHA256 only" : nil,
-         o.surgicalMode ? (dylibs.isEmpty ? "Surgical mode" : "Surgical mode (auto-disabled: dylibs)") : nil].compactMap { $0 }
+         o.surgicalMode ? "Surgical mode" : nil,
+         o.parallelSigning ? "Parallel signing" : nil].compactMap { $0 }
     }
     private var plistList: [String] {
         [o.forceMinIOS12 ? "MinimumOSVersion 12.0" : nil, o.removeURLSchemes ? "Hide URL schemes" : nil,
@@ -981,6 +983,7 @@ struct SigningSheet: View {
         s.skipIPad = o.skipIPad
         s.disableATS = o.disableATS
         s.surgicalMode = o.surgicalMode
+        s.parallelSigning = o.parallelSigning
         s.stripSCInfo = o.stripSCInfo
         s.stripPrivacyManifests = o.stripPrivacy
         s.stripWatchApps = o.stripWatch
@@ -995,6 +998,7 @@ struct SigningSheet: View {
         s.disableSiri = o.disableSiri
         s.disableBackgroundModes = o.disableBackgroundModes
         s.entitlementsPlistData = encodedEntitlementsPlistData()
+        ParallelSigning.set(o.parallelSigning)
         return s
     }
 

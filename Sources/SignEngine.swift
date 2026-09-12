@@ -223,8 +223,8 @@ nonisolated struct SignOptions: Sendable {
     var disableBackgroundModes = false  // strip UIBackgroundModes (Info.plist)
 
     var skipEmbeddedProvision = false
-    var surgicalMode = false
-    var parallelSigning = false
+    var surgicalMode = false            // opt-in faster prep path; SigningSheet leaves it off by default
+    var parallelSigning = false         // opt-in zsign DAG parallelism; still forced off when injecting dylibs
 
     var isEmpty: Bool {
         name == nil && bundleID == nil && version == nil && iconPNG == nil

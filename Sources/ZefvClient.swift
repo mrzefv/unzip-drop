@@ -17,6 +17,7 @@ final class ZefvAccount: ObservableObject {
 
     @Published private(set) var username: String?
     @Published private(set) var email: String?
+    @Published private(set) var style: UserStyle = UserStyle.load()
     @Published private(set) var role: UserRole = .member
     @Published private(set) var busy = false
     @Published var lastError: String?
@@ -105,6 +106,8 @@ final class ZefvAccount: ObservableObject {
             let o = try await get("account.php", ["token": tok])
             if let name = o["username"] as? String { username = name; _ = Keychain.set(Self.kUsername, name) }
             email = (o["email"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            style = UserStyle(json: o["style"] as? [String: Any])
+            style.save()
             let r = UserRole(rawValue: (o["role"] as? String) ?? "member") ?? .member
             role = r; _ = Keychain.set("zefv_role", r.rawValue)
             await StaffGate.shared.refresh()
@@ -112,6 +115,17 @@ final class ZefvAccount: ObservableObject {
             if case .server(let m) = e, m.lowercased().contains("session") { await clearLocal() }
             lastError = e.message
         } catch { lastError = error.localizedDescription }
+    }
+
+    /// Registered-only cosmetics: username color / rainbow / animated background.
+    func setStyle(_ st: UserStyle) async -> Bool {
+        guard let tok = sessionToken else { return false }
+        busy = true; lastError = nil; defer { busy = false }
+        do {
+            _ = try await post("account.php", ["action": "set_style", "token": tok,
+                                               "color": st.colorHex, "rainbow": st.rainbow ? 1 : 0, "gif": st.gifURL])
+            style = st; st.save(); return true
+        } catch { lastError = (error as? Err)?.message ?? error.localizedDescription; return false }
     }
 
     func setEmail(_ e: String) async -> Bool {
@@ -132,7 +146,7 @@ final class ZefvAccount: ObservableObject {
         _ = Keychain.set(Self.kSession, "")
         _ = Keychain.set(Self.kUsername, "")
         _ = Keychain.set("zefv_role", "")
-        username = nil; email = nil; role = .member
+        username = nil; email = nil; role = .member; style = .none; UserStyle.none.save()
     }
 
     func logout() async {

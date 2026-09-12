@@ -27,26 +27,30 @@ struct DirExporter: UIViewControllerRepresentable {
 /// `center` renders a centered subtitle (mSign-style "57 Apps") behind the leading title.
 struct TabTitleBar<Trailing: View>: View {
     let title: String
-    var center: String? = nil            // small line under the title, e.g. "3 Apps"
+    var center: String? = nil            // second-row caption, e.g. "3 Apps"
     @ViewBuilder var trailing: Trailing
     var body: some View {
-        ZStack {
-            VStack(spacing: 1) {
-                Text(title).font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
-                if let center {
-                    Text(center).font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.subtle).lineLimit(1)
+        VStack(spacing: 0) {
+            // Row 1: palette · title (centered) · tab actions
+            ZStack {
+                Text(title).font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                    .frame(maxWidth: .infinity).padding(.horizontal, 90)
+                HStack(spacing: 10) {
+                    ThemePaletteButton()
+                    Spacer()
+                    trailing
                 }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 104)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            // Row 2: caption · account chip (MDID as guest, avatar + name when signed in)
             HStack(spacing: 8) {
-                ThemePaletteButton()
-                Spacer()
-                trailing
+                Text(center ?? "").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
+                Spacer(minLength: 6)
                 AccountChip()
             }
+            .padding(.horizontal, 16).padding(.vertical, 6)
+            .background(Color.white.opacity(0.04))
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
         .floatingGlassBar(edge: .top, cornerRadius: 28)
     }
 }

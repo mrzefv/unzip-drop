@@ -17,6 +17,8 @@ struct AccountScreen: View {
     @State private var newPass = ""
     @State private var toast: String?
     @State private var confirmSignOut = false
+    @State private var draft: UserStyle = ZefvAccount.shared.style
+    @State private var pickedColor: Color = Theme.accent
 
     private var role: UserRole { staff.isStaff ? staff.role : account.role }
 
@@ -27,8 +29,9 @@ struct AccountScreen: View {
             if account.isLoggedIn { profile } else { ZefvAccountScreen(mode: .signIn, dismissOnSuccess: false) }
         }
         .preferredColorScheme(AppTheme.shared.colorScheme)
-        .task { await account.refreshProfile(); email = account.email ?? "" }
+        .task { await account.refreshProfile(); email = account.email ?? ""; draft = account.style }
         .onChange(of: account.email) { email = $0 ?? "" }
+        .onChange(of: account.style) { draft = $0 }
     }
 
     // MARK: - Profile
@@ -44,7 +47,7 @@ struct AccountScreen: View {
                         Text(String((account.username ?? "?").prefix(1)).uppercased())
                             .font(.system(size: 34, weight: .heavy, design: .rounded)).foregroundStyle(role.color)
                     }
-                    Text(account.username ?? "").font(.system(size: 24, weight: .bold)).foregroundStyle(Theme.text)
+                    StyledUsername(name: account.username ?? "", style: account.style, font: .system(size: 24, weight: .bold))
                     HStack(spacing: 8) {
                         Image(systemName: role.icon).font(.system(size: 11, weight: .bold))
                         Text(role.badgeText).font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(1)
@@ -63,9 +66,62 @@ struct AccountScreen: View {
                     .buttonStyle(.plain)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 22)
-                .background(Theme.card)
+                .background(ProfileBackdrop(style: account.style))
                 .overlay(RoundedRectangle(cornerRadius: 18).stroke(Theme.stroke, lineWidth: 1))
                 .clipShape(RoundedRectangle(cornerRadius: 18))
+
+                // Style (registered users)
+                Card {
+                    section("Username style")
+                    VStack(alignment: .leading, spacing: 12) {
+                        // Color
+                        Text("COLOR").font(.system(size: 10, weight: .bold)).kerning(1.2).foregroundStyle(Theme.subtle)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                swatch(nil)
+                                ForEach(UserStyle.presets, id: \.self) { swatch($0) }
+                                ColorPicker("", selection: $pickedColor, supportsOpacity: false)
+                                    .labelsHidden().frame(width: 28, height: 28)
+                                    .onChange(of: pickedColor) { c in
+                                        if let h = c.hexString() { draft.colorHex = "#" + h.uppercased().replacingOccurrences(of: "#", with: "") }
+                                    }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        // Rainbow
+                        Toggle(isOn: $draft.rainbow) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "rainbow").symbolRenderingMode(.multicolor)
+                                Text("Rainbow name").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.text)
+                            }
+                        }
+                        .tint(Theme.accent)
+                        // Animated background
+                        Text("ANIMATED BACKGROUND (GIF URL)").font(.system(size: 10, weight: .bold)).kerning(1.2).foregroundStyle(Theme.subtle)
+                        field("https://…/background.gif", text: $draft.gifURL, secure: false, keyboard: .URL)
+                        if draft.hasGIF, let u = URL(string: draft.gifURL) {
+                            AnimatedImageView(url: u)
+                                .frame(height: 90).frame(maxWidth: .infinity)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
+                        }
+                        // Preview + save
+                        HStack {
+                            Text("Preview:").font(.system(size: 12)).foregroundStyle(Theme.subtle)
+                            StyledUsername(name: account.username ?? "", style: draft, font: .system(size: 16, weight: .bold))
+                            Spacer()
+                            Button {
+                                Task { if await account.setStyle(draft) { flash("Style saved") } }
+                            } label: {
+                                HStack(spacing: 6) { if account.busy { ProgressView().tint(.black) }; Text("Save style").font(.system(size: 13, weight: .bold)) }
+                                    .padding(.horizontal, 14).padding(.vertical, 8)
+                                    .background(Theme.accent).foregroundStyle(.black).clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(account.busy || draft == account.style)
+                        }
+                    }
+                }
 
                 // Role explainer
                 Card {
@@ -188,6 +244,18 @@ struct AccountScreen: View {
         .background(Color.white.opacity(0.05))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.stroke, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func swatch(_ hex: String?) -> some View {
+        let selected = (hex ?? "") == draft.colorHex
+        return Button { draft.colorHex = hex ?? "" } label: {
+            ZStack {
+                Circle().fill(hex.map { Color(hex: String($0.dropFirst())) } ?? Theme.card).frame(width: 28, height: 28)
+                if hex == nil { Image(systemName: "slash.circle").font(.system(size: 14)).foregroundStyle(Theme.subtle) }
+            }
+            .overlay(Circle().stroke(selected ? Color.white : Theme.stroke, lineWidth: selected ? 2 : 1))
+        }
+        .buttonStyle(.plain)
     }
 
     private func flash(_ m: String) {

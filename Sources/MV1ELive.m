@@ -132,6 +132,7 @@ static void mv1e_init(void){
     // Only the TARGET app gets the button. mSign ships this file as a bundled
     // resource (it hands the source to Actions to build the dylib), so if the
     // resource is present we are running inside mSign itself → do nothing.
+    if ([NSBundle.mainBundle objectForInfoDictionaryKey:@"MSignHost"]) return;      // Info.plist marker survives re-signing
     if ([NSBundle.mainBundle pathForResource:@"MV1ELive" ofType:@"m"]) return;
     NSString *host = NSBundle.mainBundle.bundleIdentifier ?: @"";
     if ([host containsString:@"mrvek"] || [host containsString:@"msign"] || [host containsString:@"unzip"]) return;

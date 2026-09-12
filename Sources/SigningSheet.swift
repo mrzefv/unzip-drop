@@ -87,7 +87,7 @@ struct SigningSheet: View {
     struct DylibItem: Identifiable, Equatable { let id = UUID(); let url: URL; var weak = false }
     struct ExtraToggles {
         var removeExistingLibraries = false, thinToArm64Only = false, randomizeBundleID = false, disableATS = false
-        var weakDylibReferences = false, sha256Only = false, forceResign = true, surgicalMode = true, parallelSigning = ParallelSigning.isEnabled
+        var weakDylibReferences = false, sha256Only = false, forceResign = false, surgicalMode = false, parallelSigning = false
         var forceMinIOS12 = false, disableFileSharing = false, forcePortrait = false, skipIPad = false
         var stripSCInfo = false, stripPrivacy = false, stripWatch = false, stripExtensions = false, removeURLSchemes = false
         var stripBitcode = false, stripDebugSymbols = false
@@ -126,7 +126,6 @@ struct SigningSheet: View {
             .safeAreaInset(edge: .bottom, spacing: 0) { signBar.floatingGlassBar(edge: .bottom) }
         }
         .background(Color.black.ignoresSafeArea())
-        .onChange(of: o.parallelSigning) { ParallelSigning.set($0) }
         .fullScreenCover(isPresented: $showTerminal) {
             SigningTerminalView(
                 appName: name, bundle: bundle, icon: iconPNG ?? meta.iconPNG,

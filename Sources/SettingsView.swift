@@ -63,9 +63,9 @@ struct SettingsView: View {
                         SettingsSection("Support") {
                             SettingsLink(icon: "globe", title: "MRzefV", subtitle: "mrzefv.com | Founder MRzefv",
                                          url: URL(string: "https://mrzefv.com")!)
-                            SettingsLink(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub",
-                                         subtitle: "github.com/mrzefv",
-                                         url: URL(string: "https://github.com/mrzefv")!)
+                            SettingsLink(icon: "network", title: "Delvek.net",
+                                         subtitle: "delvek.net | Repo and support",
+                                         url: URL(string: "https://delvek.net")!)
                         }
 
                         StatusFooter()
@@ -356,16 +356,16 @@ private struct StatusFooter: View {
     var body: some View {
         VStack(spacing: 8) {
             if account.isLoggedIn {
-                // Signed-in: signature · username · role, MDID under it (small, centered)
+                // Signed-in: signature · username, then MDID and role inline.
                 HStack(spacing: 8) {
                     Image(systemName: "signature").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.accent)
                     Text(account.username ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.text)
                     refreshButton
+                }
+                HStack(spacing: 8) {
+                    mdidPill
                     rolePill
                 }
-                mdidLine
-                Button("Sign out") { Task { await account.logout() } }
-                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.subtle).padding(.top, 2)
             } else {
                 // Guest: create-account CTA, then role + MDID underneath
                 Button { showAccount = true } label: {
@@ -377,10 +377,10 @@ private struct StatusFooter: View {
                 }
                 .buttonStyle(.plain)
                 HStack(spacing: 8) {
+                    mdidPill
                     rolePill
                     refreshButton
                 }
-                mdidLine
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)
@@ -410,11 +410,20 @@ private struct StatusFooter: View {
         .buttonStyle(.plain)
     }
 
-    private var mdidLine: some View {
-        (Text("MDID: ")
-            .font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
-        + Text(staff.mdid)
-            .font(.system(size: 11, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent))
+    private var mdidPill: some View {
+        HStack(spacing: 4) {
+            Text("MDID")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(Theme.subtle)
+            Text(staff.mdid)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Theme.accent)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.white.opacity(0.04))
+        .overlay(Capsule().stroke(Theme.stroke, lineWidth: 1))
+        .clipShape(Capsule())
         .onTapGesture {
             UIPasteboard.general.string = staff.mdid
             UINotificationFeedbackGenerator().notificationOccurred(.success)

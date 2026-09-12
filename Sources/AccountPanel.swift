@@ -30,32 +30,32 @@ struct AccountChip: View {
             UISelectionFeedbackGenerator().selectionChanged()
             account.panelShown.toggle()
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 if account.isLoggedIn {
                     ZStack(alignment: .bottomTrailing) {
-                        Circle().fill(Theme.accent).frame(width: 30, height: 30)
+                        Circle().fill(Theme.accent).frame(width: 24, height: 24)
                         Text(String((account.username ?? "?").prefix(1)).uppercased())
-                            .font(.system(size: 13, weight: .heavy, design: .rounded)).foregroundStyle(.black)
-                            .frame(width: 30, height: 30)
-                        Circle().fill(Color.green).frame(width: 8, height: 8)
-                            .overlay(Circle().stroke(Theme.bg, lineWidth: 1.5))
+                            .font(.system(size: 11, weight: .heavy, design: .rounded)).foregroundStyle(.black)
+                            .frame(width: 24, height: 24)
+                        Circle().fill(Color.green).frame(width: 7, height: 7)
+                            .overlay(Circle().stroke(Theme.bg, lineWidth: 1.2))
                     }
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(account.username ?? "").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                        Text(account.username ?? "").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
                         Text(role == .member ? "REGISTERED" : role.badgeText)
-                            .font(.system(size: 8, weight: .heavy, design: .monospaced)).kerning(1).foregroundStyle(Theme.accent)
+                            .font(.system(size: 7, weight: .heavy, design: .monospaced)).kerning(0.8).foregroundStyle(Theme.accent)
                     }
                 } else {
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text("MDID").font(.system(size: 8, weight: .semibold, design: .monospaced)).kerning(1).foregroundStyle(Theme.subtle)
-                        Text(staff.mdid).font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundStyle(Theme.accent).lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text("MDID").font(.system(size: 7, weight: .semibold, design: .monospaced)).kerning(0.8).foregroundStyle(Theme.subtle)
+                        Text(staff.mdid).font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(Theme.accent).lineLimit(1)
                     }
                 }
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.subtle)
+                    .font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.subtle)
                     .rotationEffect(.degrees(account.panelShown ? 180 : 0))
             }
-            .padding(.leading, 8).padding(.trailing, 8).padding(.vertical, 4)
+            .padding(.leading, 7).padding(.trailing, 7).padding(.vertical, 3)
             .background(Color.white.opacity(0.05)).clipShape(Capsule())
             .contentShape(Capsule())
         }
@@ -87,11 +87,11 @@ struct AccountDropdown: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 0) {
-                Rectangle().fill(Theme.accent).frame(height: 3)
+                Rectangle().fill(Theme.accent).frame(height: 2)
                 if account.isLoggedIn { signedIn } else { guest }
             }
         }
-        .frame(width: 340)
+        .frame(width: 292)
         .background(Theme.bg)
         .task { await account.refreshProfile() }
     }
@@ -100,15 +100,15 @@ struct AccountDropdown: View {
 
     private var guest: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 label("touchid", "Your MDID")
-                Text(staff.mdid).font(.system(size: 20, weight: .bold, design: .monospaced)).foregroundStyle(Theme.accent)
+                Text(staff.mdid).font(.system(size: 17, weight: .bold, design: .monospaced)).foregroundStyle(Theme.accent)
                 label("chart.bar.xaxis", "Sign quota")
                 quotaBar
             }
-            .padding(16)
+            .padding(14)
             Divider().overlay(Theme.stroke)
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 field("Username", text: $username, secure: false)
                 field("Password", text: $password, secure: true)
                 if let e = account.lastError {
@@ -122,12 +122,12 @@ struct AccountDropdown: View {
                         if ok { username = ""; password = "" }
                     }
                 } label: {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 7) {
                         if account.busy { ProgressView().tint(.black) }
                         else { Image(systemName: registering ? "person.crop.circle.badge.plus" : "arrow.right.square.fill") }
-                        Text(registering ? "REGISTER" : "SIGN IN").font(.system(size: 17, weight: .heavy, design: .monospaced)).kerning(1)
+                        Text(registering ? "REGISTER" : "SIGN IN").font(.system(size: 15, weight: .heavy, design: .monospaced)).kerning(1)
                     }
-                    .frame(maxWidth: .infinity).padding(.vertical, 14)
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
                     .background(Theme.accent).foregroundStyle(.black)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
@@ -138,9 +138,9 @@ struct AccountDropdown: View {
                     Button(registering ? "Sign in" : "Register") { withAnimation { registering.toggle(); account.lastError = nil } }
                         .foregroundStyle(Theme.accent)
                 }
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
             }
-            .padding(16)
+            .padding(14)
         }
     }
 
@@ -161,23 +161,23 @@ struct AccountDropdown: View {
 
     private var signedIn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 ZStack {
-                    Circle().fill(Theme.accent).frame(width: 52, height: 52)
+                    Circle().fill(Theme.accent).frame(width: 44, height: 44)
                     Text(String((account.username ?? "?").prefix(1)).uppercased())
-                        .font(.system(size: 22, weight: .heavy, design: .rounded)).foregroundStyle(.black)
+                        .font(.system(size: 18, weight: .heavy, design: .rounded)).foregroundStyle(.black)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(account.username ?? "").font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.text)
-                    Text(staff.mdid).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Theme.subtle)
+                    Text(account.username ?? "").font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.text)
+                    Text(staff.mdid).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(Theme.subtle)
                 }
                 Spacer()
-                HStack(spacing: 6) {
-                    Circle().fill(Color.green).frame(width: 9, height: 9)
-                    Text("Verified").font(.system(size: 14)).foregroundStyle(Theme.text)
+                HStack(spacing: 5) {
+                    Circle().fill(Color.green).frame(width: 8, height: 8)
+                    Text("Verified").font(.system(size: 12)).foregroundStyle(Theme.text)
                 }
             }
-            .padding(16)
+            .padding(14)
             Divider().overlay(Theme.stroke)
 
             HStack(spacing: 8) {
@@ -191,10 +191,10 @@ struct AccountDropdown: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(role.color.opacity(0.6), lineWidth: 1))
                 Spacer()
             }
-            .padding(.horizontal, 16).padding(.vertical, 10)
+            .padding(.horizontal, 14).padding(.vertical, 9)
             Divider().overlay(Theme.stroke)
 
-            label("chart.bar.xaxis", "User stats").padding(.horizontal, 16).padding(.top, 12)
+            label("chart.bar.xaxis", "User stats").padding(.horizontal, 14).padding(.top, 10)
             HStack(spacing: 0) {
                 stat("\(signsToday)", "Signs used", Theme.accent)
                 divider
@@ -202,42 +202,42 @@ struct AccountDropdown: View {
                 divider
                 stat("\(signed.entries.count)", "Signs total", .orange)
             }
-            .padding(.vertical, 14)
+            .padding(.vertical, 12)
             Divider().overlay(Theme.stroke)
 
-            label("safari", "Navigate").padding(.horizontal, 16).padding(.top, 12)
+            label("safari", "Navigate").padding(.horizontal, 14).padding(.top, 10)
             VStack(spacing: 0) {
                 navRow("square.grid.3x3.fill", "Browse",   Color(red: 0.2, green: 0.6, blue: 1.0)) { nav.go(0) }
                 navRow("square.grid.2x2.fill", "Library",  Color(red: 0.7, green: 0.35, blue: 1.0)) { nav.go(1) }
                 navRow("signature",            "Signed",   .orange) { nav.go(2) }
                 navRow("gearshape.fill",       "Settings", Theme.subtle) { nav.go(3) }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 4)
             Divider().overlay(Theme.stroke)
 
-            label("bolt.fill", "Quick tools").padding(.horizontal, 16).padding(.top, 12)
+            label("bolt.fill", "Quick tools").padding(.horizontal, 14).padding(.top, 10)
             HStack(spacing: 8) {
                 tool("square.grid.2x2", "Library") { nav.go(1) }
                 tool("iphone", "Devices") { nav.openAccountScreen = true; nav.go(3) }
                 tool("signature", "Signer") { nav.go(1) }
                 tool("gearshape.fill", "Config") { nav.go(3) }
             }
-            .padding(16)
+            .padding(14)
             Divider().overlay(Theme.stroke)
 
             Button { confirmLogout = true } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
-                    Text("LOGOUT").font(.system(size: 15, weight: .heavy, design: .monospaced)).kerning(1)
+                    Text("LOGOUT").font(.system(size: 13, weight: .heavy, design: .monospaced)).kerning(1)
                 }
-                .frame(maxWidth: .infinity).padding(.vertical, 14)
+                .frame(maxWidth: .infinity).padding(.vertical, 11)
                 .foregroundStyle(.red)
                 .background(Color.red.opacity(0.10))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.red.opacity(0.4), lineWidth: 1))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
-            .padding(16)
+            .padding(14)
             .confirmationDialog("Log out of \(account.username ?? "")?", isPresented: $confirmLogout, titleVisibility: .visible) {
                 Button("Log out", role: .destructive) { Task { await account.logout() } }
                 Button("Cancel", role: .cancel) {}
@@ -259,20 +259,20 @@ struct AccountDropdown: View {
 
     private func stat(_ v: String, _ t: String, _ c: Color) -> some View {
         VStack(spacing: 4) {
-            Text(v).font(.system(size: 30, weight: .heavy, design: .rounded)).foregroundStyle(c)
-            Text(t.uppercased()).font(.system(size: 10, weight: .bold, design: .monospaced)).kerning(1).foregroundStyle(Theme.subtle)
+            Text(v).font(.system(size: 26, weight: .heavy, design: .rounded)).foregroundStyle(c)
+            Text(t.uppercased()).font(.system(size: 9, weight: .bold, design: .monospaced)).kerning(1).foregroundStyle(Theme.subtle)
         }
         .frame(maxWidth: .infinity)
     }
 
     private func navRow(_ icon: String, _ t: String, _ c: Color, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon).font(.system(size: 16, weight: .semibold)).foregroundStyle(c).frame(width: 24)
-                Text(t.uppercased()).font(.system(size: 16, weight: .heavy, design: .monospaced)).kerning(1).foregroundStyle(c == Theme.subtle ? Theme.text : c)
+            HStack(spacing: 12) {
+                Image(systemName: icon).font(.system(size: 15, weight: .semibold)).foregroundStyle(c).frame(width: 22)
+                Text(t.uppercased()).font(.system(size: 15, weight: .heavy, design: .monospaced)).kerning(1).foregroundStyle(c == Theme.subtle ? Theme.text : c)
                 Spacer()
             }
-            .padding(.horizontal, 16).padding(.vertical, 12)
+            .padding(.horizontal, 14).padding(.vertical, 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -280,11 +280,11 @@ struct AccountDropdown: View {
 
     private func tool(_ icon: String, _ t: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: icon).font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.text)
+            VStack(spacing: 7) {
+                Image(systemName: icon).font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.text)
                 Text(t.uppercased()).font(.system(size: 9, weight: .bold, design: .monospaced)).kerning(1).foregroundStyle(Theme.subtle)
             }
-            .frame(maxWidth: .infinity).padding(.vertical, 14)
+            .frame(maxWidth: .infinity).padding(.vertical, 12)
             .background(Color.white.opacity(0.04))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.stroke, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -297,9 +297,9 @@ struct AccountDropdown: View {
             if secure { SecureField(ph, text: text) }
             else { TextField(ph, text: text).autocorrectionDisabled().textInputAutocapitalization(.never) }
         }
-        .font(.system(size: 16, design: .monospaced))
+        .font(.system(size: 15, design: .monospaced))
         .foregroundStyle(Theme.text)
-        .padding(.horizontal, 14).padding(.vertical, 14)
+        .padding(.horizontal, 12).padding(.vertical, 12)
         .background(Color.white.opacity(0.05))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.stroke, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 8))

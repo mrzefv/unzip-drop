@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct AccountScreen: View {
+    private let usernameBackgroundGIFName = "onboarding"
     @ObservedObject private var account = ZefvAccount.shared
     @ObservedObject private var staff = StaffGate.shared
     @Environment(\.dismiss) private var dismiss
@@ -274,7 +275,7 @@ struct AccountScreen: View {
     private func updateBackgroundGifCache() {
         let shouldLoad = account.usernameCustomization.gifBackground && !reduceMotion
         if shouldLoad {
-            if backgroundGif == nil { backgroundGif = AnimatedImage.named("onboarding") }
+            if backgroundGif == nil { backgroundGif = AnimatedImage.named(usernameBackgroundGIFName) }
         } else {
             backgroundGif = nil
         }

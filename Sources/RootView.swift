@@ -14,6 +14,8 @@ struct RootView: View {
     @ObservedObject private var signQueue = SignQueue.shared
     @ObservedObject private var hub = GitHubHub.shared
     @ObservedObject private var theme = AppTheme.shared
+    @ObservedObject private var account = ZefvAccount.shared
+    @ObservedObject private var nav = AppNav.shared
     @ObservedObject private var onboarding = Onboarding.shared
     @State private var tab = 0
     @State private var signItem: SignItem?

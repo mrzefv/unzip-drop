@@ -297,9 +297,9 @@ nonisolated enum Signer {
         let capture = onLog.map { ConsoleCapture($0) }
         capture?.start()
         do {
-            // Parallel DAG signing is safe here because all bundle mutations happen
-            // before zsign starts walking disjoint subtrees.
-            ZSignSetParallel(o.parallelSigning)
+            // Bundle mutations happen before zsign starts, but dylib injection still
+            // keeps the older conservative serial path.
+            ZSignSetParallel(o.parallelSigning && o.injectDylibs.isEmpty)
             let entitlementsURL: URL?
             if let scrubbed = Self.scrubbedEntitlements(o.entitlementsPlistData, options: o, profile: material.provision, onLog: onLog) {
                 let u = work.appendingPathComponent("entitlements.plist")

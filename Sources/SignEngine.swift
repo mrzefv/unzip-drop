@@ -224,7 +224,7 @@ nonisolated struct SignOptions: Sendable {
 
     var skipEmbeddedProvision = false
     var surgicalMode = true
-    var parallelSigning = false
+    var parallelSigning = true
 
     var isEmpty: Bool {
         name == nil && bundleID == nil && version == nil && iconPNG == nil

@@ -442,7 +442,13 @@ private struct SourceDetailScreen: View {
         .onChange(of: sort) { _ in visibleGroupCount = 6 }
         .sheet(item: $openGroup) { g in
             AppDetailSheet(source: current, group: g)
-                .presentationDragIndicator(.visible)
+                .then { view in
+                    if #available(iOS 16.0, *) {
+                        view.presentationDragIndicator(.visible)
+                    } else {
+                        view
+                    }
+                }
                 .preferredColorScheme(.dark)
         }
     }

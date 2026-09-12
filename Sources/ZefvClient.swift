@@ -138,8 +138,7 @@ final class ZefvAccount: ObservableObject {
                 _ = Keychain.set(Self.kUsername, name)
                 loadCustomization(for: name)
             } else {
-                await clearLocal()
-                lastError = "Session expired"
+                lastError = "Malformed profile response"
                 return
             }
             email = (o["email"] as? String).flatMap { $0.isEmpty ? nil : $0 }

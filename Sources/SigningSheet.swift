@@ -1009,7 +1009,7 @@ struct SigningSheet: View {
         s.skipIPad = o.skipIPad
         s.disableATS = o.disableATS
         s.surgicalMode = o.surgicalMode
-        s.parallelSigning = o.parallelSigning
+        s.parallelSigning = effectiveParallelSigning
         s.stripSCInfo = o.stripSCInfo
         s.stripPrivacyManifests = o.stripPrivacy
         s.stripWatchApps = o.stripWatch

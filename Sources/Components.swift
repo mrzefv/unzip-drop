@@ -27,22 +27,26 @@ struct DirExporter: UIViewControllerRepresentable {
 /// `center` renders a centered subtitle (mSign-style "57 Apps") behind the leading title.
 struct TabTitleBar<Trailing: View>: View {
     let title: String
-    var center: String? = nil
+    var center: String? = nil            // small line under the title, e.g. "3 Apps"
     @ViewBuilder var trailing: Trailing
     var body: some View {
         ZStack {
-            if let center {
-                Text(center).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.subtle)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            VStack(spacing: 1) {
+                Text(title).font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                if let center {
+                    Text(center).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.subtle).lineLimit(1)
+                }
             }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 120)
             HStack(spacing: 10) {
                 ThemePaletteButton()
-                Text(title).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text)
                 Spacer()
                 trailing
+                AccountChip()
             }
         }
-        .padding(.horizontal, 18).padding(.vertical, 12)
+        .padding(.horizontal, 14).padding(.vertical, 10)
         .floatingGlassBar(edge: .top, cornerRadius: 28)
     }
 }

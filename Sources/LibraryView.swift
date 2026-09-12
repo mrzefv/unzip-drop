@@ -16,6 +16,8 @@ struct LibraryView: View {
     @State private var installing: String?
     @State private var error: String?
     @State private var sheetItem: LibraryItem?
+    @State private var showSearch = false
+    @State private var confirmDeleteAll = false
 
     private var inbox: URL { AppPaths.dir("inbox") }
 
@@ -29,7 +31,7 @@ struct LibraryView: View {
             Theme.bg.ignoresSafeArea()
             ScrollView(showsIndicators: false) {
                 LazyVStack(spacing: 0) {
-                    if !items.isEmpty {
+                    if !items.isEmpty && showSearch {
                         MSignSearchField(placeholder: "Search", text: $search).padding(.bottom, 8)
                     }
                     if let error { Card { Text(error).font(.caption).foregroundStyle(.orange) }.padding(.bottom, 8) }
@@ -91,9 +93,38 @@ struct LibraryView: View {
 
     private var header: some View {
         TabTitleBar(title: "Library", center: "\(items.count) Apps") {
-            Button { importing = true } label: {
-                Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accent)
+            HStack(spacing: 14) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) { showSearch.toggle(); if !showSearch { search = "" } }
+                } label: {
+                    Image(systemName: showSearch ? "xmark" : "magnifyingglass")
+                        .font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+
+                Menu {
+                    Button { importing = true } label: { Label("Import .ipa", systemImage: "square.and.arrow.down") }
+                    if !items.isEmpty {
+                        Divider()
+                        Menu {
+                            ForEach(items) { it in
+                                Button(role: .destructive) { delete(it) } label: { Label(it.name, systemImage: "trash") }
+                            }
+                        } label: { Label("Delete app…", systemImage: "trash") }
+                        Button(role: .destructive) { confirmDeleteAll = true } label: {
+                            Label("Delete all (\(items.count))", systemImage: "trash.fill")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accent)
+                        .frame(width: 30, height: 30).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
+        }
+        .confirmationDialog("Delete every app in the Library?", isPresented: $confirmDeleteAll, titleVisibility: .visible) {
+            Button("Delete \(items.count) apps", role: .destructive) { deleteAll() }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -137,6 +168,12 @@ struct LibraryView: View {
     private func delete(_ it: LibraryItem) {
         try? FileManager.default.removeItem(at: it.url)
         items.removeAll { $0.id == it.id }
+    }
+
+    private func deleteAll() {
+        for it in items { try? FileManager.default.removeItem(at: it.url) }
+        items.removeAll()
+        search = ""; showSearch = false
     }
 
     private func install(_ it: LibraryItem) async {

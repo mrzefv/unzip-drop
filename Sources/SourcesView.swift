@@ -399,10 +399,7 @@ private struct SourceDetailScreen: View {
                 Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
             }
             Spacer()
-            HStack(spacing: 10) {
-                SourceIcon(url: current.iconURL, side: 24, fallback: current.name)
-                Text(current.name.uppercased()).font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
-            }
+            Text("Browse").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
             Spacer()
             Button { withAnimation { showSearch.toggle() } } label: {
                 Image(systemName: "magnifyingglass").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
@@ -420,14 +417,12 @@ private struct SourceDetailScreen: View {
     }
 
     private var countBar: some View {
-        HStack {
+        HStack(spacing: 8) {
+            SourceIcon(url: current.iconURL, side: 22, fallback: current.name)
             Text("\(groups.count.formatted()) Apps").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
+            Text("· \(current.name.uppercased())").font(.system(size: 12, weight: .bold)).kerning(0.5).foregroundStyle(Theme.subtle).lineLimit(1)
             Spacer()
-            HStack(spacing: 6) {
-                Image(systemName: "signature.zh").font(.system(size: 15, weight: .bold))
-                Text("by MrZEfv").font(.system(size: 14, weight: .bold)).kerning(0.3)
-            }
-            .foregroundStyle(Color(red: 0.95, green: 0.25, blue: 0.25)).lineLimit(1)
+            AccountChip()
         }
         .padding(.horizontal, 16).padding(.vertical, 6)
         .background(Color.white.opacity(0.04))

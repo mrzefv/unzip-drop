@@ -1,7 +1,7 @@
 //
 //  StaffGate.swift
 //  Server-decided role gate. The list of staff device IDs lives on the VPS
-//  (apii.zefv.dev/roles/check.php) — never in the IPA, so it can't be pulled out
+//  (apii.zefv.dev/roles_check.php) — never in the IPA, so it can't be pulled out
 //  of the binary. The app sends its stable device token; the server returns the
 //  role. Result is cached in the Keychain with a short TTL so it works briefly
 //  offline and re-verifies when back online.
@@ -54,11 +54,12 @@ final class StaffGate: ObservableObject {
 
     // MARK: - Server check
 
-    /// VPS endpoint derived from the cert source (…/ota/cert.php → …/roles/check.php).
+    /// Roles endpoint. Lives on apii (the PHP account API), not the api.zefv.dev
+    /// router. Override with UserDefaults "uzd_roles_url" if it ever moves.
+    nonisolated static let defaultRolesURL = "https://apii.zefv.dev/roles/check.php"
     nonisolated private func endpoint() -> URL? {
-        guard let base = URL(string: ServerConfig.certSourceURL) else { return nil }
-        return base.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("roles").appendingPathComponent("check.php")
+        let v = UserDefaults.standard.string(forKey: "uzd_roles_url") ?? ""
+        return URL(string: v.isEmpty ? Self.defaultRolesURL : v)
     }
 
     /// Re-check the role with the server. Silent on failure (keeps last cached value).

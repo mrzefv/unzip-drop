@@ -20,8 +20,8 @@ nonisolated enum Theme {
         return h.isEmpty ? defaultAccent : h
     }
 
-    static var bg: Color     { isDark ? Color(red: 0.06, green: 0.07, blue: 0.08) : Color(red: 0.96, green: 0.96, blue: 0.97) }
-    static var card: Color   { isDark ? Color(red: 0.11, green: 0.12, blue: 0.14) : Color.white }
+    static var bg: Color     { isDark ? Color.black : Color(red: 0.96, green: 0.96, blue: 0.97) }
+    static var card: Color   { isDark ? Color(red: 0.08, green: 0.09, blue: 0.10) : Color.white }
     static var stroke: Color { isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.08) }
     static var text: Color   { isDark ? Color(red: 0.92, green: 0.95, blue: 0.96) : Color(red: 0.08, green: 0.09, blue: 0.10) }
     static var subtle: Color { isDark ? Color(red: 0.55, green: 0.60, blue: 0.63) : Color(red: 0.42, green: 0.46, blue: 0.49) }

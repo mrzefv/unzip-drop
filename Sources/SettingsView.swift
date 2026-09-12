@@ -12,12 +12,14 @@ import UniformTypeIdentifiers
 // MARK: - Root list
 
 private enum Screen: Identifiable, Hashable {
+    case github, account
     case about, repo, token
     case dylibTemplate, ipaTemplate
     case certificates, otaDomain, certInspector, transparency, recoverData, copilot, live3d
     case tutorials
     var id: String {
         switch self {
+        case .github: return "github"; case .account: return "account"
         case .about: return "about"; case .repo: return "repo"; case .token: return "token"
         case .dylibTemplate: return "tpl-dylib"; case .ipaTemplate: return "tpl-ipa"
         case .certificates: return "certs"; case .otaDomain: return "ota"; case .certInspector: return "inspect"; case .transparency: return "transparency"; case .recoverData: return "recover"; case .copilot: return "copilot"; case .live3d: return "live3d"
@@ -31,6 +33,7 @@ struct SettingsView: View {
     @EnvironmentObject var session: Session
     @ObservedObject private var certs = CertificateStore.shared
     @ObservedObject private var staff = StaffGate.shared
+    @ObservedObject private var account = ZefvAccount.shared
     @State private var screen: Screen?
 
     var body: some View {
@@ -41,40 +44,13 @@ struct SettingsView: View {
 
                         SettingsSection("General") {
                             SettingsRow(icon: "info.circle.fill", title: "About", subtitle: "App information and version") { screen = .about }
-                        }
-
-                        SettingsSection("GitHub") {
-                            SettingsRow(icon: "tray.and.arrow.down.fill", title: "Import zip",
-                                        subtitle: "Extract a zip into the workspace") { GitHubHub.shared.open(0) }
-                            SettingsRow(icon: "folder.fill", title: "Contents",
-                                        subtitle: session.root == nil ? "Workspace is empty" : "\(session.fileCount) files · \(session.archiveName ?? "")") { GitHubHub.shared.open(1) }
-                            SettingsRow(icon: "arrow.up.circle.fill", title: "Push",
-                                        subtitle: "Commit the workspace to \(config.owner.isEmpty ? "a repo" : "\(config.owner)/\(config.repo)")") { GitHubHub.shared.open(2) }
-                            SettingsRow(icon: "hammer.fill", title: "Build",
-                                        subtitle: "Actions runs, steps, artifacts") { GitHubHub.shared.open(3) }
-                        }
-
-                        SettingsSection("Target") {
-                            SettingsRow(icon: "point.3.connected.trianglepath.dotted",
-                                        title: "Repository",
-                                        subtitle: repoSubtitle) { screen = .repo }
-                        }
-
-                        SettingsSection("Security") {
-                            SettingsRow(icon: "key.fill",
-                                        title: "Access token",
-                                        subtitle: config.hasToken ? "GitHub PAT stored in Keychain" : "No token set") { screen = .token }
-                            if staff.isStaff {
-                                SettingsRow(icon: "lock.doc.fill",
-                                            title: "Recover hidden data",
-                                            subtitle: "Decrypt an Mcrypted payload from any signed IPA") { screen = .recoverData }
-                                SettingsRow(icon: "sparkles",
-                                            title: "Copilot",
-                                            subtitle: Copilot.hasKey ? "\(Copilot.provider.label) key set" : "Add API key for AI dylib authoring") { screen = .copilot }
-                                SettingsRow(icon: "cube.transparent",
-                                            title: "mv1E Live (3D view debugger)",
-                                            subtitle: "Render a live UIView hierarchy captured from an injected app") { screen = .live3d }
-                            }
+                            SettingsRow(icon: account.isLoggedIn ? "person.crop.circle.fill" : "person.crop.circle.badge.plus",
+                                        title: "Account",
+                                        subtitle: account.isLoggedIn
+                                            ? "\(account.username ?? "") · \((staff.isStaff ? staff.role : account.role).title) · \(staff.mdid)"
+                                            : "Sign in or register · \(staff.mdid)") { screen = .account }
+                            SettingsRow(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub",
+                                        subtitle: githubSubtitle) { screen = .github }
                         }
 
                         SettingsSection("Signing") {
@@ -84,39 +60,12 @@ struct SettingsView: View {
                                         subtitle: "\(ServerConfig.installHost) · certbot via Actions") { screen = .otaDomain }
                         }
 
-                        SettingsSection("Transparency") {
-                            SettingsRow(icon: "doc.text.magnifyingglass", title: "Certificate inspector",
-                                        subtitle: "Every cert the app can serve, field by field") { screen = .certInspector }
-                            SettingsRow(icon: "eye.trianglebadge.exclamationmark", title: "What leaves this device",
-                                        subtitle: "Endpoints, what's sent, and live self-checks") { screen = .transparency }
-                        }
-
-                        SettingsSection("Templates") {
-                            SettingsRow(icon: "puzzlepiece.extension.fill", title: "Dylib project",
-                                        subtitle: "Theos · runtime swizzle · Actions build") { screen = .dylibTemplate }
-                            SettingsRow(icon: "app.badge.fill", title: "IPA app project",
-                                        subtitle: "SwiftUI · XcodeGen · unsigned Actions build") { screen = .ipaTemplate }
-                        }
-
-                        SettingsSection("Learn") {
-                            SettingsRow(icon: "book.fill", title: "Tutorials",
-                                        subtitle: "\(TutorialLibrary.all.count) guides · phone-only workflow, FLEX, hooking, certs") { screen = .tutorials }
-                        }
-
                         SettingsSection("Support") {
-                            SettingsLink(icon: "globe", title: "delvek.net", subtitle: "Trusted IPA Repository",
-                                         url: URL(string: "https://delvek.net")!)
-                            SettingsLink(icon: "person.crop.circle.badge.checkmark", title: "MSign",
-                                         subtitle: "msign.party | Founder MRZefv",
-                                         url: URL(string: "https://msign.party")!)
-                        }
-
-                        SettingsSection(staff.isStaff ? "Staff (\(staff.role.title))" : "Access") {
-                            SettingsRow(icon: staff.isStaff ? "checkmark.shield.fill" : "lock.fill",
-                                        title: staff.isStaff ? "Staff tools unlocked" : "Standard access",
-                                        subtitle: "Your MDID: \(staff.mdid)") {
-                                UIPasteboard.general.string = staff.mdid
-                            }
+                            SettingsLink(icon: "globe", title: "MRzefV", subtitle: "mrzefv.com | Founder MRzefv",
+                                         url: URL(string: "https://mrzefv.com")!)
+                            SettingsLink(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub",
+                                         subtitle: "github.com/mrzefv",
+                                         url: URL(string: "https://github.com/mrzefv")!)
                         }
 
                         StatusFooter()
@@ -131,11 +80,14 @@ struct SettingsView: View {
                     Text("\(Theme.appName.uppercased()) \(Theme.appVersion)").font(.caption.monospaced()).foregroundStyle(Theme.subtle)
                 }
             }
-            .task { await StaffGate.shared.refresh() }
+            .task { await StaffGate.shared.refresh(); await ZefvAccount.shared.refreshProfile() }
+            .onReceive(AppNav.shared.$openAccountScreen) { if $0 { AppNav.shared.openAccountScreen = false; screen = .account } }
         }
         .fullScreenCover(item: $screen) { s in
             Group {
                 switch s {
+                case .github: GitHubSettingsScreen()
+                case .account: AccountScreen()
                 case .about: AboutScreen()
                 case .repo:  RepoScreen()
                 case .token: TokenScreen()
@@ -154,6 +106,128 @@ struct SettingsView: View {
             .environmentObject(config)
             .environmentObject(session)
             .preferredColorScheme(.dark)
+        }
+    }
+
+    private var githubSubtitle: String {
+        guard !config.owner.isEmpty, !config.repo.isEmpty else { return "Import · Push · Build · Templates · Tutorials" }
+        return "\(config.owner)/\(config.repo) · Import · Push · Build"
+    }
+}
+
+// MARK: - GitHub hub (everything repo/dev related lives here, off the main list)
+
+private struct GitHubSettingsScreen: View {
+    @EnvironmentObject var config: Config
+    @EnvironmentObject var session: Session
+    @ObservedObject private var staff = StaffGate.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var screen: Screen?
+
+    var body: some View {
+        ZStack {
+            Theme.bg.ignoresSafeArea()
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+
+                    SettingsSection("GitHub") {
+                        SettingsRow(icon: "tray.and.arrow.down.fill", title: "Import zip",
+                                    subtitle: "Extract a zip into the workspace") { GitHubHub.shared.open(0) }
+                        SettingsRow(icon: "folder.fill", title: "Contents",
+                                    subtitle: session.root == nil ? "Workspace is empty" : "\(session.fileCount) files · \(session.archiveName ?? "")") { GitHubHub.shared.open(1) }
+                        SettingsRow(icon: "arrow.up.circle.fill", title: "Push",
+                                    subtitle: "Commit the workspace to \(config.owner.isEmpty ? "a repo" : "\(config.owner)/\(config.repo)")") { GitHubHub.shared.open(2) }
+                        SettingsRow(icon: "hammer.fill", title: "Build",
+                                    subtitle: "Actions runs, steps, artifacts") { GitHubHub.shared.open(3) }
+                    }
+
+                    SettingsSection("Target") {
+                        SettingsRow(icon: "point.3.connected.trianglepath.dotted",
+                                    title: "Repository",
+                                    subtitle: repoSubtitle) { screen = .repo }
+                    }
+
+                    SettingsSection("Security") {
+                        SettingsRow(icon: "key.fill",
+                                    title: "Access token",
+                                    subtitle: config.hasToken ? "GitHub PAT stored in Keychain" : "No token set") { screen = .token }
+                        if staff.isStaff {
+                            SettingsRow(icon: "lock.doc.fill",
+                                        title: "Recover hidden data",
+                                        subtitle: "Decrypt an Mcrypted payload from any signed IPA") { screen = .recoverData }
+                            SettingsRow(icon: "sparkles",
+                                        title: "Copilot",
+                                        subtitle: Copilot.hasKey ? "\(Copilot.provider.label) key set" : "Add API key for AI dylib authoring") { screen = .copilot }
+                            SettingsRow(icon: "cube.transparent",
+                                        title: "mv1E Live (3D view debugger)",
+                                        subtitle: "Render a live UIView hierarchy captured from an injected app") { screen = .live3d }
+                        }
+                    }
+
+                    SettingsSection("Transparency") {
+                        SettingsRow(icon: "doc.text.magnifyingglass", title: "Certificate inspector",
+                                    subtitle: "Every cert the app can serve, field by field") { screen = .certInspector }
+                        SettingsRow(icon: "eye.trianglebadge.exclamationmark", title: "What leaves this device",
+                                    subtitle: "Endpoints, what's sent, and live self-checks") { screen = .transparency }
+                    }
+
+                    SettingsSection("Templates") {
+                        SettingsRow(icon: "puzzlepiece.extension.fill", title: "Dylib project",
+                                    subtitle: "Theos · runtime swizzle · Actions build") { screen = .dylibTemplate }
+                        SettingsRow(icon: "app.badge.fill", title: "IPA app project",
+                                    subtitle: "SwiftUI · XcodeGen · unsigned Actions build") { screen = .ipaTemplate }
+                    }
+
+                    SettingsSection("Learn") {
+                        SettingsRow(icon: "book.fill", title: "Tutorials",
+                                    subtitle: "\(TutorialLibrary.all.count) guides · phone-only workflow, FLEX, hooking, certs") { screen = .tutorials }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 30)
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                ZStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left.forwardslash.chevron.right").foregroundStyle(Theme.accent)
+                        Text("GITHUB").font(.system(size: 15, weight: .heavy, design: .rounded)).kerning(1).foregroundStyle(Theme.text)
+                        Spacer()
+                    }
+                    Text(config.repo.isEmpty ? "Setup" : "\(config.owner)/\(config.repo)")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced)).foregroundStyle(Theme.subtle)
+                        .frame(maxWidth: .infinity).padding(.horizontal, 120).lineLimit(1).truncationMode(.middle)
+                    HStack {
+                        Spacer()
+                        Button { dismiss() } label: {
+                            Image(systemName: "chevron.down").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.accent)
+                                .frame(width: 34, height: 34).background(Theme.accent.opacity(0.14)).clipShape(Circle())
+                        }
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .floatingGlassBar(edge: .top)
+            }
+        }
+        .fullScreenCover(item: $screen) { s in
+            Group {
+                switch s {
+                case .github, .account, .about, .certificates, .otaDomain: EmptyView()
+                case .repo:  RepoScreen()
+                case .token: TokenScreen()
+                case .certInspector: CertInspectorScreen()
+                case .transparency:  TransparencyScreen()
+                case .recoverData:   McryptedRecoverView()
+                case .copilot:       CopilotSettingsView()
+                case .live3d:        MV1ELiveView()
+                case .dylibTemplate: DylibTemplateScreen()
+                case .ipaTemplate:   IPATemplateScreen()
+                case .tutorials:     TutorialsListScreen()
+                }
+            }
+            .environmentObject(config)
+            .environmentObject(session)
+            .preferredColorScheme(AppTheme.shared.colorScheme)
         }
     }
 
@@ -271,115 +345,79 @@ private struct RowPressStyle: ButtonStyle {
 // MARK: - Footer (mSign-style identity + status pill)
 
 private struct StatusFooter: View {
-    @Environment(\.openURL) private var openURL
+    @EnvironmentObject var config: Config
     @ObservedObject private var staff = StaffGate.shared
+    @ObservedObject private var account = ZefvAccount.shared
     @State private var checking = false
-    @State private var didCopyMDID = false
-    @State private var mdidResetTask: Task<Void, Never>?
-    @State private var mdidResetToken = UUID()
+    @State private var showAccount = false
 
-    private var footerIdentity: (roleLabel: String, roleColor: Color, accountURL: URL, accountLabel: String, accountIcon: String) {
-        if staff.isStaff {
-            return (
-                roleLabel: staff.role.badgeText,
-                roleColor: staff.role.color,
-                accountURL: URL(string: "https://msign.party")!,
-                accountLabel: "Open MSign site",
-                accountIcon: "person.crop.circle"
-            )
-        }
-        return (
-            roleLabel: "GUEST",
-            roleColor: Theme.accent,
-            accountURL: URL(string: "https://msign.party/account")!,
-            accountLabel: "Create an MSign account",
-            accountIcon: "person.badge.plus"
-        )
-    }
+    private var role: UserRole { staff.isStaff ? staff.role : account.role }
 
     var body: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Button {
-                    openURL(footerIdentity.accountURL)
-                } label: {
+        VStack(spacing: 8) {
+            if account.isLoggedIn {
+                // Signed-in: signature · username · role, MDID under it (small, centered)
+                HStack(spacing: 8) {
+                    Image(systemName: "signature").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.accent)
+                    Text(account.username ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.text)
+                    refreshButton
+                    rolePill
+                }
+                mdidLine
+                Button("Sign out") { Task { await account.logout() } }
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.subtle).padding(.top, 2)
+            } else {
+                // Guest: create-account CTA, then role + MDID underneath
+                Button { showAccount = true } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: footerIdentity.accountIcon)
-                        Text(footerIdentity.accountLabel)
-                            .underline()
+                        Image(systemName: "person.crop.circle.badge.plus").font(.system(size: 16, weight: .semibold))
+                        Text("Create an MSign account").font(.system(size: 15, weight: .bold)).underline()
                     }
-                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Theme.accent)
                 }
                 .buttonStyle(.plain)
-                Spacer()
-                Button {
-                    guard !checking else { return }
-                    checking = true
-                    Task {
-                        await staff.refresh()
-                        await MainActor.run { checking = false }
-                    }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.subtle)
-                        .frame(width: 34, height: 34)
-                        .background(Color.white.opacity(0.08))
-                        .clipShape(Circle())
-                        .rotationEffect(.degrees(checking ? 360 : 0))
-                        .animation(checking ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default, value: checking)
+                HStack(spacing: 8) {
+                    rolePill
+                    refreshButton
                 }
-                .buttonStyle(.plain)
-            }
-
-            HStack(spacing: 10) {
-                Text(footerIdentity.roleLabel)
-                    .font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(1)
-                    .padding(.horizontal, 9).padding(.vertical, 4)
-                    .background(footerIdentity.roleColor.opacity(0.18))
-                    .foregroundStyle(footerIdentity.roleColor)
-                    .overlay(Capsule().stroke(footerIdentity.roleColor.opacity(0.5), lineWidth: 1))
-                    .clipShape(Capsule())
-
-                Button {
-                    copyMDID()
-                } label: {
-                    (Text("MDID: ")
-                        .font(.system(size: 14, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
-                    + Text(staff.mdid)
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent))
-                        .lineLimit(1)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("MDID")
-                .accessibilityValue(staff.mdid)
-                .accessibilityHint(didCopyMDID ? "Copied to clipboard" : "Double tap to copy to clipboard")
-
-                Spacer(minLength: 0)
+                mdidLine
             }
         }
-        .frame(maxWidth: .infinity)
-        .onDisappear {
-            mdidResetTask?.cancel()
-            mdidResetTask = nil
-        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .multilineTextAlignment(.center)
+        .sheet(isPresented: $showAccount) { ZefvAccountScreen(mode: .register) }
     }
 
-    @MainActor
-    private func copyMDID() {
-        UIPasteboard.general.string = staff.mdid
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-        didCopyMDID = true
-        mdidResetTask?.cancel()
-        mdidResetTask = nil
-        let token = UUID()
-        mdidResetToken = token
-        mdidResetTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            guard !Task.isCancelled, mdidResetToken == token else { return }
-            didCopyMDID = false
-            mdidResetTask = nil
+    private var rolePill: some View {
+        Text(role.badgeText)
+            .font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(1)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(role.color.opacity(0.18)).foregroundStyle(role.color)
+            .overlay(Capsule().stroke(role.color.opacity(0.5), lineWidth: 1)).clipShape(Capsule())
+    }
+
+    private var refreshButton: some View {
+        Button {
+            guard !checking else { return }
+            checking = true
+            Task { await staff.refresh(); checking = false }
+        } label: {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.subtle)
+                .rotationEffect(.degrees(checking ? 360 : 0))
+                .animation(checking ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default, value: checking)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var mdidLine: some View {
+        (Text("MDID: ")
+            .font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
+        + Text(staff.mdid)
+            .font(.system(size: 11, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent))
+        .onTapGesture {
+            UIPasteboard.general.string = staff.mdid
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
     }
 }

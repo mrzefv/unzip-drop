@@ -14,6 +14,7 @@ struct RootView: View {
     @ObservedObject private var signQueue = SignQueue.shared
     @ObservedObject private var hub = GitHubHub.shared
     @ObservedObject private var theme = AppTheme.shared
+    @ObservedObject private var onboarding = Onboarding.shared
     @State private var tab = 0
     @State private var signItem: SignItem?
     @State private var signError: String?
@@ -43,16 +44,28 @@ struct RootView: View {
                 .padding(.leading, 26).padding(.top, 8)
                 .allowsHitTesting(false)
                 .popover(isPresented: $theme.panelShown, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
-                    if #available(iOS 16.4, *) {
-                        ThemePanel()
-                            .presentationCompactAdaptation(.popover)
-                            .presentationBackground(Theme.bg)
-                            .preferredColorScheme(theme.colorScheme)
-                    } else {
-                        ThemePanel()
-                            .preferredColorScheme(theme.colorScheme)
-                    }
+                    ThemePanel()
+                        .presentationCompactAdaptation(.popover)
+                        .presentationBackground(Theme.bg)
+                        .preferredColorScheme(theme.colorScheme)
                 }
+        }
+        .overlay(alignment: .topTrailing) {
+            // Anchor under the account chip; hosts the account dropdown.
+            Color.clear.frame(width: 44, height: 44)
+                .padding(.trailing, 26).padding(.top, 8)
+                .allowsHitTesting(false)
+                .popover(isPresented: $account.panelShown, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+                    AccountDropdown()
+                        .presentationCompactAdaptation(.popover)
+                        .presentationBackground(Theme.bg)
+                        .preferredColorScheme(theme.colorScheme)
+                }
+        }
+        .onChange(of: nav.requestedTab) { t in
+            guard let t else { return }
+            nav.requestedTab = nil
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { tab = t }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             TabBar(selected: $tab)
@@ -78,6 +91,9 @@ struct RootView: View {
         .alert("Couldn't read IPA", isPresented: Binding(get: { signError != nil }, set: { if !$0 { signError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(signError ?? "") }
+        .fullScreenCover(isPresented: $onboarding.needsOnboarding) {
+            OnboardingView { onboarding.complete() }
+        }
     }
 
     private func openSigningSheet(_ url: URL) {

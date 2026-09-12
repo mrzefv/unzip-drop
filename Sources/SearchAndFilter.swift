@@ -50,14 +50,15 @@ final class CertificateSearchManager: ObservableObject {
     
     func filter(_ certificates: [Certificate], store: CertificateStore) -> [Certificate] {
         var filtered = certificates
+        let infoByID = Dictionary(uniqueKeysWithValues: certificates.map { ($0.id, store.cachedProfileInfo(for: $0)) })
+        func info(for cert: Certificate) -> ProfileInfo { infoByID[cert.id] ?? ProfileInfo() }
         
         // Apply text search
         if !searchText.isEmpty {
             filtered = filtered.filter { cert in
                 if cert.name.localizedCaseInsensitiveContains(searchText) { return true }
-                guard let data = try? Data(contentsOf: cert.provisionURL) else { return false }
-                let info = CertificateStore.profileInfo(data)
-                return [info.team, info.name].compactMap { $0 }
+                let profile = info(for: cert)
+                return [profile.team, profile.name].compactMap { $0 }
                     .contains { $0.localizedCaseInsensitiveContains(searchText) }
             }
         }
@@ -69,24 +70,12 @@ final class CertificateSearchManager: ObservableObject {
         case .active:
             filtered = filtered.filter { $0.id == store.activeID }
         case .expiringSoon:
-            filtered = filtered.filter { cert in
-                guard let provData = try? Data(contentsOf: cert.provisionURL) else { return false }
-                let info = CertificateStore.profileInfo(provData)
-                return info.isExpiringSoon
-            }
+            filtered = filtered.filter { info(for: $0).isExpiringSoon }
         case .expired:
-            filtered = filtered.filter { cert in
-                guard let provData = try? Data(contentsOf: cert.provisionURL) else { return false }
-                let info = CertificateStore.profileInfo(provData)
-                return info.isExpired
-            }
+            filtered = filtered.filter { info(for: $0).isExpired }
         case .byTeam:
             if let team = selectedTeam {
-                filtered = filtered.filter { cert in
-                    guard let provData = try? Data(contentsOf: cert.provisionURL) else { return false }
-                    let info = CertificateStore.profileInfo(provData)
-                    return info.team == team
-                }
+                filtered = filtered.filter { info(for: $0).team == team }
             }
         }
         
@@ -98,19 +87,15 @@ final class CertificateSearchManager: ObservableObject {
             case .dateAdded:
                 result = cert1.addedAt > cert2.addedAt
             case .expiryDate:
-                let exp1 = (try? Data(contentsOf: cert1.provisionURL))
-                    .map { CertificateStore.profileInfo($0).expirationDate } ?? nil
-                let exp2 = (try? Data(contentsOf: cert2.provisionURL))
-                    .map { CertificateStore.profileInfo($0).expirationDate } ?? nil
-                result = (exp1 ?? Date.distantFuture) > (exp2 ?? Date.distantFuture)
+                let exp1 = info(for: cert1).expirationDate
+                let exp2 = info(for: cert2).expirationDate
+                result = (exp1 ?? .distantFuture) > (exp2 ?? .distantFuture)
             case .name:
                 result = cert1.name < cert2.name
             case .team:
-                let team1 = (try? Data(contentsOf: cert1.provisionURL))
-                    .map { CertificateStore.profileInfo($0).team } ?? ""
-                let team2 = (try? Data(contentsOf: cert2.provisionURL))
-                    .map { CertificateStore.profileInfo($0).team } ?? ""
-                result = team1 ?? "" < team2 ?? ""
+                let team1 = info(for: cert1).team ?? ""
+                let team2 = info(for: cert2).team ?? ""
+                result = team1 < team2
             }
             
             return sortAscending ? !result : result

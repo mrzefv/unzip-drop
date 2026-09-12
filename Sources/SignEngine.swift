@@ -16,15 +16,6 @@ func xmlPlistData(fromMobileProvision data: Data) -> Data? {
     return data.subdata(in: start.lowerBound..<end.upperBound)
 }
 
-/// Parallel DAG signing toggle — pushed into the zsign engine via ZSignSetParallel.
-/// Independent frameworks/dylibs/plugins are signed concurrently (dispatch_apply),
-/// which is the main speedup on multi-framework apps. Default ON.
-nonisolated enum ParallelSigning {
-    private static let key = "uzd_parallel_signing"
-    static var isEnabled: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
-    static func set(_ v: Bool) { UserDefaults.standard.set(v, forKey: key) }
-}
-
 enum ZsignError: Error, LocalizedError {
     case fileNotFound(String)
     case signingFailed(code: Int32)
@@ -232,7 +223,9 @@ nonisolated struct SignOptions: Sendable {
     var disableBackgroundModes = false  // strip UIBackgroundModes (Info.plist)
 
     var skipEmbeddedProvision = false
-    var surgicalMode = true
+    var surgicalMode = true             // engine default; SigningSheet overrides to opt-in
+    var parallelSigning = true          // engine default; SigningSheet overrides to opt-in and zsign still disables it for guarded cases
+    var parallelSigningPayloadSizeBytes: Int64? = nil
 
     static let none = SignOptions()
 
@@ -247,6 +240,123 @@ nonisolated struct SignOptions: Sendable {
 }
 
 nonisolated enum Signer {
+    static let parallelSigningMaxIPABytes: Int64 = 500 * 1_024 * 1_024
+
+    actor ZSignExecutionGate {
+        static let shared = ZSignExecutionGate()
+
+        func run<T: Sendable>(parallel: Bool, _ operation: () throws -> T) throws -> T {
+            ZSignSetParallel(parallel)
+            defer { ZSignSetParallel(false) }
+            return try operation()
+        }
+    }
+
+    enum ParallelSigningDecision: Equatable {
+        case enabled
+        case disabledByUser
+        case disabledByDylibInjection
+        case disabledByUnknownIPASize
+        case disabledByIPASize(actual: Int64)
+
+        var isEnabled: Bool {
+            if case .enabled = self { return true }
+            return false
+        }
+
+        var logMessage: String? {
+            switch self {
+            case .enabled, .disabledByUser:
+                return nil
+            case .disabledByDylibInjection:
+                return ">>> Parallel signing disabled: dylib injection selected."
+            case .disabledByUnknownIPASize:
+                return ">>> Parallel signing disabled: couldn't determine payload size safely."
+            case .disabledByIPASize(let actual):
+                let actualText = ByteCountFormatter.string(fromByteCount: actual, countStyle: .file)
+                let limitText = ByteCountFormatter.string(fromByteCount: Signer.parallelSigningMaxIPABytes, countStyle: .file)
+                return ">>> Parallel signing disabled: \(actualText) payload exceeds the \(limitText) safety cap."
+            }
+        }
+
+        var statusText: String {
+            switch self {
+            case .enabled:
+                return "Parallel signing"
+            case .disabledByUser:
+                return "Parallel signing"
+            case .disabledByDylibInjection:
+                return "Parallel signing (auto-disabled: dylibs)"
+            case .disabledByUnknownIPASize:
+                return "Parallel signing (auto-disabled: unknown size)"
+            case .disabledByIPASize:
+                return "Parallel signing (auto-disabled: large payload)"
+            }
+        }
+
+        var noteText: String {
+            switch self {
+            case .enabled, .disabledByUser:
+                return "Signs sibling frameworks and binaries concurrently inside zsign"
+            case .disabledByDylibInjection:
+                return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because dylib injection is selected"
+            case .disabledByUnknownIPASize:
+                return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because the payload size could not be determined safely"
+            case .disabledByIPASize:
+                let limitText = ByteCountFormatter.string(fromByteCount: Signer.parallelSigningMaxIPABytes, countStyle: .file)
+                return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because this payload exceeds the \(limitText) safety cap"
+            }
+        }
+    }
+
+    private nonisolated static func directorySize(_ root: URL) -> Int64? {
+        let fm = FileManager.default
+        guard let en = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) else { return nil }
+        var total: Int64 = 0
+        for case let u as URL in en {
+            let vals = try? u.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard vals?.isRegularFile == true else { continue }
+            total += Int64(vals?.fileSize ?? 0)
+        }
+        return total
+    }
+
+    nonisolated static func payloadSizeForParallelDecision(
+        ipaURL: URL,
+        appURL: URL? = nil
+    ) -> Int64? {
+        if let appURL {
+            return directorySize(appURL)
+        }
+        let fm = FileManager.default
+        let work = fm.temporaryDirectory.appendingPathComponent("parallel-size-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: work) }
+        do {
+            try fm.createDirectory(at: work, withIntermediateDirectories: true)
+            try fm.unzipItem(at: ipaURL, to: work)
+            let payload = work.appendingPathComponent("Payload", isDirectory: true)
+            guard let extractedApp = try fm.contentsOfDirectory(at: payload, includingPropertiesForKeys: nil)
+                .first(where: { $0.pathExtension == "app" }) else { return nil }
+            return directorySize(extractedApp)
+        } catch {
+            return nil
+        }
+    }
+
+    nonisolated static func parallelSigningDecision(
+        options o: SignOptions,
+        payloadSizeBytes: Int64?
+    ) -> ParallelSigningDecision {
+        guard o.parallelSigning else { return .disabledByUser }
+        guard o.injectDylibs.isEmpty else { return .disabledByDylibInjection }
+        guard let payloadSizeBytes else {
+            return .disabledByUnknownIPASize
+        }
+        guard payloadSizeBytes <= parallelSigningMaxIPABytes else {
+            return .disabledByIPASize(actual: payloadSizeBytes)
+        }
+        return .enabled
+    }
 
     nonisolated static func signDetached(
         ipaURL: URL,
@@ -258,6 +368,8 @@ nonisolated enum Signer {
     ) async throws -> SignOutcome {
         var o = SignOptions()
         o.name = nameOverride; o.bundleID = bundleIDOverride; o.version = versionOverride
+        o.surgicalMode = false
+        o.parallelSigning = false
         return try await signDetached(ipaURL: ipaURL, material: material, options: o, onLog: onLog)
     }
 
@@ -296,8 +408,12 @@ nonisolated enum Signer {
         let capture = onLog.map { ConsoleCapture($0) }
         capture?.start()
         do {
-            // Parallel DAG signing (mSign's speed path). Safe: disjoint subtrees.
-            ZSignSetParallel(o.surgicalMode && o.injectDylibs.isEmpty)
+            let parallelDecision = parallelSigningDecision(
+                options: o,
+                payloadSizeBytes: o.parallelSigningPayloadSizeBytes
+                    ?? payloadSizeForParallelDecision(ipaURL: ipaURL, appURL: appURL)
+            )
+            if let msg = parallelDecision.logMessage { onLog?(msg) }
             let entitlementsURL: URL?
             if let scrubbed = Self.scrubbedEntitlements(o.entitlementsPlistData, options: o, profile: material.provision, onLog: onLog) {
                 let u = work.appendingPathComponent("entitlements.plist")
@@ -307,17 +423,19 @@ nonisolated enum Signer {
                 entitlementsURL = nil
             }
 
-            try ZsignSigner.signAppBundle(
-                appBundlePath: appURL.path,
-                provisionPath: provURL.path,
-                p12Path: p12URL.path,
-                p12Password: material.password,
-                bundleID: o.bundleID,
-                displayName: o.name,
-                version: o.version,
-                entitlementsPath: entitlementsURL?.path,
-                skipEmbeddedProvision: o.skipEmbeddedProvision
-            )
+            try await ZSignExecutionGate.shared.run(parallel: parallelDecision.isEnabled) {
+                try ZsignSigner.signAppBundle(
+                    appBundlePath: appURL.path,
+                    provisionPath: provURL.path,
+                    p12Path: p12URL.path,
+                    p12Password: material.password,
+                    bundleID: o.bundleID,
+                    displayName: o.name,
+                    version: o.version,
+                    entitlementsPath: entitlementsURL?.path,
+                    skipEmbeddedProvision: o.skipEmbeddedProvision
+                )
+            }
             capture?.stop()
         } catch {
             capture?.stop()

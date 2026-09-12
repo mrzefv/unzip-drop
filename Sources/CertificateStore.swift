@@ -92,6 +92,7 @@ final class CertificateStore: ObservableObject {
 
     private static let activeKey = "uzd_active_cert"
     private let indexURL = AppPaths.dir("certs").appendingPathComponent("index.json")
+    private var profileInfoCache: [String: ProfileInfo] = [:]
 
     private init() {
         load()
@@ -124,6 +125,7 @@ final class CertificateStore: ObservableObject {
         let cert = Certificate(id: id, name: name.isEmpty ? "Certificate" : name,
                                p12RelPath: p12Rel, provisionRelPath: provRel, addedAt: Date())
         certificates.append(cert)
+        profileInfoCache[id] = Self.profileInfo(provision)
         save()
         if makeActive || activeID == nil { activeID = id }
         return cert
@@ -134,6 +136,7 @@ final class CertificateStore: ObservableObject {
         try? FileManager.default.removeItem(at: cert.provisionURL)
         Keychain.set("cert-" + cert.id, "")
         certificates.removeAll { $0.id == cert.id }
+        profileInfoCache.removeValue(forKey: cert.id)
         if activeID == cert.id { activeID = certificates.first?.id }
         save()
     }
@@ -158,6 +161,13 @@ final class CertificateStore: ObservableObject {
         let team = (plist["TeamName"] as? String) ?? (plist["TeamIdentifier"] as? [String])?.first
         return ProfileInfo(name: plist["Name"] as? String, team: team, expires: plist["ExpirationDate"] as? Date,
                            udids: plist["ProvisionedDevices"] as? [String] ?? [])
+    }
+
+    func cachedProfileInfo(for cert: Certificate) -> ProfileInfo {
+        if let cached = profileInfoCache[cert.id] { return cached }
+        let info = (try? Data(contentsOf: cert.provisionURL)).map(Self.profileInfo) ?? ProfileInfo()
+        profileInfoCache[cert.id] = info
+        return info
     }
 
     // MARK: Device ↔ profile check
@@ -189,6 +199,7 @@ final class CertificateStore: ObservableObject {
         guard let data = try? Data(contentsOf: indexURL),
               let list = try? JSONDecoder().decode([Certificate].self, from: data) else { return }
         certificates = list
+        profileInfoCache.removeAll(keepingCapacity: true)
     }
     private func save() { try? JSONEncoder().encode(certificates).write(to: indexURL) }
 }

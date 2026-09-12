@@ -176,6 +176,8 @@ final class SourceStore: ObservableObject {
     static let shared = SourceStore()
     @Published private(set) var sources: [RepoSource] = []
     private let fileURL = AppPaths.dir("sources").appendingPathComponent("sources.json")
+    private var parsedCache: [String: RepoParser.ParsedRepo] = [:]
+    private var prefetchingIDs: Set<String> = []
 
     static let defaults: [RepoSource] = [
         RepoSource(id: "delvek", name: "DELvEK", url: URL(string: "https://delvek.net/repo.json")!,
@@ -192,27 +194,68 @@ final class SourceStore: ObservableObject {
         }
     }
 
-    func add(_ s: RepoSource) { sources.removeAll { $0.url == s.url }; sources.append(s); save() }
-    func update(_ s: RepoSource) { if let i = sources.firstIndex(where: { $0.id == s.id }) { sources[i] = s; save() } }
-    func remove(_ s: RepoSource) { sources.removeAll { $0.id == s.id }; save() }
+    private nonisolated static func requestParsedRepo(for source: RepoSource) async throws -> RepoParser.ParsedRepo {
+        var req = URLRequest(url: source.url); req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard (resp as? HTTPURLResponse)?.statusCode ?? 0 < 400 else {
+            throw GitHubError.badConfig("Source returned HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
+        }
+        return try RepoParser.parse(data: data, fallbackName: source.name)
+    }
+
+    private func applyParsedRepo(_ parsed: RepoParser.ParsedRepo, to source: RepoSource) {
+        var updated = source
+        if updated.name.isEmpty || updated.id.hasPrefix("custom-") { updated.name = parsed.name }
+        if updated.iconURL == nil { updated.iconURL = parsed.iconURL }
+        if let desc = parsed.description, !desc.isEmpty, updated.description.isEmpty || updated.id.hasPrefix("custom-") { updated.description = desc }
+        if let author = parsed.author { updated.author = author }
+        updated.appCount = parsed.groups.count
+        updated.lastFetched = Date()
+        parsedCache[source.id] = parsed
+        update(updated)
+    }
+
+    func add(_ s: RepoSource) {
+        let replacedIDs = sources.filter { $0.url == s.url }.map(\.id)
+        replacedIDs.forEach { parsedCache.removeValue(forKey: $0) }
+        sources.removeAll { $0.url == s.url }
+        sources.append(s)
+        save()
+    }
+    func update(_ s: RepoSource) {
+        if let i = sources.firstIndex(where: { $0.id == s.id }) {
+            let oldURL = sources[i].url
+            sources[i] = s
+            if oldURL != s.url { parsedCache.removeValue(forKey: s.id) }
+            save()
+        }
+    }
+    func remove(_ s: RepoSource) { sources.removeAll { $0.id == s.id }; parsedCache.removeValue(forKey: s.id); save() }
     func move(from: IndexSet, to: Int) { sources.move(fromOffsets: from, toOffset: to); save() }
     private func save() { try? JSONEncoder().encode(sources).write(to: fileURL) }
+    func cachedParsedRepo(for source: RepoSource) -> RepoParser.ParsedRepo? { parsedCache[source.id] }
 
-    /// Fetch + parse a repo.json; caches nothing but updates the source's metadata.
+    /// Fetch + parse a repo.json, cache the parsed result, and update the source metadata.
     func fetch(_ s: RepoSource) async throws -> RepoParser.ParsedRepo {
-        var req = URLRequest(url: s.url); req.cachePolicy = .reloadIgnoringLocalCacheData
-        req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
-        let (d, resp) = try await URLSession.shared.data(for: req)
-        guard (resp as? HTTPURLResponse)?.statusCode ?? 0 < 400 else { throw GitHubError.badConfig("Source returned HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)") }
-        let parsed = try RepoParser.parse(data: d, fallbackName: s.name)
-        var u = s
-        if u.name.isEmpty || u.id.hasPrefix("custom-") { u.name = parsed.name }
-        if u.iconURL == nil { u.iconURL = parsed.iconURL }
-        if let desc = parsed.description, !desc.isEmpty, u.description.isEmpty || u.id.hasPrefix("custom-") { u.description = desc }
-        if let a = parsed.author { u.author = a }
-        u.appCount = parsed.groups.count; u.lastFetched = Date()
-        update(u)
+        let parsed = try await Self.requestParsedRepo(for: s)
+        applyParsedRepo(parsed, to: s)
         return parsed
+    }
+
+    func prefetchSources() async {
+        let snapshot = sources.filter { parsedCache[$0.id] == nil && !prefetchingIDs.contains($0.id) }
+        snapshot.forEach { prefetchingIDs.insert($0.id) }
+        await withTaskGroup(of: (RepoSource, RepoParser.ParsedRepo?).self) { group in
+            for source in snapshot {
+                group.addTask { (source, try? await Self.requestParsedRepo(for: source)) }
+            }
+            for await (source, parsed) in group {
+                prefetchingIDs.remove(source.id)
+                guard let parsed else { continue }
+                applyParsedRepo(parsed, to: source)
+            }
+        }
     }
 }
 
@@ -273,6 +316,7 @@ struct SourcesView: View {
             Button("Add") { add() }
             Button("Cancel", role: .cancel) { newURL = "" }
         } message: { Text(addError ?? "Paste a repo.json URL (AltStore, Feather, DELvEK, mSign formats).") }
+        .task { await store.prefetchSources() }
     }
 
     private func sourceRow(_ s: RepoSource) -> some View {
@@ -316,6 +360,7 @@ private struct SourceDetailScreen: View {
     @State private var progress: Double = 0
     @State private var sort: Sort = .updated
     @State private var openGroup: AppGroup?
+    @State private var visibleGroupCount = 6
 
     private enum Sort: String, CaseIterable { case updated = "Recently updated", name = "Name", size = "Size" }
 
@@ -331,6 +376,7 @@ private struct SourceDetailScreen: View {
         }
         return list
     }
+    private var visibleGroups: [AppGroup] { Array(groups.prefix(visibleGroupCount)) }
 
     /// News from the source, else featured apps as news cards.
     private var news: [SourceNews] {
@@ -358,11 +404,12 @@ private struct SourceDetailScreen: View {
                     .listRowBackground(Color.black).listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 4, trailing: 0))
             }
-            ForEach(groups) { g in
+            ForEach(visibleGroups) { g in
                 appRow(g)
                     .listRowBackground(Color.black)
                     .listRowSeparatorTint(Theme.stroke)
                     .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                    .onAppear { loadMoreIfNeeded(current: g) }
             }
         }
         .listStyle(.plain)
@@ -384,7 +431,15 @@ private struct SourceDetailScreen: View {
             .floatingGlassBar(edge: .top)
         }
         .background(Color.black.ignoresSafeArea())
-        .task { await load() }
+        .task {
+            if let cached = store.cachedParsedRepo(for: current) {
+                parsed = cached
+                loading = false
+            }
+            await load(showSpinner: parsed == nil)
+        }
+        .onChange(of: search) { _ in visibleGroupCount = 6 }
+        .onChange(of: sort) { _ in visibleGroupCount = 6 }
         .sheet(item: $openGroup) { g in
             AppDetailSheet(source: current, group: g)
                 .presentationDragIndicator(.visible)
@@ -535,10 +590,17 @@ private struct SourceDetailScreen: View {
         }
     }
 
-    private func load() async {
-        loading = true; error = nil
+    private func load(showSpinner: Bool = true) async {
+        if showSpinner { loading = true }
+        error = nil
         do { parsed = try await store.fetch(current) } catch { self.error = error.localizedDescription }
+        visibleGroupCount = 6
         loading = false
+    }
+
+    private func loadMoreIfNeeded(current group: AppGroup) {
+        guard group.id == visibleGroups.last?.id, visibleGroupCount < groups.count else { return }
+        visibleGroupCount = min(visibleGroupCount + 6, groups.count)
     }
 
     private func download(_ app: SourceApp) async {

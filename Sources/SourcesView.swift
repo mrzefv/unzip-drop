@@ -1020,7 +1020,6 @@ struct SourceIcon: View {
     var fallback: String = ""
     var body: some View { CachedIcon(url: url, side: side, fallback: fallback) }
 }
-}
 
 // MARK: - Inbox + downloader (progress-reporting)
 

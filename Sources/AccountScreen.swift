@@ -34,12 +34,17 @@ struct AccountScreen: View {
         .task { await account.refreshProfile(); email = account.email ?? "" }
         .onChange(of: account.email) { email = $0 ?? "" }
         .onAppear {
-            if backgroundGif == nil { backgroundGif = AnimatedImage.named("onboarding") }
+            if reduceMotion, account.usernameCustomization.gifBackground {
+                _ = account.updateUsernameCustomization(gifBackground: false)
+            }
+            updateBackgroundGifCache()
         }
+        .onChange(of: account.usernameCustomization.gifBackground) { _ in updateBackgroundGifCache() }
         .onChange(of: reduceMotion) {
             if $0, account.usernameCustomization.gifBackground {
                 _ = account.updateUsernameCustomization(gifBackground: false)
             }
+            updateBackgroundGifCache()
         }
     }
 
@@ -272,5 +277,14 @@ struct AccountScreen: View {
     private func flash(_ m: String) {
         withAnimation { toast = m }
         Task { try? await Task.sleep(nanoseconds: 1_600_000_000); withAnimation { toast = nil } }
+    }
+
+    private func updateBackgroundGifCache() {
+        let shouldLoad = account.usernameCustomization.gifBackground && !reduceMotion
+        if shouldLoad {
+            if backgroundGif == nil { backgroundGif = AnimatedImage.named("onboarding") }
+        } else {
+            backgroundGif = nil
+        }
     }
 }

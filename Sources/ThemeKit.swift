@@ -55,9 +55,9 @@ struct ThemePaletteButton: View {
             theme.panelShown.toggle()
         } label: {
             Image(systemName: "paintpalette.fill")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Theme.accent)
-                .frame(width: 34, height: 34)
+                .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -73,13 +73,13 @@ struct ThemePanel: View {
     @State private var picked: Color = Theme.accent
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             // Accent color
             VStack(spacing: 0) {
                 Button { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showSwatches.toggle() } } label: {
                     row(icon: nil, swatch: Theme.accent, label: "ACCENT COLOR", value: "#\(theme.accentHex.uppercased())") {
                         Image(systemName: "chevron.down")
-                            .font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.subtle)
+                            .font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.subtle)
                             .rotationEffect(.degrees(showSwatches ? 180 : 0))
                     }
                 }
@@ -89,16 +89,16 @@ struct ThemePanel: View {
                     HStack(spacing: 8) {
                         ForEach(AppTheme.presets, id: \.self) { hex in
                             Button { theme.accentHex = hex; picked = Color(hex: hex) } label: {
-                                Circle().fill(Color(hex: hex)).frame(width: 22, height: 22)
+                                Circle().fill(Color(hex: hex)).frame(width: 20, height: 20)
                                     .overlay(Circle().stroke(Color.white.opacity(theme.accentHex.uppercased() == hex ? 0.9 : 0.15), lineWidth: 2))
                             }
                             .buttonStyle(.plain)
                         }
                         ColorPicker("", selection: $picked, supportsOpacity: false)
-                            .labelsHidden().frame(width: 26, height: 26)
+                            .labelsHidden().frame(width: 22, height: 22)
                             .onChange(of: picked) { c in if let h = c.hexString() { theme.accentHex = h } }
                     }
-                    .padding(.horizontal, 14).padding(.bottom, 12)
+                    .padding(.horizontal, 12).padding(.bottom, 10)
                 }
             }
             .background(panelCard)
@@ -118,38 +118,38 @@ struct ThemePanel: View {
                 }
             } label: {
                 row(icon: theme.background.icon, swatch: nil, label: "BACKGROUND", value: theme.background.title) {
-                    Image(systemName: "chevron.down").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.subtle)
+                    Image(systemName: "chevron.down").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.subtle)
                 }
             }
             .buttonStyle(.plain)
             .background(panelCard)
         }
-        .padding(12)
-        .frame(width: 320)
+        .padding(8)
+        .frame(width: 270)
         .background(Theme.bg)
     }
 
     private var panelCard: some View {
-        RoundedRectangle(cornerRadius: 16)
+        RoundedRectangle(cornerRadius: 14)
             .fill(Theme.accent.opacity(theme.isDark ? 0.10 : 0.12))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.accent.opacity(0.25), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.accent.opacity(0.25), lineWidth: 1))
     }
 
     private func row<T: View>(icon: String?, swatch: Color?, label: String, value: String, @ViewBuilder trailing: () -> T) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             ZStack {
-                RoundedRectangle(cornerRadius: 10).fill(swatch ?? Theme.accent.opacity(0.18))
-                if let icon { Image(systemName: icon).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.accent) }
+                RoundedRectangle(cornerRadius: 9).fill(swatch ?? Theme.accent.opacity(0.18))
+                if let icon { Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.accent) }
             }
-            .frame(width: 38, height: 38)
+            .frame(width: 32, height: 32)
             VStack(alignment: .leading, spacing: 3) {
-                Text(label).font(.system(size: 10, weight: .bold)).kerning(1.2).foregroundStyle(Theme.subtle)
-                Text(value).font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text)
+                Text(label).font(.system(size: 9, weight: .bold)).kerning(1.1).foregroundStyle(Theme.subtle)
+                Text(value).font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.text)
             }
             Spacer(minLength: 8)
             trailing()
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
+        .padding(.horizontal, 12).padding(.vertical, 10)
         .contentShape(Rectangle())
     }
 }

@@ -32,21 +32,21 @@ struct TabTitleBar<Trailing: View>: View {
     var body: some View {
         ZStack {
             VStack(spacing: 1) {
-                Text(title).font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                Text(title).font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
                 if let center {
-                    Text(center).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.subtle).lineLimit(1)
+                    Text(center).font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.subtle).lineLimit(1)
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 120)
-            HStack(spacing: 10) {
+            .padding(.horizontal, 104)
+            HStack(spacing: 8) {
                 ThemePaletteButton()
                 Spacer()
                 trailing
                 AccountChip()
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
+        .padding(.horizontal, 14).padding(.vertical, 8)
         .floatingGlassBar(edge: .top, cornerRadius: 28)
     }
 }

@@ -217,7 +217,7 @@ final class ZefvAccount: ObservableObject {
     }
 
     private func customizationKey(for username: String) -> String {
-        Self.kCustomizationPrefix + username.lowercased()
+        Self.kCustomizationPrefix + username
     }
 
     private static func normalizeHex(_ value: String) -> String? {

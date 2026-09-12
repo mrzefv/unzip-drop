@@ -193,14 +193,20 @@ final class SourceStore: ObservableObject {
         }
     }
 
-    func add(_ s: RepoSource) { sources.removeAll { $0.url == s.url }; sources.append(s); save() }
+    func add(_ s: RepoSource) {
+        let replacedIDs = sources.filter { $0.url == s.url }.map(\.id)
+        replacedIDs.forEach { parsedCache.removeValue(forKey: $0) }
+        sources.removeAll { $0.url == s.url }
+        sources.append(s)
+        save()
+    }
     func update(_ s: RepoSource) { if let i = sources.firstIndex(where: { $0.id == s.id }) { sources[i] = s; save() } }
     func remove(_ s: RepoSource) { sources.removeAll { $0.id == s.id }; parsedCache.removeValue(forKey: s.id); save() }
     func move(from: IndexSet, to: Int) { sources.move(fromOffsets: from, toOffset: to); save() }
     private func save() { try? JSONEncoder().encode(sources).write(to: fileURL) }
     func cachedParsedRepo(for source: RepoSource) -> RepoParser.ParsedRepo? { parsedCache[source.id] }
 
-    /// Fetch + parse a repo.json; caches nothing but updates the source's metadata.
+    /// Fetch + parse a repo.json, cache the parsed result, and update the source metadata.
     func fetch(_ s: RepoSource) async throws -> RepoParser.ParsedRepo {
         var req = URLRequest(url: s.url); req.cachePolicy = .reloadIgnoringLocalCacheData
         req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")

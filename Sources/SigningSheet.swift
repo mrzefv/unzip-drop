@@ -2152,6 +2152,7 @@ struct SigningTerminalView: View {
     private var categoryStack: some View {
         VStack(spacing: 10) {
             categoryCard("App Info", icon: "app.badge.fill", tint: blue, rows: appInfoRows)
+            categoryCard("App Binary", icon: "cpu.fill", tint: .cyan, rows: binaryRows, empty: "No binary activity yet")
             categoryCard("Frameworks", icon: "shippingbox.fill", tint: accent, rows: frameworkRows, empty: "No framework activity yet")
             categoryCard("Entitlements", icon: "checkmark.shield.fill", tint: green, rows: entitlementRows, empty: "No entitlement changes yet")
             categoryCard("CodeResources", icon: "doc.badge.gearshape.fill", tint: .purple, rows: codeResourcesRows, empty: "No CodeResources activity yet")
@@ -2267,7 +2268,11 @@ struct SigningTerminalView: View {
     }
 
     private var frameworkRows: [String] {
-        dedup(categorizedLines(matching: [".framework", ".dylib", "frameworks/", "signfolder:"]))
+        dedup(categorizedLines(matching: [".framework", ".dylib", "frameworks/"]))
+    }
+
+    private var binaryRows: [String] {
+        dedup(categorizedLines(matching: ["signfile:", "signfolder:", "mach-o", "binary", "thin to arm64", "strip bitcode", "debug symbols"]))
     }
 
     private var entitlementRows: [String] {

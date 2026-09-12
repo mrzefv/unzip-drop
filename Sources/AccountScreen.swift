@@ -51,12 +51,11 @@ struct AccountScreen: View {
                 // Identity card
                 ZStack {
                     if account.usernameCustomization.gifBackground {
-                        if reduceMotion {
-                            RoundedRectangle(cornerRadius: 18)
-                                .fill(usernameColor.opacity(0.15))
-                                .frame(height: 170)
-                                .allowsHitTesting(false)
-                        } else if let gif = backgroundGif {
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(usernameColor.opacity(0.15))
+                            .frame(height: 170)
+                            .allowsHitTesting(false)
+                        if !reduceMotion, let gif = backgroundGif {
                             gif
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 170)
@@ -248,10 +247,7 @@ struct AccountScreen: View {
     private var gifBackgroundBinding: Binding<Bool> {
         Binding(
             get: { account.usernameCustomization.gifBackground },
-            set: { value in
-                let next = reduceMotion ? false : value
-                _ = account.updateUsernameCustomization(gifBackground: next)
-            }
+            set: { value in _ = account.updateUsernameCustomization(gifBackground: value) }
         )
     }
 

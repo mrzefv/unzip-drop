@@ -36,6 +36,8 @@ nonisolated enum Keychain {
         return String(data: d, encoding: .utf8)
     }
 
+    static func delete(_ key: String) { _ = set(key, "") }
+
     // MARK: - Non-exportable secrets (private keys)
     //
     // Used for the local CA's root/leaf private keys: ThisDeviceOnly means the

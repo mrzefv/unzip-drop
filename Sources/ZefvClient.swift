@@ -230,7 +230,7 @@ final class ZefvAccount: ObservableObject {
               let oldValue = Keychain.get(oldKey),
               Keychain.get(newKey) == nil else { return }
         _ = Keychain.set(newKey, oldValue)
-        _ = Keychain.set(oldKey, "")
+        Keychain.delete(oldKey)
     }
 
     private static func normalizeHex(_ value: String) -> String? {

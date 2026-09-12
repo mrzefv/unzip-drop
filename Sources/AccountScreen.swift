@@ -121,14 +121,17 @@ struct AccountScreen: View {
                         VStack(alignment: .leading, spacing: 12) {
                             ColorPicker("Username color", selection: usernameColorBinding, supportsOpacity: false)
                                 .foregroundStyle(Theme.text)
+                                .accessibilityValue(Text("Hex \(account.usernameCustomization.colorHex)"))
                             Picker("Username font", selection: usernameFontBinding) {
                                 ForEach(UsernameFontStyle.allCases, id: \.self) { style in
                                     Text(style.title).tag(style)
                                 }
                             }
                             .pickerStyle(.menu)
+                            .accessibilityValue(Text(account.usernameCustomization.fontStyle.title))
                             Toggle("Animated GIF background", isOn: gifBackgroundBinding)
                                 .foregroundStyle(Theme.text)
+                                .accessibilityValue(Text(account.usernameCustomization.gifBackground ? "On" : "Off"))
                             if reduceMotion {
                                 Text("GIF backgrounds are hidden while Reduce Motion is enabled.")
                                     .font(.caption)

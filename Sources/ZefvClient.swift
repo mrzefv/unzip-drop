@@ -135,10 +135,6 @@ final class ZefvAccount: ObservableObject {
         do {
             let o = try await get("account.php", ["token": tok])
             if let name = o["username"] as? String, !name.isEmpty {
-                let previousName = username
-                if let previousName, previousName != name {
-                    migrateCustomization(from: previousName, to: name)
-                }
                 username = name
                 _ = Keychain.set(Self.kUsername, name)
                 loadCustomization(for: name)
@@ -222,16 +218,6 @@ final class ZefvAccount: ObservableObject {
 
     private func customizationKey(for username: String) -> String {
         Self.kCustomizationPrefix + Self.usernameDigest(username)
-    }
-
-    private func migrateCustomization(from oldUsername: String, to newUsername: String) {
-        let oldKey = customizationKey(for: oldUsername)
-        let newKey = customizationKey(for: newUsername)
-        guard oldKey != newKey,
-              let oldValue = Keychain.get(oldKey),
-              Keychain.get(newKey) == nil else { return }
-        guard Keychain.set(newKey, oldValue) else { return }
-        _ = Keychain.delete(oldKey)
     }
 
     private static func normalizeHex(_ value: String) -> String? {

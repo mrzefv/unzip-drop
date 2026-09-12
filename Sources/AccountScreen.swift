@@ -35,6 +35,7 @@ struct AccountScreen: View {
         .onChange(of: account.email) { email = $0 ?? "" }
         .onAppear { updateBackgroundGifCache() }
         .onChange(of: account.usernameCustomization.gifBackground) { _ in updateBackgroundGifCache() }
+        .onChange(of: account.usernameCustomization) { _ in updateBackgroundGifCache() }
         .onChange(of: reduceMotion) { _ in updateBackgroundGifCache() }
     }
 
@@ -126,8 +127,9 @@ struct AccountScreen: View {
                         .pickerStyle(.menu)
                         Toggle("Animated GIF background", isOn: gifBackgroundBinding)
                             .foregroundStyle(Theme.text)
+                            .disabled(reduceMotion)
                         if reduceMotion {
-                            Text("Animated background preview is paused while Reduce Motion is enabled.")
+                            Text("GIF backgrounds are hidden while Reduce Motion is enabled.")
                                 .font(.caption)
                                 .foregroundStyle(Theme.subtle)
                         }

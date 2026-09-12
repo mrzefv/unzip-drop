@@ -27,7 +27,7 @@ enum UsernameFontStyle: String, Codable, CaseIterable, Sendable {
     }
 }
 
-struct UsernameCustomization: Codable, Sendable {
+struct UsernameCustomization: Codable, Equatable, Sendable {
     var colorHex: String
     var fontStyle: UsernameFontStyle
     var gifBackground: Bool
@@ -229,8 +229,8 @@ final class ZefvAccount: ObservableObject {
         guard oldKey != newKey,
               let oldValue = Keychain.get(oldKey),
               Keychain.get(newKey) == nil else { return }
-        _ = Keychain.set(newKey, oldValue)
-        Keychain.delete(oldKey)
+        guard Keychain.set(newKey, oldValue) else { return }
+        _ = Keychain.delete(oldKey)
     }
 
     private static func normalizeHex(_ value: String) -> String? {

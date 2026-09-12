@@ -43,7 +43,8 @@ nonisolated enum Keychain {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
         ]
-        return SecItemDelete(q as CFDictionary) == errSecSuccess
+        let status = SecItemDelete(q as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 
     // MARK: - Non-exportable secrets (private keys)

@@ -128,7 +128,6 @@ struct AccountScreen: View {
                             .pickerStyle(.menu)
                             Toggle("Animated GIF background", isOn: gifBackgroundBinding)
                                 .foregroundStyle(Theme.text)
-                                .disabled(reduceMotion)
                             if reduceMotion {
                                 Text("GIF backgrounds are hidden while Reduce Motion is enabled.")
                                     .font(.caption)

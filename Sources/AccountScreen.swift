@@ -13,6 +13,7 @@ struct AccountScreen: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var email = ""
+    @State private var newName = ""
     @State private var curPass = ""
     @State private var newPass = ""
     @State private var toast: String?
@@ -142,6 +143,21 @@ struct AccountScreen: View {
                         }
                         .buttonStyle(.plain)
                     }
+                }
+
+                // Username
+                Card {
+                    section("Username")
+                    HStack(spacing: 10) {
+                        field(account.username ?? "username", text: $newName, secure: false)
+                        Button("Rename") {
+                            Task { if await account.setUsername(newName) { newName = ""; flash("Username changed") } }
+                        }
+                        .font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.accent)
+                        .disabled(account.busy || newName.count < 3 || newName == account.username)
+                    }
+                    Text("3–32 characters · letters, digits, _ or . · roles follow the account, not the name")
+                        .font(.system(size: 11)).foregroundStyle(Theme.subtle).padding(.top, 6)
                 }
 
                 // Email

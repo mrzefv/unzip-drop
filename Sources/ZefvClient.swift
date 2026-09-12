@@ -128,6 +128,17 @@ final class ZefvAccount: ObservableObject {
         } catch { lastError = (error as? Err)?.message ?? error.localizedDescription; return false }
     }
 
+    func setUsername(_ n: String) async -> Bool {
+        guard let tok = sessionToken else { return false }
+        busy = true; lastError = nil; defer { busy = false }
+        do {
+            let o = try await post("account.php", ["action": "set_username", "token": tok, "username": n])
+            let name = (o["username"] as? String) ?? n
+            username = name; _ = Keychain.set(Self.kUsername, name)
+            return true
+        } catch { lastError = (error as? Err)?.message ?? error.localizedDescription; return false }
+    }
+
     func setEmail(_ e: String) async -> Bool {
         guard let tok = sessionToken else { return false }
         busy = true; lastError = nil; defer { busy = false }

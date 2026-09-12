@@ -79,11 +79,13 @@ final class AppTheme: ObservableObject {
 
     private func applyTheme(primaryHex: String? = nil, secondaryHex: String? = nil, accentHex: String? = nil) {
         suppressRevisionBump = true
+        defer {
+            suppressRevisionBump = false
+            bump()
+        }
         if let primaryHex { self.primaryHex = primaryHex }
         if let secondaryHex { self.secondaryHex = secondaryHex }
         if let accentHex { self.accentHex = accentHex }
-        suppressRevisionBump = false
-        bump()
     }
 }
 

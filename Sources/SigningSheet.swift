@@ -821,7 +821,9 @@ struct SigningSheet: View {
         preview.surgicalMode = o.surgicalMode
         preview.parallelSigning = o.parallelSigning
         preview.injectDylibs = dylibs.map { ($0.url, o.weakDylibReferences ? true : $0.weak) }
-        return Signer.parallelSigningDecision(ipaURL: ipaURL, options: preview)
+        let attrs = try? FileManager.default.attributesOfItem(atPath: ipaURL.path)
+        let payloadSizeBytes = attrs?[.size] as? Int64
+        return Signer.parallelSigningDecision(options: preview, payloadSizeBytes: payloadSizeBytes)
     }
     private var effectiveParallelSigning: Bool { currentParallelSigningDecision.isEnabled }
     private var parallelSigningNote: String { currentParallelSigningDecision.noteText }

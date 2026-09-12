@@ -260,11 +260,11 @@ nonisolated enum Signer {
             case .disabledByDylibInjection:
                 return ">>> Parallel signing disabled: dylib injection selected."
             case .disabledByUnknownIPASize:
-                return ">>> Parallel signing disabled: couldn't determine IPA size safely."
+                return ">>> Parallel signing disabled: couldn't determine payload size safely."
             case .disabledByIPASize(let actual):
                 let actualText = ByteCountFormatter.string(fromByteCount: actual, countStyle: .file)
                 let limitText = ByteCountFormatter.string(fromByteCount: Signer.parallelSigningMaxIPABytes, countStyle: .file)
-                return ">>> Parallel signing disabled: \(actualText) IPA exceeds the \(limitText) safety cap."
+                return ">>> Parallel signing disabled: \(actualText) payload exceeds the \(limitText) safety cap."
             }
         }
 
@@ -279,7 +279,7 @@ nonisolated enum Signer {
             case .disabledByUnknownIPASize:
                 return "Parallel signing (auto-disabled: unknown size)"
             case .disabledByIPASize:
-                return "Parallel signing (auto-disabled: large IPA)"
+                return "Parallel signing (auto-disabled: large payload)"
             }
         }
 
@@ -290,25 +290,44 @@ nonisolated enum Signer {
             case .disabledByDylibInjection:
                 return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because dylib injection is selected"
             case .disabledByUnknownIPASize:
-                return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because the IPA size could not be determined safely"
+                return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because the payload size could not be determined safely"
             case .disabledByIPASize:
                 let limitText = ByteCountFormatter.string(fromByteCount: Signer.parallelSigningMaxIPABytes, countStyle: .file)
-                return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because this IPA exceeds the \(limitText) safety cap"
+                return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because this payload exceeds the \(limitText) safety cap"
             }
         }
     }
 
-    nonisolated static func parallelSigningDecision(
+    private nonisolated static func payloadSizeForParallelDecision(
         ipaURL: URL,
-        options o: SignOptions
+        appURL: URL
+    ) -> Int64? {
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: ipaURL.path),
+           let ipaSize = attrs[.size] as? Int64 {
+            return ipaSize
+        }
+        let fm = FileManager.default
+        guard let en = fm.enumerator(at: appURL, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) else { return nil }
+        var total: Int64 = 0
+        for case let u as URL in en {
+            let vals = try? u.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard vals?.isRegularFile == true else { continue }
+            total += Int64(vals?.fileSize ?? 0)
+        }
+        return total
+    }
+
+    nonisolated static func parallelSigningDecision(
+        options o: SignOptions,
+        payloadSizeBytes: Int64?
     ) -> ParallelSigningDecision {
         guard o.parallelSigning else { return .disabledByUser }
         guard o.injectDylibs.isEmpty else { return .disabledByDylibInjection }
-        guard let ipaSize = (try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int64) else {
+        guard let payloadSizeBytes else {
             return .disabledByUnknownIPASize
         }
-        guard ipaSize <= parallelSigningMaxIPABytes else {
-            return .disabledByIPASize(actual: ipaSize)
+        guard payloadSizeBytes <= parallelSigningMaxIPABytes else {
+            return .disabledByIPASize(actual: payloadSizeBytes)
         }
         return .enabled
     }
@@ -363,7 +382,10 @@ nonisolated enum Signer {
         let capture = onLog.map { ConsoleCapture($0) }
         capture?.start()
         do {
-            let parallelDecision = parallelSigningDecision(ipaURL: ipaURL, options: o)
+            let parallelDecision = parallelSigningDecision(
+                options: o,
+                payloadSizeBytes: payloadSizeForParallelDecision(ipaURL: ipaURL, appURL: appURL)
+            )
             if let msg = parallelDecision.logMessage { onLog?(msg) }
             ZSignSetParallel(parallelDecision.isEnabled)
             let entitlementsURL: URL?

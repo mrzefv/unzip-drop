@@ -126,6 +126,7 @@ struct SigningSheet: View {
             .safeAreaInset(edge: .bottom, spacing: 0) { signBar.floatingGlassBar(edge: .bottom) }
         }
         .background(Color.black.ignoresSafeArea())
+        .onChange(of: o.parallelSigning) { ParallelSigning.set($0) }
         .fullScreenCover(isPresented: $showTerminal) {
             SigningTerminalView(
                 appName: name, bundle: bundle, icon: iconPNG ?? meta.iconPNG,
@@ -998,7 +999,6 @@ struct SigningSheet: View {
         s.disableSiri = o.disableSiri
         s.disableBackgroundModes = o.disableBackgroundModes
         s.entitlementsPlistData = encodedEntitlementsPlistData()
-        ParallelSigning.set(o.parallelSigning)
         return s
     }
 

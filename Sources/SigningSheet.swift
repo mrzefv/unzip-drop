@@ -12,6 +12,12 @@ import UIKit
 import UniformTypeIdentifiers
 import ZIPFoundation
 
+private actor SigningLogSink {
+    private let onLine: @MainActor (String) -> Void
+    init(onLine: @escaping @MainActor (String) -> Void) { self.onLine = onLine }
+    func append(_ line: String) async { await onLine(line) }
+}
+
 struct SigningSheet: View {
     let ipaURL: URL
     let meta: IPAMeta
@@ -1094,13 +1100,14 @@ struct SigningSheet: View {
         log = [">>> Signing \(name) with \(material.name)"]
         let url = ipaURL
         let options = buildOptionsValue()
+        let logSink = SigningLogSink { line in log.append(line) }
         do {
             let outcome = try await Task.detached(priority: .userInitiated) {
                 try await Signer.signDetached(
                     ipaURL: url,
                     material: material,
                     options: options,
-                    onLog: { line in Task { @MainActor in log.append(line) } }
+                    onLog: { line in Task { await logSink.append(line) } }
                 )
             }.value
             lastEntitlements = outcome.entitlements
@@ -2062,6 +2069,7 @@ struct SigningTerminalView: View {
 
     private let accent = Color(red: 1.0, green: 0.60, blue: 0.10)   // MRZefv orange
     private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
+    private let green = Color(red: 0.2, green: 1.0, blue: 0.45)
 
     var body: some View {
         ZStack {
@@ -2107,16 +2115,24 @@ struct SigningTerminalView: View {
     private var logScroll: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(Array(lines.enumerated()), id: \.offset) { _, raw in
-                        Text(raw)
-                            .font(.system(size: 11, weight: .regular, design: .monospaced))
-                            .foregroundStyle(color(for: raw))
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .lineSpacing(2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 1)
+                VStack(alignment: .leading, spacing: 12) {
+                    categoryStack
+                    Divider().overlay(Color.white.opacity(0.08))
+                    Text("Activity")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .padding(.horizontal, 2)
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(Array(lines.enumerated()), id: \.offset) { _, raw in
+                            Text(raw)
+                                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                .foregroundStyle(color(for: raw))
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .lineSpacing(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 1)
+                        }
                     }
                     if !done { TerminalCursor(color: accent) }
                     Color.clear.frame(height: done ? 100 : 20).id("BOTTOM")
@@ -2131,6 +2147,44 @@ struct SigningTerminalView: View {
             }
         }
         .background(Color.black)
+    }
+
+    private var categoryStack: some View {
+        VStack(spacing: 10) {
+            categoryCard("App Info", icon: "app.badge.fill", tint: blue, rows: appInfoRows)
+            categoryCard("Frameworks", icon: "shippingbox.fill", tint: accent, rows: frameworkRows, empty: "No framework activity yet")
+            categoryCard("Entitlements", icon: "checkmark.shield.fill", tint: green, rows: entitlementRows, empty: "No entitlement changes yet")
+            categoryCard("CodeResources", icon: "doc.badge.gearshape.fill", tint: .purple, rows: codeResourcesRows, empty: "No CodeResources activity yet")
+        }
+    }
+
+    private func categoryCard(_ title: String, icon: String, tint: Color, rows: [String], empty: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: icon).foregroundStyle(tint).font(.system(size: 15, weight: .semibold))
+                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                Spacer()
+                Text("\(rows.count)").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.white.opacity(0.45))
+            }
+            if rows.isEmpty {
+                Text(empty ?? "No activity yet")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.45))
+            } else {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(rows, id: \.self) { row in
+                        Text(row)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.82))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(tint.opacity(0.35), lineWidth: 1))
     }
 
     // Download · branding · Install
@@ -2192,6 +2246,48 @@ struct SigningTerminalView: View {
         if raw.contains("Packaging") || raw.contains("Packaged") { return Color(red: 0.55, green: 0.75, blue: 1.0) }
         if raw.hasPrefix(">>>") { return .white.opacity(0.85) }
         return .white.opacity(0.75)
+    }
+
+    private var appInfoRows: [String] {
+        var rows = [
+            "Name: \(appName)",
+            "Bundle: \(bundle)"
+        ]
+        if let result {
+            rows.append("Version: \(result.version)")
+            rows.append("Signed IPA: \(result.sizeString.isEmpty ? "ready" : result.sizeString)")
+        } else if done, let error {
+            rows.append("Status: failed")
+            rows.append("Reason: \(error)")
+        } else {
+            rows.append("Status: signing in progress")
+        }
+        rows.append(contentsOf: categorizedLines(matching: ["extracting ipa", "info.plist", "embedded.mobileprovision", "packaging signed ipa"]))
+        return dedup(rows)
+    }
+
+    private var frameworkRows: [String] {
+        dedup(categorizedLines(matching: [".framework", ".dylib", "frameworks/", "signfolder:"]))
+    }
+
+    private var entitlementRows: [String] {
+        dedup(categorizedLines(matching: ["entitlement", "mobileprovision", "aps-environment", "application-groups", "icloud", "background modes"]))
+    }
+
+    private var codeResourcesRows: [String] {
+        dedup(categorizedLines(matching: ["coderesources", "sha1", "sha256", "packaging", "signed ok", "done."]))
+    }
+
+    private func categorizedLines(matching needles: [String]) -> [String] {
+        lines.filter { raw in
+            let lower = raw.lowercased()
+            return needles.contains { lower.contains($0) }
+        }
+    }
+
+    private func dedup(_ rows: [String]) -> [String] {
+        var seen = Set<String>()
+        return rows.filter { seen.insert($0).inserted }
     }
 }
 

@@ -254,6 +254,16 @@ nonisolated enum Signer {
             return false
         }
 
+        actor ZSignExecutionGate {
+            static let shared = ZSignExecutionGate()
+
+            func run<T: Sendable>(parallel: Bool, _ operation: () throws -> T) throws -> T {
+                ZSignSetParallel(parallel)
+                defer { ZSignSetParallel(false) }
+                return try operation()
+            }
+        }
+
         var logMessage: String? {
             switch self {
             case .enabled, .disabledByUser:
@@ -404,7 +414,6 @@ nonisolated enum Signer {
                     ?? payloadSizeForParallelDecision(ipaURL: ipaURL, appURL: appURL)
             )
             if let msg = parallelDecision.logMessage { onLog?(msg) }
-            ZSignSetParallel(parallelDecision.isEnabled)
             let entitlementsURL: URL?
             if let scrubbed = Self.scrubbedEntitlements(o.entitlementsPlistData, options: o, profile: material.provision, onLog: onLog) {
                 let u = work.appendingPathComponent("entitlements.plist")
@@ -414,17 +423,19 @@ nonisolated enum Signer {
                 entitlementsURL = nil
             }
 
-            try ZsignSigner.signAppBundle(
-                appBundlePath: appURL.path,
-                provisionPath: provURL.path,
-                p12Path: p12URL.path,
-                p12Password: material.password,
-                bundleID: o.bundleID,
-                displayName: o.name,
-                version: o.version,
-                entitlementsPath: entitlementsURL?.path,
-                skipEmbeddedProvision: o.skipEmbeddedProvision
-            )
+            try await ZSignExecutionGate.shared.run(parallel: parallelDecision.isEnabled) {
+                try ZsignSigner.signAppBundle(
+                    appBundlePath: appURL.path,
+                    provisionPath: provURL.path,
+                    p12Path: p12URL.path,
+                    p12Password: material.password,
+                    bundleID: o.bundleID,
+                    displayName: o.name,
+                    version: o.version,
+                    entitlementsPath: entitlementsURL?.path,
+                    skipEmbeddedProvision: o.skipEmbeddedProvision
+                )
+            }
             capture?.stop()
         } catch {
             capture?.stop()

@@ -359,7 +359,7 @@ private struct StatusFooter: View {
                 // Signed-in: signature · username, then MDID and role inline.
                 HStack(spacing: 8) {
                     Image(systemName: "signature").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.accent)
-                    Text(account.username ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.text)
+                    StyledUsername(name: account.username ?? "", style: account.style, base: 15)
                     refreshButton
                 }
                 HStack(spacing: 8) {

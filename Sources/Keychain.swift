@@ -36,7 +36,15 @@ nonisolated enum Keychain {
         return String(data: d, encoding: .utf8)
     }
 
-    static func delete(_ key: String) { _ = set(key, "") }
+    @discardableResult
+    static func delete(_ key: String) -> Bool {
+        let q: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+        ]
+        return SecItemDelete(q as CFDictionary) == errSecSuccess
+    }
 
     // MARK: - Non-exportable secrets (private keys)
     //

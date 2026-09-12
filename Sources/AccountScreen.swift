@@ -33,19 +33,9 @@ struct AccountScreen: View {
         .preferredColorScheme(AppTheme.shared.colorScheme)
         .task { await account.refreshProfile(); email = account.email ?? "" }
         .onChange(of: account.email) { email = $0 ?? "" }
-        .onAppear {
-            if reduceMotion, account.usernameCustomization.gifBackground {
-                _ = account.updateUsernameCustomization(gifBackground: false)
-            }
-            updateBackgroundGifCache()
-        }
+        .onAppear { updateBackgroundGifCache() }
         .onChange(of: account.usernameCustomization.gifBackground) { _ in updateBackgroundGifCache() }
-        .onChange(of: reduceMotion) {
-            if $0, account.usernameCustomization.gifBackground {
-                _ = account.updateUsernameCustomization(gifBackground: false)
-            }
-            updateBackgroundGifCache()
-        }
+        .onChange(of: reduceMotion) { _ in updateBackgroundGifCache() }
     }
 
     // MARK: - Profile
@@ -136,9 +126,8 @@ struct AccountScreen: View {
                         .pickerStyle(.menu)
                         Toggle("Animated GIF background", isOn: gifBackgroundBinding)
                             .foregroundStyle(Theme.text)
-                            .disabled(reduceMotion)
                         if reduceMotion {
-                            Text("Animated backgrounds are disabled when Reduce Motion is enabled.")
+                            Text("Animated background preview is paused while Reduce Motion is enabled.")
                                 .font(.caption)
                                 .foregroundStyle(Theme.subtle)
                         }

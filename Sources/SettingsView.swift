@@ -352,6 +352,8 @@ private struct StatusFooter: View {
     @State private var showAccount = false
 
     private var role: UserRole { staff.isStaff ? staff.role : account.role }
+    private var usernameColor: Color { Color(hex: account.usernameCustomization.colorHex) }
+    private var usernameFontDesign: Font.Design { fontDesign(account.usernameCustomization.fontStyle) }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -359,7 +361,9 @@ private struct StatusFooter: View {
                 // Signed-in: signature · username · role, MDID under it (small, centered)
                 HStack(spacing: 8) {
                     Image(systemName: "signature").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.accent)
-                    Text(account.username ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.text)
+                    Text(account.username ?? "")
+                        .font(.system(size: 15, weight: .bold, design: usernameFontDesign))
+                        .foregroundStyle(usernameColor)
                     refreshButton
                     rolePill
                 }
@@ -418,6 +422,15 @@ private struct StatusFooter: View {
         .onTapGesture {
             UIPasteboard.general.string = staff.mdid
             UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
+    }
+
+    private func fontDesign(_ style: UsernameFontStyle) -> Font.Design {
+        switch style {
+        case .default: return .default
+        case .rounded: return .rounded
+        case .monospaced: return .monospaced
+        case .serif: return .serif
         }
     }
 }

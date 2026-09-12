@@ -19,6 +19,8 @@ struct AccountScreen: View {
     @State private var confirmSignOut = false
 
     private var role: UserRole { staff.isStaff ? staff.role : account.role }
+    private var usernameColor: Color { Color(hex: account.usernameCustomization.colorHex) }
+    private var usernameFontDesign: Font.Design { fontDesign(account.usernameCustomization.fontStyle) }
 
     var body: some View {
         ZStack {
@@ -37,30 +39,42 @@ struct AccountScreen: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 14) {
                 // Identity card
-                VStack(spacing: 12) {
-                    ZStack {
-                        Circle().fill(role.color.opacity(0.18)).frame(width: 84, height: 84)
-                        Circle().stroke(role.color.opacity(0.5), lineWidth: 2).frame(width: 84, height: 84)
-                        Text(String((account.username ?? "?").prefix(1)).uppercased())
-                            .font(.system(size: 34, weight: .heavy, design: .rounded)).foregroundStyle(role.color)
+                ZStack {
+                    if account.usernameCustomization.gifBackground, let gif = AnimatedImage.named("onboarding") {
+                        gif
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 170)
+                            .opacity(0.2)
+                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                            .allowsHitTesting(false)
                     }
-                    Text(account.username ?? "").font(.system(size: 24, weight: .bold)).foregroundStyle(Theme.text)
-                    HStack(spacing: 8) {
-                        Image(systemName: role.icon).font(.system(size: 11, weight: .bold))
-                        Text(role.badgeText).font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(1)
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(role.color.opacity(0.18)).foregroundStyle(role.color)
-                    .overlay(Capsule().stroke(role.color.opacity(0.5), lineWidth: 1)).clipShape(Capsule())
+                    VStack(spacing: 12) {
+                        ZStack {
+                            Circle().fill(role.color.opacity(0.18)).frame(width: 84, height: 84)
+                            Circle().stroke(role.color.opacity(0.5), lineWidth: 2).frame(width: 84, height: 84)
+                            Text(String((account.username ?? "?").prefix(1)).uppercased())
+                                .font(.system(size: 34, weight: .heavy, design: .rounded)).foregroundStyle(role.color)
+                        }
+                        Text(account.username ?? "")
+                            .font(.system(size: 24, weight: .bold, design: usernameFontDesign))
+                            .foregroundStyle(usernameColor)
+                        HStack(spacing: 8) {
+                            Image(systemName: role.icon).font(.system(size: 11, weight: .bold))
+                            Text(role.badgeText).font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(1)
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(role.color.opacity(0.18)).foregroundStyle(role.color)
+                        .overlay(Capsule().stroke(role.color.opacity(0.5), lineWidth: 1)).clipShape(Capsule())
 
-                    Button {
-                        UIPasteboard.general.string = staff.mdid
-                        flash("MDID copied")
-                    } label: {
-                        (Text("MDID: ").font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
-                         + Text(staff.mdid).font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent))
+                        Button {
+                            UIPasteboard.general.string = staff.mdid
+                            flash("MDID copied")
+                        } label: {
+                            (Text("MDID: ").font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundColor(Theme.subtle)
+                             + Text(staff.mdid).font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 22)
                 .background(Theme.card)
@@ -85,6 +99,22 @@ struct AccountScreen: View {
                                 .frame(width: 30, height: 30).background(Theme.accent.opacity(0.14)).clipShape(Circle())
                         }
                         .buttonStyle(.plain)
+                    }
+                }
+
+                Card {
+                    section("Username style")
+                    VStack(alignment: .leading, spacing: 12) {
+                        ColorPicker("Username color", selection: usernameColorBinding, supportsOpacity: false)
+                            .foregroundStyle(Theme.text)
+                        Picker("Username font", selection: usernameFontBinding) {
+                            ForEach(UsernameFontStyle.allCases, id: \.self) { style in
+                                Text(style.title).tag(style)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        Toggle("Animated GIF background", isOn: gifBackgroundBinding)
+                            .foregroundStyle(Theme.text)
                     }
                 }
 
@@ -159,7 +189,9 @@ struct AccountScreen: View {
                 Text("ACCOUNT").font(.system(size: 15, weight: .heavy, design: .rounded)).kerning(1).foregroundStyle(Theme.text)
                 Spacer()
             }
-            Text(account.username ?? "").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.subtle)
+            Text(account.username ?? "")
+                .font(.system(size: 13, weight: .semibold, design: usernameFontDesign))
+                .foregroundStyle(usernameColor.opacity(0.9))
             HStack {
                 Spacer()
                 Button { dismiss() } label: {
@@ -170,6 +202,31 @@ struct AccountScreen: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
         .floatingGlassBar(edge: .top)
+    }
+
+    private var usernameColorBinding: Binding<Color> {
+        Binding(
+            get: { usernameColor },
+            set: { value in
+                if let hex = value.hexString() {
+                    _ = account.updateUsernameCustomization(colorHex: hex)
+                }
+            }
+        )
+    }
+
+    private var usernameFontBinding: Binding<UsernameFontStyle> {
+        Binding(
+            get: { account.usernameCustomization.fontStyle },
+            set: { value in _ = account.updateUsernameCustomization(fontStyle: value) }
+        )
+    }
+
+    private var gifBackgroundBinding: Binding<Bool> {
+        Binding(
+            get: { account.usernameCustomization.gifBackground },
+            set: { value in _ = account.updateUsernameCustomization(gifBackground: value) }
+        )
     }
 
     // MARK: - Bits
@@ -193,5 +250,14 @@ struct AccountScreen: View {
     private func flash(_ m: String) {
         withAnimation { toast = m }
         Task { try? await Task.sleep(nanoseconds: 1_600_000_000); withAnimation { toast = nil } }
+    }
+
+    private func fontDesign(_ style: UsernameFontStyle) -> Font.Design {
+        switch style {
+        case .default: return .default
+        case .rounded: return .rounded
+        case .monospaced: return .monospaced
+        case .serif: return .serif
+        }
     }
 }

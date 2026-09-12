@@ -11,6 +11,30 @@
 
 import Foundation
 
+enum UsernameFontStyle: String, Codable, CaseIterable, Sendable {
+    case `default`
+    case rounded
+    case monospaced
+    case serif
+
+    var title: String {
+        switch self {
+        case .default: return "Default"
+        case .rounded: return "Rounded"
+        case .monospaced: return "Monospaced"
+        case .serif: return "Serif"
+        }
+    }
+}
+
+struct UsernameCustomization: Codable, Sendable {
+    var colorHex: String
+    var fontStyle: UsernameFontStyle
+    var gifBackground: Bool
+
+    static let `default` = UsernameCustomization(colorHex: "FFFFFF", fontStyle: .default, gifBackground: false)
+}
+
 @MainActor
 final class ZefvAccount: ObservableObject {
     static let shared = ZefvAccount()
@@ -18,12 +42,14 @@ final class ZefvAccount: ObservableObject {
     @Published private(set) var username: String?
     @Published private(set) var email: String?
     @Published private(set) var role: UserRole = .member
+    @Published private(set) var usernameCustomization: UsernameCustomization = .default
     @Published private(set) var busy = false
     @Published var lastError: String?
     @Published var panelShown = false
 
     private static let kSession  = "zefv_session_token"
     private static let kUsername = "zefv_username"
+    private static let kCustomizationPrefix = "zefv_username_custom_"
 
     var isLoggedIn: Bool { username != nil }
     var sessionToken: String? { Keychain.get(Self.kSession) }
@@ -31,6 +57,7 @@ final class ZefvAccount: ObservableObject {
     private init() {
         username = Keychain.get(Self.kUsername)
         if let raw = Keychain.get("zefv_role"), let r = UserRole(rawValue: raw) { role = r }
+        loadCustomization(for: username)
     }
 
     // MARK: - Endpoint base — the PHP account API lives on apii (api.zefv.dev is a router)
@@ -93,6 +120,7 @@ final class ZefvAccount: ObservableObject {
             _ = Keychain.set(Self.kUsername, name)
             _ = Keychain.set("zefv_role", r.rawValue)
             username = name; role = r
+            loadCustomization(for: name)
             await StaffGate.shared.refresh()
             return true
         } catch { lastError = (error as? Err)?.message ?? error.localizedDescription; return false }
@@ -103,7 +131,11 @@ final class ZefvAccount: ObservableObject {
         guard let tok = sessionToken, !tok.isEmpty else { return }
         do {
             let o = try await get("account.php", ["token": tok])
-            if let name = o["username"] as? String { username = name; _ = Keychain.set(Self.kUsername, name) }
+            if let name = o["username"] as? String {
+                username = name
+                _ = Keychain.set(Self.kUsername, name)
+                loadCustomization(for: name)
+            }
             email = (o["email"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             let r = UserRole(rawValue: (o["role"] as? String) ?? "member") ?? .member
             role = r; _ = Keychain.set("zefv_role", r.rawValue)
@@ -133,11 +165,53 @@ final class ZefvAccount: ObservableObject {
         _ = Keychain.set(Self.kUsername, "")
         _ = Keychain.set("zefv_role", "")
         username = nil; email = nil; role = .member
+        usernameCustomization = .default
     }
 
     func logout() async {
         if let tok = sessionToken { _ = try? await post("account.php", ["action": "logout", "token": tok]) }
         await clearLocal()
+    }
+
+    func updateUsernameCustomization(colorHex: String? = nil,
+                                     fontStyle: UsernameFontStyle? = nil,
+                                     gifBackground: Bool? = nil) -> Bool {
+        guard let name = username, !name.isEmpty else { return false }
+        var next = usernameCustomization
+        if let colorHex, let normalized = Self.normalizeHex(colorHex) { next.colorHex = normalized }
+        if let fontStyle { next.fontStyle = fontStyle }
+        if let gifBackground { next.gifBackground = gifBackground }
+        usernameCustomization = next
+        saveCustomization(next, for: name)
+        return true
+    }
+
+    private func saveCustomization(_ customization: UsernameCustomization, for username: String) {
+        guard !username.isEmpty, let data = try? JSONEncoder().encode(customization) else { return }
+        UserDefaults.standard.set(data, forKey: customizationKey(for: username))
+    }
+
+    private func loadCustomization(for username: String?) {
+        guard let username, !username.isEmpty else {
+            usernameCustomization = .default
+            return
+        }
+        guard let data = UserDefaults.standard.data(forKey: customizationKey(for: username)),
+              let customization = try? JSONDecoder().decode(UsernameCustomization.self, from: data) else {
+            usernameCustomization = .default
+            return
+        }
+        usernameCustomization = customization
+    }
+
+    private func customizationKey(for username: String) -> String {
+        Self.kCustomizationPrefix + username.lowercased()
+    }
+
+    private static func normalizeHex(_ value: String) -> String? {
+        let hex = value.trimmingCharacters(in: CharacterSet(charactersIn: "#")).uppercased()
+        guard hex.count == 6, Int(hex, radix: 16) != nil else { return nil }
+        return hex
     }
 
     enum Err: Error { case badURL, server(String)

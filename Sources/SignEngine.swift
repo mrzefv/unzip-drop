@@ -226,6 +226,8 @@ nonisolated struct SignOptions: Sendable {
     var surgicalMode = false            // opt-in faster prep path; SigningSheet leaves it off by default
     var parallelSigning = false         // opt-in zsign DAG parallelism; still forced off when injecting dylibs
 
+    static let none = SignOptions()
+
     var isEmpty: Bool {
         name == nil && bundleID == nil && version == nil && iconPNG == nil
         && injectDylibs.isEmpty && removeDylibs.isEmpty && binaryPatches.isEmpty && injectDataBlob == nil && plistSet.isEmpty && entitlementsPlistData == nil
@@ -237,6 +239,27 @@ nonisolated struct SignOptions: Sendable {
 }
 
 nonisolated enum Signer {
+    static let parallelSigningMaxIPABytes: Int64 = 500 * 1_024 * 1_024
+
+    private nonisolated static func shouldUseParallelSigning(
+        ipaURL: URL,
+        options o: SignOptions,
+        onLog: (@Sendable (String) -> Void)? = nil
+    ) -> Bool {
+        guard o.parallelSigning else { return false }
+        guard o.injectDylibs.isEmpty else {
+            onLog?(">>> Parallel signing disabled: dylib injection selected.")
+            return false
+        }
+        let ipaSize = (try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int64) ?? 0
+        guard ipaSize == 0 || ipaSize <= parallelSigningMaxIPABytes else {
+            let actual = ByteCountFormatter.string(fromByteCount: ipaSize, countStyle: .file)
+            let limit = ByteCountFormatter.string(fromByteCount: parallelSigningMaxIPABytes, countStyle: .file)
+            onLog?(">>> Parallel signing disabled: \(actual) IPA exceeds the \(limit) safety cap.")
+            return false
+        }
+        return true
+    }
 
     nonisolated static func signDetached(
         ipaURL: URL,
@@ -288,9 +311,7 @@ nonisolated enum Signer {
         let capture = onLog.map { ConsoleCapture($0) }
         capture?.start()
         do {
-            // Bundle mutations happen before zsign starts, but dylib injection still
-            // keeps the older conservative serial path.
-            ZSignSetParallel(o.parallelSigning && o.injectDylibs.isEmpty)
+            ZSignSetParallel(shouldUseParallelSigning(ipaURL: ipaURL, options: o, onLog: onLog))
             let entitlementsURL: URL?
             if let scrubbed = Self.scrubbedEntitlements(o.entitlementsPlistData, options: o, profile: material.provision, onLog: onLog) {
                 let u = work.appendingPathComponent("entitlements.plist")

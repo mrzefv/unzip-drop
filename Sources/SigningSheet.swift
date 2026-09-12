@@ -815,11 +815,25 @@ struct SigningSheet: View {
          o.surgicalMode ? "Surgical mode" : nil,
          o.parallelSigning ? (effectiveParallelSigning ? "Parallel signing" : "Parallel signing (auto-disabled: dylibs)") : nil].compactMap { $0 }
     }
-    private var effectiveParallelSigning: Bool { o.parallelSigning && dylibs.isEmpty }
+    private var effectiveParallelSigning: Bool {
+        o.parallelSigning && dylibs.isEmpty && !ipaTooLargeForParallel
+    }
+    private var ipaTooLargeForParallel: Bool {
+        guard let n = try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int64 else { return false }
+        return n > Signer.parallelSigningMaxIPABytes
+    }
     private var parallelSigningNote: String {
-        effectiveParallelSigning
-        ? "Signs sibling frameworks and binaries concurrently inside zsign"
-        : "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because dylib injection is selected"
+        if effectiveParallelSigning {
+            return "Signs sibling frameworks and binaries concurrently inside zsign"
+        }
+        if !dylibs.isEmpty {
+            return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because dylib injection is selected"
+        }
+        if ipaTooLargeForParallel {
+            let limit = ByteCountFormatter.string(fromByteCount: Signer.parallelSigningMaxIPABytes, countStyle: .file)
+            return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because this IPA exceeds the \(limit) safety cap"
+        }
+        return "Signs sibling frameworks and binaries concurrently inside zsign"
     }
     private var plistList: [String] {
         [o.forceMinIOS12 ? "MinimumOSVersion 12.0" : nil, o.removeURLSchemes ? "Hide URL schemes" : nil,

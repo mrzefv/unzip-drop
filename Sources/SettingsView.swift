@@ -503,9 +503,42 @@ private struct Field: View {
 
 // MARK: - About
 
+private func statusLine(_ name: String, _ ok: Bool) -> some View {
+    HStack(spacing: 8) {
+        Circle().fill(ok ? Color.green : Color.red).frame(width: 8, height: 8)
+        Text(name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.text)
+        Spacer()
+        Text(ok ? "OK" : "DOWN").font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(1).foregroundStyle(ok ? .green : .red)
+    }
+}
+
 private struct AboutScreen: View {
+    @State private var status: [String: Any]?
+    @State private var statusFailed = false
     var body: some View {
         DetailScreen(title: "About") {
+            Card {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Service status").font(.headline).foregroundStyle(Theme.text)
+                    if let st = status {
+                        statusLine("API", (st["ok"] as? Bool) ?? false || (st["db"] as? Bool) ?? false)
+                        statusLine("Database", (st["db"] as? Bool) ?? false)
+                        statusLine("Cert source", (st["cert_source"] as? Bool) ?? false)
+                        if let n = st["users"] as? Int { Text("\(n) registered accounts").font(.caption).foregroundStyle(Theme.subtle) }
+                    } else if statusFailed {
+                        statusLine("API", false)
+                        Text("apii.zefv.dev unreachable").font(.caption).foregroundStyle(.orange)
+                    } else {
+                        HStack(spacing: 8) { ProgressView().tint(Theme.accent); Text("Checking apii.zefv.dev…").font(.caption).foregroundStyle(Theme.subtle) }
+                    }
+                }
+            }
+            .task {
+                guard let u = URL(string: ZefvAccount.defaultBase + "status.php") else { statusFailed = true; return }
+                var req = URLRequest(url: u); req.timeoutInterval = 8; req.cachePolicy = .reloadIgnoringLocalCacheData
+                if let (d, _) = try? await URLSession.shared.data(for: req), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { status = o }
+                else { statusFailed = true }
+            }
             Card {
                 HStack(spacing: 14) {
                     ZStack {

@@ -18,6 +18,8 @@ final class ZefvAccount: ObservableObject {
     @Published private(set) var username: String?
     @Published private(set) var email: String?
     @Published private(set) var style: UserStyle = UserStyle.load()
+    @Published private(set) var signsToday: Int = UserDefaults.standard.integer(forKey: "zefv_signs_today")
+    @Published private(set) var signsTotal: Int = UserDefaults.standard.integer(forKey: "zefv_signs_total")
     @Published private(set) var role: UserRole = .member
     @Published private(set) var busy = false
     @Published var lastError: String?
@@ -106,8 +108,9 @@ final class ZefvAccount: ObservableObject {
             let o = try await get("account.php", ["token": tok])
             if let name = o["username"] as? String { username = name; _ = Keychain.set(Self.kUsername, name) }
             email = (o["email"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            style = UserStyle(json: o["style"] as? [String: Any])
-            style.save()
+            var st = UserStyle(json: o["style"] as? [String: Any])
+            st.badges = (o["badges"] as? [String]) ?? []
+            style = st; st.save()
             let r = UserRole(rawValue: (o["role"] as? String) ?? "member") ?? .member
             role = r; _ = Keychain.set("zefv_role", r.rawValue)
             await StaffGate.shared.refresh()
@@ -125,8 +128,24 @@ final class ZefvAccount: ObservableObject {
             _ = try await post("account.php", ["action": "set_style", "token": tok,
                                                "color": st.colorHex, "rainbow": st.rainbow ? 1 : 0, "gif": st.gifURL,
                                                "font": st.fontName, "size": st.sizeStep])
-            style = st; st.save(); return true
+            var saved = st; saved.badges = style.badges
+            style = saved; saved.save(); return true
         } catch { lastError = (error as? Err)?.message ?? error.localizedDescription; return false }
+    }
+
+    // MARK: - Sign counter (aesthetic only — no limits)
+
+    private func applyCounts(_ o: [String: Any]) {
+        if let t = o["today"] as? Int { signsToday = t; UserDefaults.standard.set(t, forKey: "zefv_signs_today") }
+        if let t = o["total"] as? Int { signsTotal = t; UserDefaults.standard.set(t, forKey: "zefv_signs_total") }
+    }
+    func refreshSignCounts() async {
+        if let o = try? await get("quota.php", ["mdid": StaffGate.shared.mdid]) { applyCounts(o) }
+    }
+    /// Fire-and-forget after a successful sign.
+    func recordSign() {
+        signsToday += 1; signsTotal += 1
+        Task { if let o = try? await post("quota.php", ["mdid": StaffGate.shared.mdid, "action": "consume"]) { applyCounts(o) } }
     }
 
     func setUsername(_ n: String) async -> Bool {

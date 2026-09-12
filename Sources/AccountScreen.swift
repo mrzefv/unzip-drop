@@ -49,6 +49,7 @@ struct AccountScreen: View {
                             .font(.system(size: 34, weight: .heavy, design: .rounded)).foregroundStyle(role.color)
                     }
                     StyledUsername(name: account.username ?? "", style: account.style, base: 24)
+                    BadgeRow(badges: account.style.badges)
                     HStack(spacing: 8) {
                         Image(systemName: role.icon).font(.system(size: 11, weight: .bold))
                         Text(role.badgeText).font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(1)

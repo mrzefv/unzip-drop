@@ -1119,6 +1119,7 @@ struct SigningSheet: View {
             let entry = try SignedStore.shared.add(outcome: outcome, icon: iconPNG ?? meta.iconPNG, certName: material.name)
             result = entry
             onSigned(entry)
+            ZefvAccount.shared.recordSign()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch {
             self.error = error.localizedDescription

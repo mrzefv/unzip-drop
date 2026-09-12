@@ -98,6 +98,23 @@ nonisolated enum AppCategory: String, CaseIterable, Sendable, Codable {
     }
 }
 
+nonisolated enum VersionCompare {
+    /// true when `remote` is newer than `local` (numeric, tolerant of "v1.2.3 (45)").
+    static func isNewer(remote: String, than local: String) -> Bool {
+        func parts(_ v: String) -> [Int] {
+            v.lowercased().replacingOccurrences(of: "v", with: "").split(whereSeparator: { !$0.isNumber && $0 != "." })
+                .first.map { $0.split(separator: ".").map { Int($0) ?? 0 } } ?? []
+        }
+        let a = parts(remote), b = parts(local)
+        guard !a.isEmpty, !b.isEmpty else { return remote != local && !remote.isEmpty && remote != "—" }
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
+}
+
 /// One app = one bundle id; a source can list many versions of it.
 nonisolated struct AppGroup: Identifiable, Equatable, Sendable {
     let bundle: String
@@ -404,6 +421,10 @@ final class SourceStore: ObservableObject {
     func move(from: IndexSet, to: Int) { sources.move(fromOffsets: from, toOffset: to); save() }
     private func save() { try? JSONEncoder().encode(sources).write(to: fileURL) }
     func cachedParsedRepo(for source: RepoSource) -> RepoParser.ParsedRepo? { parsedCache[source.id] }
+    /// Every source that has a parsed copy in memory, in list order.
+    func allCached() -> [(source: RepoSource, repo: RepoParser.ParsedRepo)] {
+        sources.compactMap { s in parsedCache[s.id].map { (s, $0) } }
+    }
 
     /// Fetch + parse a repo.json, cache the parsed result, and update the source metadata.
     func fetch(_ s: RepoSource) async throws -> RepoParser.ParsedRepo {
@@ -440,6 +461,43 @@ struct SourcesView: View {
     @State private var adding = false
     @State private var newURL = ""
     @State private var addError: String?
+    @State private var showSearch = false
+    @State private var search = ""
+    @State private var results: [MergedHit] = []
+    @State private var searchTask: Task<Void, Never>?
+    @State private var openHit: MergedHit?
+
+    struct MergedHit: Identifiable, Sendable {
+        let source: RepoSource
+        let group: AppGroup
+        var id: String { source.id + "|" + group.bundle }
+    }
+
+    /// Search every cached source at once (debounced, off-main). Newest version wins on duplicate bundles.
+    private func runSearch() {
+        searchTask?.cancel()
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { results = []; return }
+        let all = store.allCached()
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled else { return }
+            let hits: [MergedHit] = await Task.detached(priority: .userInitiated) {
+                var best: [String: MergedHit] = [:]
+                var order: [String] = []
+                for (src, repo) in all {
+                    for g in repo.byUpdated where g.versions.contains(where: { $0.searchKey.contains(q) }) {
+                        if let e = best[g.bundle] {
+                            if VersionCompare.isNewer(remote: g.latest.version, than: e.group.latest.version) { best[g.bundle] = MergedHit(source: src, group: g) }
+                        } else { best[g.bundle] = MergedHit(source: src, group: g); order.append(g.bundle) }
+                    }
+                }
+                return Array(order.prefix(200).compactMap { best[$0] })
+            }.value
+            guard !Task.isCancelled else { return }
+            results = hits
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -457,6 +515,25 @@ struct SourcesView: View {
             Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
                 List {
+                    if showSearch {
+                        MSignSearchField(placeholder: "Search all sources", text: $search)
+                            .listRowBackground(Color.black).listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                    }
+                    if showSearch && !search.isEmpty {
+                        if results.isEmpty {
+                            Text("No apps match “\(search)” in \(store.allCached().count) sources.")
+                                .font(.system(size: 13)).foregroundStyle(Theme.subtle)
+                                .listRowBackground(Color.black).listRowSeparator(.hidden)
+                        }
+                        ForEach(results) { hit in
+                            Button { openHit = hit } label: { mergedRow(hit) }
+                                .buttonStyle(.plain)
+                                .listRowBackground(Color.black)
+                                .listRowSeparatorTint(Theme.stroke)
+                                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                        }
+                    } else {
                     ForEach(store.sources) { s in
                         NavigationLink(value: s) { sourceRow(s) }
                             .disabled(editing)
@@ -468,12 +545,19 @@ struct SourcesView: View {
                     }
                     .onDelete { idx in idx.map { store.sources[$0] }.forEach(store.remove) }
                     .onMove { store.move(from: $0, to: $1) }
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .environment(\.editMode, .constant(editing ? .active : .inactive))
                 .safeAreaInset(edge: .top, spacing: 0) {
                     TabTitleBar(title: "Sources") {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.16)) { showSearch.toggle(); if !showSearch { search = ""; results = [] } }
+                        } label: {
+                            Image(systemName: showSearch ? "xmark" : "magnifyingglass").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent)
+                        }
+                        .buttonStyle(.plain)
                         Button(editing ? "Done" : "Edit") { withAnimation { editing.toggle() } }
                             .font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.accent)
                         Button { adding = true } label: {
@@ -490,6 +574,34 @@ struct SourcesView: View {
             Button("Cancel", role: .cancel) { newURL = "" }
         } message: { Text(addError ?? "Paste a repo.json URL (AltStore, Feather, DELvEK, mSign formats).") }
         .task { await store.prefetchSources() }
+        .onChange(of: search) { _ in runSearch() }
+        .sheet(item: $openHit) { hit in
+            AppDetailSheet(source: hit.source, group: hit.group)
+                .presentationDragIndicator(.visible)
+                .preferredColorScheme(AppTheme.shared.colorScheme)
+        }
+    }
+
+    private func mergedRow(_ hit: MergedHit) -> some View {
+        let app = hit.group.latest
+        return HStack(spacing: 12) {
+            SourceIcon(url: app.iconURL, side: 46, fallback: app.name)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(app.name).font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text("\(app.version) · \(app.sizeMB) ·").font(.system(size: 12)).foregroundStyle(Theme.subtle)
+                    RemoteStyledName(name: app.subtitle, base: 12, weight: .medium, fallback: Theme.subtle)
+                }
+            }
+            Spacer()
+            HStack(spacing: 5) {
+                SourceIcon(url: hit.source.iconURL, side: 16, fallback: hit.source.name)
+                Text(hit.source.name.uppercased()).font(.system(size: 9, weight: .heavy, design: .monospaced)).kerning(0.5)
+            }
+            .padding(.horizontal, 7).padding(.vertical, 4)
+            .background(Theme.accent.opacity(0.14)).foregroundStyle(Theme.accent).clipShape(Capsule())
+        }
+        .contentShape(Rectangle())
     }
 
     private func sourceRow(_ s: RepoSource) -> some View {
@@ -499,6 +611,12 @@ struct SourcesView: View {
                 Text(s.name).font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
                 Text(s.description.isEmpty ? s.url.host ?? s.url.absoluteString : s.description)
                     .font(.system(size: 13)).foregroundStyle(Theme.subtle).lineLimit(1)
+                if let a = s.author, !a.isEmpty {
+                    HStack(spacing: 4) {
+                        Text("by").font(.system(size: 12)).foregroundStyle(Theme.subtle)
+                        RemoteStyledName(name: a, base: 12, weight: .semibold, fallback: Theme.subtle, showBadges: true)
+                    }
+                }
                 if let n = s.appCount { Text("\(n) apps").font(.caption2.monospaced()).foregroundStyle(Theme.accent) }
             }
             Spacer()
@@ -538,6 +656,24 @@ private struct SourceDetailScreen: View {
     private enum Sort: String, CaseIterable { case updated = "Recently updated", name = "Name", size = "Size" }
 
     private var current: RepoSource { store.sources.first { $0.id == source.id } ?? source }
+
+    /// Bundles you have (signed) where this repo carries a newer version.
+    private var updatable: [AppGroup] {
+        guard let p = parsed else { return [] }
+        var newestLocal: [String: String] = [:]
+        for e in signed.entries {
+            if let v = newestLocal[e.bundleID] { if VersionCompare.isNewer(remote: e.version, than: v) { newestLocal[e.bundleID] = e.version } }
+            else { newestLocal[e.bundleID] = e.version }
+        }
+        return p.groups.filter { g in newestLocal[g.bundle].map { VersionCompare.isNewer(remote: g.latest.version, than: $0) } ?? false }
+    }
+    private func hasUpdate(_ g: AppGroup) -> Bool { updatable.contains { $0.id == g.id } }
+    @State private var updatingAll = false
+
+    private func updateAll() async {
+        updatingAll = true; defer { updatingAll = false }
+        for g in updatable where !IPAInbox.has(g.latest) { await download(g.latest) }
+    }
 
     /// The list actually rendered. Recomputed off-main (debounced) when search/sort/parsed change — never in `body`.
     @State private var groups: [AppGroup] = []
@@ -680,6 +816,18 @@ private struct SourceDetailScreen: View {
     private var countBar: some View {
         HStack(spacing: 8) {
             Text("\(groups.count.formatted()) Apps").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
+            if !updatable.isEmpty {
+                Button { Task { await updateAll() } } label: {
+                    HStack(spacing: 4) {
+                        if updatingAll { ProgressView().tint(.black).scaleEffect(0.7) } else { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .heavy)) }
+                        Text("UPDATE ALL (\(updatable.count))").font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(0.5)
+                    }
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(Theme.accent).foregroundStyle(.black).clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(updatingAll || downloading != nil)
+            }
             Spacer(minLength: 6)
             AccountChip()
         }
@@ -776,14 +924,21 @@ private struct SourceDetailScreen: View {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 8) {
                         Text(app.name).font(.system(size: 19, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
-                        if g.versions.count > 1 {
+                        if hasUpdate(g) {
+                            Text("UPDATE").font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(0.5)
+                                .padding(.horizontal, 6).padding(.vertical, 3)
+                                .background(Color.orange.opacity(0.18)).foregroundStyle(.orange)
+                                .overlay(Capsule().stroke(Color.orange.opacity(0.5), lineWidth: 1)).clipShape(Capsule())
+                        } else if g.versions.count > 1 {
                             Text("\(g.versions.count) versions").font(.system(size: 10, weight: .heavy, design: .monospaced)).kerning(0.5)
                                 .padding(.horizontal, 6).padding(.vertical, 3)
                                 .background(Theme.accent.opacity(0.16)).foregroundStyle(Theme.accent).clipShape(Capsule())
                         }
                     }
-                    Text("\(app.sizeMB) | \(app.version) | \(app.subtitle)")
-                        .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                    HStack(spacing: 0) {
+                        Text("\(app.sizeMB) | \(app.version) | ").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                        RemoteStyledName(name: app.subtitle, base: 13, weight: .medium, fallback: Theme.subtle)
+                    }
                     if !app.description.isEmpty {
                         Text(app.description).font(.system(size: 13)).foregroundStyle(Theme.subtle).lineLimit(1)
                     }

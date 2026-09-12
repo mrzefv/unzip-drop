@@ -79,12 +79,12 @@ struct AccountDropdown: View {
     @State private var password = ""
     @State private var confirmLogout = false
 
-    private let dailyQuota = 25
     private var role: UserRole { staff.isStaff ? staff.role : account.role }
     private var signsToday: Int {
         let cal = Calendar.current
-        return signed.entries.filter { cal.isDateInToday($0.signedAt) }.count
+        return max(account.signsToday, signed.entries.filter { cal.isDateInToday($0.signedAt) }.count)
     }
+    private var signsTotal: Int { max(account.signsTotal, signed.entries.count) }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -95,7 +95,7 @@ struct AccountDropdown: View {
         }
         .frame(width: 292)
         .background(Theme.bg)
-        .task { await account.refreshProfile() }
+        .task { await account.refreshProfile(); await account.refreshSignCounts() }
     }
 
     // MARK: Guest — YOUR MDID · SIGN QUOTA · sign in / register
@@ -105,7 +105,7 @@ struct AccountDropdown: View {
             VStack(alignment: .leading, spacing: 12) {
                 label("touchid", "Your MDID")
                 Text(staff.mdid).font(.system(size: 17, weight: .bold, design: .monospaced)).foregroundStyle(Theme.accent)
-                label("chart.bar.xaxis", "Sign quota")
+                label("chart.bar.xaxis", "Signs")
                 quotaBar
             }
             .padding(14)
@@ -147,15 +147,13 @@ struct AccountDropdown: View {
     }
 
     private var quotaBar: some View {
-        HStack(spacing: 12) {
-            GeometryReader { g in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.08))
-                    Capsule().fill(Theme.accent).frame(width: g.size.width * min(1, CGFloat(signsToday) / CGFloat(dailyQuota)))
-                }
-            }
-            .frame(height: 6)
-            Text("\(signsToday)/\(dailyQuota) today").font(.system(size: 13, weight: .medium, design: .monospaced)).foregroundStyle(Theme.subtle)
+        HStack(spacing: 14) {
+            Text("\(signsToday)").font(.system(size: 22, weight: .heavy, design: .rounded)).foregroundStyle(Theme.accent)
+            Text("today").font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Theme.subtle)
+            Rectangle().fill(Theme.stroke).frame(width: 1, height: 22)
+            Text("\(signsTotal)").font(.system(size: 22, weight: .heavy, design: .rounded)).foregroundStyle(.orange)
+            Text("total").font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Theme.subtle)
+            Spacer()
         }
     }
 
@@ -172,6 +170,7 @@ struct AccountDropdown: View {
                 VStack(alignment: .leading, spacing: 3) {
                     StyledUsername(name: account.username ?? "", style: account.style, base: 16)
                     Text(staff.mdid).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(Theme.subtle)
+                    BadgeRow(badges: account.style.badges, size: 8)
                 }
                 Spacer()
                 HStack(spacing: 5) {
@@ -203,7 +202,7 @@ struct AccountDropdown: View {
                 divider
                 stat("1", "Devices", Theme.accent)
                 divider
-                stat("\(signed.entries.count)", "Signs total", .orange)
+                stat("\(signsTotal)", "Signs total", .orange)
             }
             .padding(.vertical, 12)
             Divider().overlay(Theme.stroke)

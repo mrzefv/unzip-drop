@@ -14,6 +14,16 @@ struct UserStyle: Equatable, Sendable {
     var gifURL: String = ""
     var fontName: String = ""      // "" = system; else a PostScript/family name from `fonts`
     var sizeStep: Int = 2          // 1 S · 2 M · 3 L · 4 XL
+    var badges: [String] = []      // server-assigned: founder, verified, dev, top_signer, og, supporter
+
+    static let badgeMeta: [String: (title: String, icon: String, color: Color)] = [
+        "founder":    ("FOUNDER",    "crown.fill",            Color(red: 1.0, green: 0.84, blue: 0.0)),
+        "verified":   ("VERIFIED",   "checkmark.seal.fill",   Color(red: 0.2, green: 0.6, blue: 1.0)),
+        "dev":        ("DEV",        "hammer.fill",           Color(red: 0.2, green: 0.85, blue: 0.75)),
+        "top_signer": ("TOP SIGNER", "signature",             Color(red: 1.0, green: 0.55, blue: 0.1)),
+        "og":         ("OG",         "flame.fill",            Color(red: 1.0, green: 0.27, blue: 0.23)),
+        "supporter":  ("SUPPORTER",  "heart.fill",            Color(red: 1.0, green: 0.4, blue: 0.7)),
+    ]
 
     /// Fonts that ship on iOS (no bundling needed). Label → font name ("" = system).
     static let fonts: [(label: String, name: String)] = [
@@ -51,19 +61,121 @@ struct UserStyle: Equatable, Sendable {
         fontName = (json?["font"] as? String) ?? ""
         let st = (json?["size"] as? Int) ?? Int((json?["size"] as? String) ?? "") ?? 2
         sizeStep = min(max(st, 1), 4)
+        badges = (json?["badges"] as? [String]) ?? []
     }
     static func load() -> UserStyle {
         guard let d = UserDefaults.standard.dictionary(forKey: key) else { return .none }
         return UserStyle(json: d)
     }
     func save() {
-        UserDefaults.standard.set(["color": colorHex, "rainbow": rainbow, "gif": gifURL, "font": fontName, "size": sizeStep], forKey: Self.key)
+        UserDefaults.standard.set(["color": colorHex, "rainbow": rainbow, "gif": gifURL, "font": fontName, "size": sizeStep, "badges": badges], forKey: Self.key)
     }
 
     var color: Color? { colorHex.count == 7 ? Color(hex: String(colorHex.dropFirst())) : nil }
     var hasGIF: Bool { URL(string: gifURL) != nil && !gifURL.isEmpty }
 
     static let presets = ["#FF453A", "#FF9F0A", "#FFD60A", "#30D158", "#2ED9C3", "#64D2FF", "#0A84FF", "#BF5AF2", "#FF66B2", "#FFFFFF"]
+}
+
+// MARK: - Badges
+
+struct BadgeRow: View {
+    let badges: [String]
+    var size: CGFloat = 9
+    var body: some View {
+        if !badges.isEmpty {
+            HStack(spacing: 5) {
+                ForEach(badges, id: \.self) { b in
+                    if let m = UserStyle.badgeMeta[b] {
+                        HStack(spacing: 3) {
+                            Image(systemName: m.icon).font(.system(size: size, weight: .bold))
+                            Text(m.title).font(.system(size: size, weight: .heavy, design: .monospaced)).kerning(0.6)
+                        }
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .foregroundStyle(m.color)
+                        .background(m.color.opacity(0.16))
+                        .overlay(Capsule().stroke(m.color.opacity(0.5), lineWidth: 1))
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Other users' styles (public lookup, batched + cached)
+
+@MainActor
+final class RemoteStyleCache: ObservableObject {
+    static let shared = RemoteStyleCache()
+    struct Entry: Sendable { let style: UserStyle; let role: UserRole; let badges: [String] }
+    @Published private(set) var entries: [String: Entry] = [:]   // key: lowercased username
+    private var misses: Set<String> = []
+    private var pending: Set<String> = []
+    private var flushTask: Task<Void, Never>?
+
+    func entry(_ username: String) -> Entry? { entries[username.lowercased()] }
+
+    /// Looks like something that could be a registered username.
+    nonisolated static func plausible(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        return t.count >= 3 && t.count <= 32 && t.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || $0 == "_" || $0 == "." }
+    }
+
+    /// Queue a lookup; requests are batched (up to 50) and flushed after 150 ms.
+    func request(_ username: String) {
+        let k = username.lowercased()
+        guard Self.plausible(username), entries[k] == nil, !misses.contains(k), !pending.contains(k) else { return }
+        pending.insert(k)
+        flushTask?.cancel()
+        flushTask = Task { try? await Task.sleep(nanoseconds: 150_000_000); await flush() }
+    }
+
+    private func flush() async {
+        let batch = Array(pending.prefix(50)); batch.forEach { pending.remove($0) }
+        guard !batch.isEmpty else { return }
+        var comps = URLComponents(string: ZefvAccount.defaultBase + "style.php")!
+        comps.queryItems = [URLQueryItem(name: "usernames", value: batch.joined(separator: ","))]
+        guard let url = comps.url else { return }
+        var req = URLRequest(url: url); req.timeoutInterval = 12
+        req.setValue(ServerConfig.certSourceToken, forHTTPHeaderField: "X-OTA-Token")
+        guard let (d, _) = try? await URLSession.shared.data(for: req),
+              let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { batch.forEach { misses.insert($0) }; return }
+        var found: Set<String> = []
+        for (name, v) in obj {
+            guard let dict = v as? [String: Any] else { continue }
+            var st = UserStyle(json: dict["style"] as? [String: Any])
+            st.badges = (dict["badges"] as? [String]) ?? []
+            let role = UserRole(rawValue: (dict["role"] as? String) ?? "member") ?? .member
+            entries[name.lowercased()] = Entry(style: st, role: role, badges: st.badges)
+            found.insert(name.lowercased())
+        }
+        for k in batch where !found.contains(k) { misses.insert(k) }
+        if !pending.isEmpty { await flush() }
+    }
+}
+
+/// A username that may belong to a registered user: renders their style/badges if so, plain text otherwise.
+struct RemoteStyledName: View {
+    let name: String
+    var base: CGFloat = 13
+    var weight: Font.Weight = .medium
+    var fallback: Color = Theme.subtle
+    var showBadges: Bool = false
+    @ObservedObject private var cache = RemoteStyleCache.shared
+
+    var body: some View {
+        let e = cache.entry(name)
+        HStack(spacing: 6) {
+            if let e {
+                StyledUsername(name: name, style: e.style, base: base, weight: weight, fallback: fallback)
+                if showBadges { BadgeRow(badges: e.badges, size: 8) }
+            } else {
+                Text(name).font(.system(size: base, weight: weight)).foregroundStyle(fallback).lineLimit(1)
+            }
+        }
+        .onAppear { cache.request(name) }
+    }
 }
 
 // MARK: - Styled username
@@ -136,7 +248,10 @@ struct AnimatedImageView: UIViewRepresentable {
                 let data: Data
                 if let cached = GIFCache.shared.data(for: url) { data = cached }
                 else {
-                    guard let (d, _) = try? await URLSession.shared.data(from: url) else { return }
+                    // Hard cap: a hostile GIF URL must not be able to eat someone's RAM. 8 MB, checked on headers and bytes.
+                    guard let (d, r) = try? await URLSession.shared.data(from: url),
+                          (r.expectedContentLength <= 0 || r.expectedContentLength <= 8 * 1024 * 1024),
+                          d.count <= 8 * 1024 * 1024 else { return }
                     GIFCache.shared.store(d, for: url); data = d
                 }
                 let decoded = await Task.detached(priority: .userInitiated) { Self.decode(data) }.value

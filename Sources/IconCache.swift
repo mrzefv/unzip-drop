@@ -40,7 +40,7 @@ final class IconCache: @unchecked Sendable {
             return nil
         }
         defer { inflight.lock(); loading.remove(url); inflight.unlock() }
-        guard let (data, _) = try? await session.data(from: url) else { return nil }
+        guard let (data, _) = try? await session.data(from: url), data.count <= 8 * 1024 * 1024 else { return nil }
         let img = await Task.detached(priority: .utility) { Self.decode(data, maxPixel: maxPixel) }.value
         if let img { mem.setObject(img, forKey: url as NSURL, cost: Int(img.size.width * img.size.height * 4)) }
         return img

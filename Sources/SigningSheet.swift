@@ -816,10 +816,13 @@ struct SigningSheet: View {
          o.parallelSigning ? (effectiveParallelSigning ? "Parallel signing" : "Parallel signing (auto-disabled: dylibs)") : nil].compactMap { $0 }
     }
     private var effectiveParallelSigning: Bool {
-        o.parallelSigning && dylibs.isEmpty && !ipaTooLargeForParallel
+        o.parallelSigning && dylibs.isEmpty && !parallelSigningBlockedBySize
     }
-    private var ipaTooLargeForParallel: Bool {
-        guard let n = try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int64 else { return false }
+    private var ipaSizeForParallel: Int64? {
+        try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int64
+    }
+    private var parallelSigningBlockedBySize: Bool {
+        guard let n = ipaSizeForParallel else { return true }
         return n > Signer.parallelSigningMaxIPABytes
     }
     private var parallelSigningNote: String {
@@ -829,7 +832,10 @@ struct SigningSheet: View {
         if !dylibs.isEmpty {
             return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because dylib injection is selected"
         }
-        if ipaTooLargeForParallel {
+        guard let ipaSizeForParallel else {
+            return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because the IPA size could not be determined safely"
+        }
+        if ipaSizeForParallel > Signer.parallelSigningMaxIPABytes {
             let limit = ByteCountFormatter.string(fromByteCount: Signer.parallelSigningMaxIPABytes, countStyle: .file)
             return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because this IPA exceeds the \(limit) safety cap"
         }

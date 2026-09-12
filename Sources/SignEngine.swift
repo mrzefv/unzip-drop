@@ -223,8 +223,8 @@ nonisolated struct SignOptions: Sendable {
     var disableBackgroundModes = false  // strip UIBackgroundModes (Info.plist)
 
     var skipEmbeddedProvision = false
-    var surgicalMode = false            // opt-in faster prep path; SigningSheet leaves it off by default
-    var parallelSigning = false         // opt-in zsign DAG parallelism; still forced off when injecting dylibs
+    var surgicalMode = true             // engine default; SigningSheet overrides to opt-in
+    var parallelSigning = true          // engine default; SigningSheet overrides to opt-in and zsign still disables it for guarded cases
 
     static let none = SignOptions()
 
@@ -251,8 +251,11 @@ nonisolated enum Signer {
             onLog?(">>> Parallel signing disabled: dylib injection selected.")
             return false
         }
-        let ipaSize = (try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int64) ?? 0
-        guard ipaSize == 0 || ipaSize <= parallelSigningMaxIPABytes else {
+        guard let ipaSize = (try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int64) else {
+            onLog?(">>> Parallel signing disabled: couldn't determine IPA size safely.")
+            return false
+        }
+        guard ipaSize <= parallelSigningMaxIPABytes else {
             let actual = ByteCountFormatter.string(fromByteCount: ipaSize, countStyle: .file)
             let limit = ByteCountFormatter.string(fromByteCount: parallelSigningMaxIPABytes, countStyle: .file)
             onLog?(">>> Parallel signing disabled: \(actual) IPA exceeds the \(limit) safety cap.")

@@ -2128,14 +2128,18 @@ struct SigningTerminalView: View {
                         .padding(.horizontal, 2)
                     VStack(alignment: .leading, spacing: 3) {
                         ForEach(Array(lines.enumerated()), id: \.offset) { _, raw in
-                            Text(raw)
-                                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                                .foregroundStyle(color(for: raw))
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .lineSpacing(2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 1)
+                            let normalized = normalizedLogLine(raw)
+                            let success = isSuccessLine(normalized)
+                            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                                if success {
+                                    Text("✓")
+                                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                        .foregroundStyle(.white)
+                                        .accessibilityLabel("Success")
+                                }
+                                logLineText(raw: raw, success: success)
+                            }
+                            .padding(.vertical, 1)
                         }
                     }
                     if !done { TerminalCursor(color: accent) }
@@ -2155,18 +2159,18 @@ struct SigningTerminalView: View {
 
     private var categoryStack: some View {
         VStack(spacing: 10) {
-            categoryCard("App Info", icon: "app.badge.fill", tint: blue, rows: appInfoRows)
-            categoryCard("App Binary", icon: "cpu.fill", tint: .cyan, rows: binaryRows, empty: "No binary activity yet")
-            categoryCard("Frameworks", icon: "shippingbox.fill", tint: accent, rows: frameworkRows, empty: "No framework activity yet")
-            categoryCard("Entitlements", icon: "checkmark.shield.fill", tint: green, rows: entitlementRows, empty: "No entitlement changes yet")
-            categoryCard("CodeResources", icon: "doc.badge.gearshape.fill", tint: .purple, rows: codeResourcesRows, empty: "No CodeResources activity yet")
+            categoryCard("App Info", icon: "app.badge.fill", rows: appInfoRows)
+            categoryCard("App Binary", icon: "cpu.fill", rows: binaryRows, empty: "No binary activity yet")
+            categoryCard("Frameworks", icon: "shippingbox.fill", rows: frameworkRows, empty: "No framework activity yet")
+            categoryCard("Entitlements", icon: "checkmark.shield.fill", rows: entitlementRows, empty: "No entitlement changes yet")
+            categoryCard("CodeResources", icon: "doc.badge.gearshape.fill", rows: codeResourcesRows, empty: "No CodeResources activity yet")
         }
     }
 
-    private func categoryCard(_ title: String, icon: String, tint: Color, rows: [String], empty: String? = nil) -> some View {
+    private func categoryCard(_ title: String, icon: String, rows: [String], empty: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Image(systemName: icon).foregroundStyle(tint).font(.system(size: 15, weight: .semibold))
+                Image(systemName: icon).foregroundStyle(.white.opacity(0.9)).font(.system(size: 15, weight: .semibold))
                 Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                 Spacer()
                 Text("\(rows.count)").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.white.opacity(0.45))
@@ -2189,9 +2193,9 @@ struct SigningTerminalView: View {
             }
         }
         .padding(12)
-        .background(Color.white.opacity(0.05))
+        .background(Color.white.opacity(0.03))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(tint.opacity(0.35), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
     }
 
     // Download · branding · Install
@@ -2204,15 +2208,19 @@ struct SigningTerminalView: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "arrow.down.circle").font(.system(size: 26))
-                        Text("Download").font(.system(size: 13, weight: .semibold))
+                        Text("Download").font(.system(size: 13, weight: .semibold, design: .monospaced))
                     }
-                    .foregroundStyle(blue).frame(maxWidth: .infinity)
+                    .foregroundStyle(result == nil ? Color.white.opacity(0.35) : .white.opacity(0.9)).frame(maxWidth: .infinity)
                 }
                 .disabled(result == nil)
 
                 VStack(spacing: 2) {
-                    Text("ᴍʀZefv").font(.system(size: 14, weight: .bold)).foregroundStyle(accent)
-                    Text("Powered by DELvEK.NET").font(.system(size: 9, weight: .semibold)).foregroundStyle(blue)
+                    Text("MRZefV")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.92))
+                    Text("Powered by DELvEK.NET")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.55))
                 }
                 .frame(maxWidth: .infinity)
 
@@ -2222,9 +2230,9 @@ struct SigningTerminalView: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "signature").font(.system(size: 26))
-                        Text(result == nil ? "Sign IPA" : "Install").font(.system(size: 13, weight: .semibold))
+                        Text(result == nil ? "Sign IPA" : "Install").font(.system(size: 13, weight: .semibold, design: .monospaced))
                     }
-                    .foregroundStyle(result == nil ? Color.white.opacity(0.35) : blue).frame(maxWidth: .infinity)
+                    .foregroundStyle(result == nil ? Color.white.opacity(0.35) : .white.opacity(0.9)).frame(maxWidth: .infinity)
                 }
                 .disabled(result == nil)
             }
@@ -2241,18 +2249,45 @@ struct SigningTerminalView: View {
         .frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: side * 0.22, style: .continuous))
     }
 
-    // mSign's log coloring
-    private func color(for raw: String) -> Color {
+    // Monochrome terminal coloring with contrast for key states
+    private func color(for raw: String, success: Bool) -> Color {
         let l = raw.lowercased()
-        if raw.contains("Signed OK") || raw.contains("Done.") || raw.contains("ready to install") { return Color(red: 0.2, green: 1.0, blue: 0.45) }
-        if raw.contains("Success!") { return Color(red: 0.35, green: 0.95, blue: 0.45) }
+        if success { return .white }
         if l.contains("error") || l.contains("failed") || raw.contains("❌") { return .red.opacity(0.9) }
-        if raw.contains("No Enough CodeSignature") || raw.contains("Realloc") { return accent }
-        if raw.contains("SignFolder:") { return Color(red: 0.45, green: 0.85, blue: 1.0) }
-        if raw.contains("SignFile:") { return .white.opacity(0.6) }
-        if raw.contains("Packaging") || raw.contains("Packaged") { return Color(red: 0.55, green: 0.75, blue: 1.0) }
-        if raw.hasPrefix(">>>") { return .white.opacity(0.85) }
-        return .white.opacity(0.75)
+        if raw.contains("SignFolder:") || raw.contains("SignFile:") || raw.contains("Packaging") || raw.contains("Packaged") {
+            return .white.opacity(0.92)
+        }
+        if raw.hasPrefix(">>>") { return .white.opacity(0.82) }
+        return .white.opacity(0.62)
+    }
+
+    private func logLineText(raw: String, success: Bool) -> some View {
+        let base = Text(raw)
+            .font(.system(size: 11, weight: .regular, design: .monospaced))
+            .foregroundStyle(color(for: raw, success: success))
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .lineSpacing(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        return base
+    }
+
+    private func normalizedLogLine(_ raw: String) -> String {
+        raw
+            .replacingOccurrences(of: "\u{001B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\[[0-9;]*m", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func isSuccessLine(_ normalized: String) -> Bool {
+        let patterns = [
+            "(?:>>>\\s*)?signed ok!?\\b",
+            "(?:>>>\\s*)?success!\\b",
+            "(?:>>>\\s*)?done\\.(\\s|$)",
+            "(?:>>>\\s*)?ready to install\\b"
+        ]
+        return patterns.contains { normalized.range(of: $0, options: [.regularExpression, .caseInsensitive]) != nil }
     }
 
     private var appInfoRows: [String] {

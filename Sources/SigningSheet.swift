@@ -142,6 +142,7 @@ struct SigningSheet: View {
                 appName: name, bundle: bundle, icon: iconPNG ?? meta.iconPNG,
                 lines: $log, done: Binding(get: { !signing && (result != nil || error != nil) }, set: { _ in }),
                 result: result, error: error,
+                certName: certs.active?.name ?? "", sizeBefore: sourceSizeBytes, sizeAfter: lastSizeBytes,
                 onInstall: { _ in showInstallPrompt = true },
                 onExit: { showTerminal = false }
             )
@@ -1102,6 +1103,8 @@ struct SigningSheet: View {
         guard let material = try? certs.activeMaterial() else { error = "No active certificate."; return }
         signing = true; error = nil; result = nil
         log = [">>> Signing \(name) with \(material.name)"]
+        log.append(contentsOf: preflightLines(material))
+        log.append(contentsOf: warningLines())
         let url = ipaURL
         let options = buildOptionsValue()
         let logSink = SigningLogSink { line in log.append(line) }
@@ -1117,6 +1120,7 @@ struct SigningSheet: View {
             lastEntitlements = outcome.entitlements
             lastSizeBytes = outcome.sizeBytes
             let entry = try SignedStore.shared.add(outcome: outcome, icon: iconPNG ?? meta.iconPNG, certName: material.name)
+            log.append(contentsOf: postSignLines(outcome.entitlements, entry: entry))
             result = entry
             onSigned(entry)
             ZefvAccount.shared.recordSign()
@@ -1127,6 +1131,70 @@ struct SigningSheet: View {
             UINotificationFeedbackGenerator().notificationOccurred(.error)
         }
         signing = false
+    }
+
+    private var sourceSizeBytes: Int64 {
+        (try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int64) ?? 0
+    }
+
+    /// Pre-flight step: cert/profile · MachO encryption · dylib injection list.
+    private func preflightLines(_ material: CertMaterial) -> [String] {
+        var out = ["§step|checkmark.shield|Pre-flight"]
+        let info = CertificateStore.profileInfo(material.provision)
+        var certLine = material.name
+        if let e = info.expires {
+            let days = Int(e.timeIntervalSinceNow / 86400)
+            certLine += days < 0 ? " · EXPIRED" : " · \(days) days left"
+        }
+        if !info.udids.isEmpty { certLine += " · \(info.udids.count) device\(info.udids.count == 1 ? "" : "s")" }
+        if let t = info.team, !t.isEmpty { certLine += " · \(t)" }
+        out.append("§child|Cert: \(certLine)")
+        if let m = macho {
+            let arch = m.arm64?.arch ?? m.slices.first?.arch ?? "?"
+            out.append("§child|MachO: \(m.encrypted ? "FairPlay encrypted (cryptid \(m.arm64?.cryptID ?? 1))" : "decrypted") · \(arch)\(m.isFat ? " · fat" : "")\(m.arm64?.minOS.map { " · iOS \($0)+" } ?? "")")
+        } else if let machoError {
+            out.append("§child|MachO: not inspected (\(machoError))")
+        }
+        if dylibs.isEmpty { out.append("§child|Inject: none") }
+        else { for d in dylibs { out.append("§child|Inject: \(d.url.lastPathComponent)\(d.weak || o.weakDylibReferences ? " (weak)" : "")") } }
+        if !machoDylibs.isEmpty { out.append("§child|Existing load commands: \(machoDylibs.count)") }
+        out.append("§done|Pre-flight")
+        return out
+    }
+
+    /// Warnings step: every destructive option that's switched on.
+    private func warningLines() -> [String] {
+        var w: [String] = []
+        if o.stripExtensions { w.append("PlugIns stripped — app extensions removed") }
+        if o.stripWatch { w.append("Watch app removed") }
+        if o.stripSCInfo { w.append("SC_Info removed") }
+        if o.stripPrivacy { w.append("Privacy manifests removed") }
+        if o.stripBitcode { w.append("Bitcode stripped") }
+        if o.stripDebugSymbols { w.append("Debug symbols stripped") }
+        if o.removeExistingLibraries { w.append("Existing dylib load commands removed") }
+        if o.thinToArm64Only { w.append("Thinned to arm64 only") }
+        if o.randomizeBundleID { w.append("Bundle ID randomized — installs side-by-side") }
+        if o.disableATS { w.append("ATS disabled — cleartext HTTP allowed") }
+        if o.removeURLSchemes { w.append("URL schemes removed") }
+        if o.forceResign { w.append("Force re-sign — existing signatures discarded") }
+        return w.map { "§warn|" + $0 }
+    }
+
+    /// Post-sign steps: key entitlements + OTA manifest readiness.
+    private func postSignLines(_ ents: [String: String], entry: SignedEntry) -> [String] {
+        var out = ["§step|checkmark.shield.fill|Inspect entitlements"]
+        let keys = ["application-identifier", "com.apple.developer.team-identifier", "get-task-allow", "aps-environment",
+                    "com.apple.security.application-groups", "keychain-access-groups", "com.apple.developer.associated-domains",
+                    "platform-application", "com.apple.security.app-sandbox"]
+        var n = 0
+        for k in keys { if let v = ents[k] { out.append("§child|\(k.replacingOccurrences(of: "com.apple.developer.", with: "").replacingOccurrences(of: "com.apple.security.", with: "")) = \(v)"); n += 1 } }
+        if n == 0 { out.append("§child|\(ents.count) entitlement\(ents.count == 1 ? "" : "s")") }
+        out.append("§done|Inspect entitlements (\(ents.count))")
+        out.append("§step|antenna.radiowaves.left.and.right|Generate OTA manifest")
+        out.append("§child|host \(ServerConfig.installHost) · \(entry.name).ipa")
+        out.append("§child|\(entry.bundleID) · v\(entry.version)")
+        out.append("§done|OTA manifest ready")
+        return out
     }
 
     private func install(_ r: SignedEntry) async {
@@ -2069,8 +2137,15 @@ struct SigningTerminalView: View {
     @Binding var done: Bool
     let result: SignedEntry?
     let error: String?
+    var certName: String = ""
+    var sizeBefore: Int64 = 0
+    var sizeAfter: Int64 = 0
     var onInstall: (SignedEntry) -> Void
     var onExit: () -> Void
+
+    @State private var lineTimes: [Date] = []
+    @State private var showAll = false
+    @State private var lastStepCount = 0
 
     private let accent = Color(red: 1.0, green: 0.60, blue: 0.10)   // MRZefv orange
     private let blue = Color(red: 0.25, green: 0.55, blue: 1.0)
@@ -2119,21 +2194,48 @@ struct SigningTerminalView: View {
 
     private var logScroll: some View {
         ScrollViewReader { proxy in
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(steps) { st in AgentStepRow(step: st) }
-                    if !done {
-                        AgentWorkingRow(text: "mSign is working…")
-                            .padding(.top, 6)
-                    } else if error == nil {
-                        AgentStepRow(step: AgentStep(icon: "checkmark.circle", title: "Ready to install", kind: .done))
+            TimelineView(.periodic(from: .now, by: done ? 3600 : 0.25)) { tl in
+                let now = tl.date
+                let steps = AgentStepParser.parse(lines, times: lineTimes, error: error, finished: done)
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Show all / collapse finished
+                        HStack {
+                            Spacer()
+                            Button { withAnimation(.easeInOut(duration: 0.15)) { showAll.toggle() } } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: showAll ? "rectangle.compress.vertical" : "rectangle.expand.vertical").font(.system(size: 10, weight: .bold))
+                                    Text(showAll ? "Collapse finished" : "Show all").font(.system(size: 11, weight: .bold))
+                                }
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Color.white.opacity(0.06)).foregroundStyle(.white.opacity(0.7)).clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.bottom, 4)
+
+                        ForEach(Array(steps.enumerated()), id: \.element.id) { i, st in
+                            AgentStepRow(step: st, isActive: !done && i == steps.count - 1, forceExpanded: showAll || done && i == steps.count - 1, now: now)
+                        }
+                        if !done {
+                            AgentWorkingRow(text: "mSign is working…", since: lineTimes.first, now: now).padding(.top, 6)
+                        } else if error == nil {
+                            AgentStepRow(step: AgentStep(icon: "checkmark.circle", title: "Ready to install", kind: .done, startedAt: lineTimes.last, endedAt: lineTimes.last))
+                            AgentSummaryCard(summary: summary(steps)).padding(.top, 10)
+                        }
+                        Color.clear.frame(height: done ? 100 : 24).id("BOTTOM")
                     }
-                    Color.clear.frame(height: done ? 100 : 24).id("BOTTOM")
+                    .padding(.horizontal, 16).padding(.top, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.horizontal, 16).padding(.top, 14)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .onChange(of: steps.count) { n in
+                    if n > lastStepCount, lastStepCount > 0 { UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.6) }
+                    lastStepCount = n
+                }
             }
+            .onAppear { syncTimes() }
             .onChange(of: lines.count) { _ in
+                syncTimes()
                 withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo("BOTTOM", anchor: .bottom) }
             }
             .onChange(of: done) { _ in
@@ -2143,9 +2245,21 @@ struct SigningTerminalView: View {
         .background(Color.black)
     }
 
-    // MARK: - Log → agent-style steps (Copilot timeline: icon · title · indented children · chevron)
+    /// One timestamp per log line, recorded as lines arrive (drives per-step timings).
+    private func syncTimes() {
+        while lineTimes.count < lines.count { lineTimes.append(Date()) }
+        if lineTimes.count > lines.count { lineTimes = Array(lineTimes.prefix(lines.count)) }
+    }
 
-    private var steps: [AgentStep] { AgentStepParser.parse(lines, error: error) }
+    private func summary(_ steps: [AgentStep]) -> AgentSummary {
+        let files = steps.filter { $0.title.hasPrefix("Sign ") && $0.title.hasSuffix("file") || $0.title.hasPrefix("Sign ") && $0.title.hasSuffix("files") }
+            .reduce(0) { $0 + $1.children.count }
+        let warnings = steps.first { $0.kind == .warn }?.children.count ?? 0
+        let total = (lineTimes.first).map { (lineTimes.last ?? $0).timeIntervalSince($0) } ?? 0
+        return AgentSummary(app: appName, bundle: bundle, version: result?.version ?? "—", cert: certName,
+                            sizeBefore: sizeBefore, sizeAfter: sizeAfter, filesSigned: files + (steps.contains { $0.title == "Sign app bundle" } ? 1 : 0),
+                            duration: total, warnings: warnings, mdid: StaffGate.shared.mdid)
+    }
 
     private var bottomBar: some View {
         VStack(spacing: 0) {
@@ -2197,185 +2311,6 @@ struct SigningTerminalView: View {
         .frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: side * 0.22, style: .continuous))
     }
 
-}
-
-// MARK: - Agent timeline model + views
-
-struct AgentStep: Identifiable {
-    enum Kind { case running, done, error, info }
-    let id = UUID()
-    var icon: String
-    var title: String
-    var kind: Kind = .done
-    var children: [String] = []
-}
-
-nonisolated enum AgentStepParser {
-    static func clean(_ raw: String) -> String {
-        raw.replacingOccurrences(of: "\u{001B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
-           .replacingOccurrences(of: "\\[[0-9;]*m", with: "", options: .regularExpression)
-           .replacingOccurrences(of: "^>>>\\s*", with: "", options: .regularExpression)
-           .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    static func parse(_ raw: [String], error: String?) -> [AgentStep] {
-        var out: [AgentStep] = []
-        var files: [String] = []          // pending SignFile children
-        var lastRealloc: String?          // "realloc 1904 → 6404"
-        func flushFiles() {
-            guard !files.isEmpty else { return }
-            out.append(AgentStep(icon: "doc.badge.gearshape", title: files.count == 1 ? "Sign 1 file" : "Sign \(files.count) files", children: files))
-            files = []
-        }
-        func attach(_ line: String) {
-            if !files.isEmpty { files[files.count - 1] = files[files.count - 1] + "  · " + line; return }
-            if !out.isEmpty { out[out.count - 1].children.append(line) }
-            else { out.append(AgentStep(icon: "text.alignleft", title: "Log", children: [line])) }
-        }
-
-        for r in raw {
-            let l = clean(r); if l.isEmpty { continue }
-            let low = l.lowercased()
-
-            if low.hasPrefix("signing ") && low.contains(" with ") {
-                flushFiles(); out.append(AgentStep(icon: "signature", title: l)); continue }
-            if low.hasPrefix("extracting ipa") {
-                flushFiles(); out.append(AgentStep(icon: "archivebox", title: "Extract IPA")); continue }
-            if low.hasPrefix("signing:") {
-                flushFiles()
-                let path = String(l.dropFirst("signing:".count)).trimmingCharacters(in: .whitespaces).replacingOccurrences(of: " ...", with: "")
-                out.append(AgentStep(icon: "doc.text.magnifyingglass", title: "Read app bundle", children: [path])); continue }
-            if low.hasPrefix("signfile:") {
-                files.append(String(l.dropFirst("signfile:".count)).trimmingCharacters(in: .whitespaces)); lastRealloc = nil; continue }
-            if low.hasPrefix("signfolder:") {
-                flushFiles()
-                let name = String(l.dropFirst("signfolder:".count)).trimmingCharacters(in: .whitespaces)
-                out.append(AgentStep(icon: "folder.badge.gearshape", title: "Sign app bundle", children: [name])); continue }
-            if low.contains("no enough codesignature space") {
-                if let m = l.range(of: "Now: ", options: .caseInsensitive) {
-                    lastRealloc = "realloc " + String(l[m.upperBound...]).replacingOccurrences(of: ", Need: ", with: " → ")
-                }
-                continue }
-            if low.contains("realloc codesignature") { continue }
-            if low == "success!" { attach(lastRealloc ?? "ok"); lastRealloc = nil; continue }
-            if low.hasPrefix("signed ok") {
-                flushFiles()
-                var t = ""
-                if let o = l.firstIndex(of: "(") { t = String(l[o...]).split(separator: ",").first.map(String.init) ?? "" }
-                out.append(AgentStep(icon: "checkmark.seal", title: "Signed OK" + (t.isEmpty ? "" : " " + t + ")"), kind: .done)); continue }
-            if low.hasPrefix("packaging signed ipa") {
-                flushFiles(); out.append(AgentStep(icon: "shippingbox", title: "Package signed IPA")); continue }
-            if low.hasPrefix("done") {
-                flushFiles()
-                if let last = out.last, last.title.hasPrefix("Signed OK") || last.title == "Package signed IPA" { continue }
-                out.append(AgentStep(icon: "checkmark.circle", title: "Done", kind: .done)); continue }
-            if low.contains("error") || low.contains("failed") || l.contains("❌") {
-                flushFiles(); out.append(AgentStep(icon: "xmark.octagon", title: l, kind: .error)); continue }
-            // BundleName / BundleVersion / AppName / BundleId / TeamId / SubjectCN / ReadCache / Exclude … → children of the current step
-            attach(l)
-        }
-        flushFiles()
-        if let error, out.last?.kind != .error {
-            out.append(AgentStep(icon: "xmark.octagon", title: error, kind: .error))
-        }
-        return out
-    }
-}
-
-/// One timeline entry: leading icon, title, then children hanging off a hairline, each with a chevron.
-struct AgentStepRow: View {
-    let step: AgentStep
-    @State private var collapsed = false
-
-    private var tint: Color {
-        step.kind == .error ? Color(red: 1, green: 0.35, blue: 0.3) : .white.opacity(0.85)
-    }
-    private var iconColor: Color {
-        switch step.kind {
-        case .error:   return Color(red: 1, green: 0.35, blue: 0.3)
-        case .running: return Color(red: 1.0, green: 0.72, blue: 0.20)
-        default:       return .white.opacity(0.65)
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                guard !step.children.isEmpty else { return }
-                withAnimation(.easeInOut(duration: 0.15)) { collapsed.toggle() }
-            } label: {
-                HStack(spacing: 14) {
-                    Image(systemName: step.icon)
-                        .font(.system(size: 17, weight: .regular))
-                        .foregroundStyle(iconColor)
-                        .frame(width: 22, height: 22)
-                    Text(step.title)
-                        .font(.system(size: 16, weight: .regular))
-                        .foregroundStyle(tint)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    Spacer(minLength: 0)
-                }
-                .padding(.vertical, 9)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if !step.children.isEmpty && !collapsed {
-                HStack(alignment: .top, spacing: 0) {
-                    Rectangle().fill(Color.white.opacity(0.14)).frame(width: 1)
-                        .padding(.leading, 11)
-                        .padding(.bottom, 6)
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(step.children.enumerated()), id: \.offset) { _, c in
-                            HStack(spacing: 8) {
-                                Text(c)
-                                    .font(.system(size: 14, weight: .regular, design: .monospaced))
-                                    .foregroundStyle(.white.opacity(0.55))
-                                    .lineLimit(1).truncationMode(.middle)
-                                    .textSelection(.enabled)
-                                Spacer(minLength: 0)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.35))
-                            }
-                            .padding(.vertical, 7)
-                        }
-                    }
-                    .padding(.leading, 24)
-                }
-                .padding(.bottom, 4)
-            }
-        }
-    }
-}
-
-/// "⠿ mSign is working…" — the Copilot working row with a drifting shimmer.
-struct AgentWorkingRow: View {
-    let text: String
-    @State private var phase: CGFloat = -1
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "circle.grid.3x3.fill")
-                .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(.white.opacity(0.7))
-                .frame(width: 22, height: 22)
-            Text(text)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(.white.opacity(0.55))
-                .overlay {
-                    GeometryReader { g in
-                        LinearGradient(colors: [.clear, .white.opacity(0.9), .clear], startPoint: .leading, endPoint: .trailing)
-                            .frame(width: g.size.width * 0.6)
-                            .offset(x: phase * g.size.width)
-                            .mask(Text(text).font(.system(size: 17, weight: .medium)))
-                    }
-                }
-                .onAppear { withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) { phase = 1 } }
-            Spacer()
-        }
-        .padding(.vertical, 9)
-    }
 }
 
 struct TerminalCursor: View {

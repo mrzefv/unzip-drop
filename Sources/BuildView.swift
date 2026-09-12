@@ -406,27 +406,42 @@ private struct RunDetailScreen: View {
         return "Queued"
     }
 
+    /// Same timeline row as the signing terminal — one visual language for every multi-step job.
     private func stepRow(_ step: WorkflowStep) -> some View {
-        let done = step.status == "completed"
-        let active = step.status == "in_progress"
-        return HStack(spacing: 14) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.subtle)
-                .rotationEffect(.degrees(expanded.contains(step.number) ? 90 : 0))
-                .opacity(done || active ? 1 : 0)
-            StatusGlyph(status: step.status, conclusion: step.conclusion, size: 20)
-            Text(step.name)
-                .font(.system(size: 16)).foregroundStyle(done || active ? Theme.text : Theme.subtle)
-                .lineLimit(1)
-            Spacer()
-            Text(fmtDuration(step.startedAt, step.completedAt, now: now))
-                .font(.system(size: 14, design: .monospaced)).foregroundStyle(Theme.subtle)
-        }
-        .padding(.horizontal, 16).padding(.vertical, 13)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if expanded.contains(step.number) { expanded.remove(step.number) } else { expanded.insert(step.number) }
-        }
+        let kind: AgentStep.Kind = {
+            if step.status == "in_progress" { return .running }
+            if step.status == "completed" {
+                switch step.conclusion ?? "" {
+                case "success": return .done
+                case "failure", "cancelled", "timed_out": return .error
+                case "skipped": return .info
+                default: return .done
+                }
+            }
+            return .info
+        }()
+        let icon: String = {
+            switch kind {
+            case .running: return "circle.dotted"
+            case .error:   return "xmark.octagon"
+            case .info:    return "circle"
+            default:
+                let n = step.name.lowercased()
+                if n.contains("checkout") { return "arrow.down.doc" }
+                if n.contains("build") || n.contains("xcodebuild") { return "hammer" }
+                if n.contains("upload") || n.contains("artifact") { return "shippingbox" }
+                if n.contains("setup") || n.contains("install") { return "wrench.and.screwdriver" }
+                if n.contains("sign") { return "signature" }
+                return "checkmark.circle"
+            }
+        }()
+        var st = AgentStep(icon: icon, title: step.name, kind: kind)
+        st.startedAt = step.startedAt
+        st.endedAt = step.completedAt
+        st.trailing = fmtDuration(step.startedAt, step.completedAt, now: now)
+        return AgentStepRow(step: st, isActive: kind == .running, now: now)
+            .padding(.horizontal, 16)
+            .opacity(kind == .info ? 0.55 : 1)
     }
 
     // MARK: Artifacts

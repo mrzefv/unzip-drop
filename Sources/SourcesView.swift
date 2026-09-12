@@ -22,7 +22,7 @@ nonisolated struct RepoSource: Codable, Identifiable, Equatable, Hashable, Senda
     var lastFetched: Date?
 }
 
-nonisolated struct SourceApp: Identifiable, Equatable, Sendable {
+nonisolated struct SourceApp: Identifiable, Equatable, Sendable, Codable {
     let id: String
     let name: String
     let bundle: String
@@ -53,13 +53,13 @@ nonisolated struct SourceApp: Identifiable, Equatable, Sendable {
         a.updatedDate = Self.isoFull.date(from: updated) ?? Self.isoDate.date(from: updated)
         a.searchKey = (name + " " + subtitle + " " + bundle).lowercased()
         a.sizeValue = Double(sizeMB.split(separator: " ").first ?? "") ?? 0
-        a.category = AppCategory.infer(explicit: categoryRaw, text: name + " " + subtitle + " " + description.prefix(400))
+        a.category = AppCategory.infer(explicit: categoryRaw, text: name + " " + subtitle + " " + description)
         return a
     }
 }
 
 /// Browse categories (chip row under News). Repo "category" wins; otherwise inferred from text.
-nonisolated enum AppCategory: String, CaseIterable, Sendable {
+nonisolated enum AppCategory: String, CaseIterable, Sendable, Codable {
     case all, tools, paid, jailbreak, media, social, car, emu
     var title: String { rawValue.uppercased() }
     var icon: String {
@@ -88,7 +88,11 @@ nonisolated enum AppCategory: String, CaseIterable, Sendable {
             if e.contains("paid") { return .paid }
         }
         let t = text.lowercased()
-        if t.contains("paid app") || t.contains("paid version") || t.contains("✓paid") || t.contains("✓ paid") { return .paid }
+        // Normalise so "「✓PAID APP」", "PAID  APP", "Paid-App", fullwidth spaces etc. all collapse to "paidapp".
+        let squashed = t.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map { Character($0) }
+        let flat = String(squashed)
+        if flat.contains("paidapp") || flat.contains("paidversion") || flat.contains("paidunlock") || flat.contains("paidfree")
+            || t.contains("✓paid") || t.contains("✓ paid") || t.contains("$ paid") || t.contains("paid ipa") { return .paid }
         for (cat, keys) in rules where keys.contains(where: { t.contains($0) }) { return cat }
         return .tools
     }
@@ -118,7 +122,7 @@ nonisolated struct AppGroup: Identifiable, Equatable, Sendable {
     }
 }
 
-nonisolated struct SourceNews: Identifiable, Equatable, Sendable {
+nonisolated struct SourceNews: Identifiable, Equatable, Sendable, Codable {
     let id: String
     let title: String
     let caption: String
@@ -147,9 +151,9 @@ nonisolated enum RepoParser {
         let featuredNews: [SourceNews]
         let groupIndex: [String: Int]
 
-        init(name: String, iconURL: URL?, description: String?, author: String?, apps rawApps: [SourceApp], news: [SourceNews]) {
+        init(name: String, iconURL: URL?, description: String?, author: String?, apps rawApps: [SourceApp], news: [SourceNews], alreadyPrecomputed: Bool = false) {
             self.name = name; self.iconURL = iconURL; self.description = description; self.author = author
-            let apps = rawApps.map { $0.precomputed() }
+            let apps = alreadyPrecomputed ? rawApps : rawApps.map { $0.precomputed() }
             self.apps = apps
             self.news = news
             let g = AppGroup.group(apps)
@@ -164,6 +168,17 @@ nonisolated enum RepoParser {
                 return SourceNews(id: "feat-" + a.bundle, title: a.name, caption: a.description, imageURL: a.screenshots.first ?? a.iconURL,
                                   url: nil, appID: a.bundle, date: a.updated, tintHex: a.tintHex)
             } : news
+        }
+
+        // MARK: persisted index (apps carry their precomputed fields, so decode = no parsing, no formatters)
+        private struct Index: Codable { let v: Int; let name: String; let iconURL: URL?; let description: String?; let author: String?; let apps: [SourceApp]; let news: [SourceNews] }
+        static let indexVersion = 4
+        func indexData() -> Data? {
+            try? JSONEncoder().encode(Index(v: Self.indexVersion, name: name, iconURL: iconURL, description: description, author: author, apps: apps, news: news))
+        }
+        static func fromIndex(_ data: Data) -> ParsedRepo? {
+            guard let i = try? JSONDecoder().decode(Index.self, from: data), i.v == indexVersion else { return nil }
+            return ParsedRepo(name: i.name, iconURL: i.iconURL, description: i.description, author: i.author, apps: i.apps, news: i.news, alreadyPrecomputed: true)
         }
 
         func sorted(_ key: String) -> [AppGroup] {
@@ -282,6 +297,19 @@ final class SourceStore: ObservableObject {
     private nonisolated static func rawCacheURL(_ id: String) -> URL {
         rawCacheDir.appendingPathComponent(id.replacingOccurrences(of: "/", with: "_") + ".json")
     }
+    private nonisolated static func indexCacheURL(_ id: String) -> URL {
+        rawCacheDir.appendingPathComponent(id.replacingOccurrences(of: "/", with: "_") + ".index.json")
+    }
+    private nonisolated static func persistIndex(_ parsed: RepoParser.ParsedRepo, for source: RepoSource) {
+        Task.detached(priority: .utility) {
+            if let d = parsed.indexData() { try? d.write(to: indexCacheURL(source.id), options: .atomic) }
+        }
+    }
+    /// Warm the first 40 icons (by "recently updated") so the list paints with no placeholders.
+    private nonisolated static func prefetchIcons(_ parsed: RepoParser.ParsedRepo) {
+        let urls = parsed.byUpdated.prefix(40).compactMap { $0.latest.iconURL }
+        Task.detached(priority: .utility) { await IconCache.shared.prefetch(Array(urls)) }
+    }
 
     private nonisolated static func requestParsedRepo(for source: RepoSource) async throws -> RepoParser.ParsedRepo {
         var req = URLRequest(url: source.url); req.cachePolicy = .reloadIgnoringLocalCacheData
@@ -292,14 +320,24 @@ final class SourceStore: ObservableObject {
         }
         let parsed = try await Task.detached(priority: .userInitiated) { try RepoParser.parse(data: data, fallbackName: source.name) }.value
         try? data.write(to: rawCacheURL(source.id), options: .atomic)
+        persistIndex(parsed, for: source)
+        prefetchIcons(parsed)
         return parsed
     }
 
     /// Parse the on-disk copy (if any) off the main thread.
     private nonisolated static func cachedParsedRepoFromDisk(for source: RepoSource) async -> RepoParser.ParsedRepo? {
-        let url = rawCacheURL(source.id)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return await Task.detached(priority: .userInitiated) { try? RepoParser.parse(data: data, fallbackName: source.name) }.value
+        // 1. Persisted index: plain Codable decode, no dialect parsing, no date formatters. ~tens of ms for 10k apps.
+        if let d = try? Data(contentsOf: indexCacheURL(source.id)),
+           let p = await Task.detached(priority: .userInitiated, operation: { RepoParser.ParsedRepo.fromIndex(d) }).value {
+            prefetchIcons(p)
+            return p
+        }
+        // 2. Raw repo.json fallback (older cache or index version bump) — parse, then write the index for next time.
+        guard let data = try? Data(contentsOf: rawCacheURL(source.id)) else { return nil }
+        let p = await Task.detached(priority: .userInitiated) { try? RepoParser.parse(data: data, fallbackName: source.name) }.value
+        if let p { persistIndex(p, for: source); prefetchIcons(p) }
+        return p
     }
 
     /// Call once at launch: hydrate every source from disk (instant), then refresh from the network in the background.
@@ -358,7 +396,11 @@ final class SourceStore: ObservableObject {
             save()
         }
     }
-    func remove(_ s: RepoSource) { sources.removeAll { $0.id == s.id }; parsedCache.removeValue(forKey: s.id); save() }
+    func remove(_ s: RepoSource) {
+        sources.removeAll { $0.id == s.id }; parsedCache.removeValue(forKey: s.id); save()
+        try? FileManager.default.removeItem(at: Self.rawCacheURL(s.id))
+        try? FileManager.default.removeItem(at: Self.indexCacheURL(s.id))
+    }
     func move(from: IndexSet, to: Int) { sources.move(fromOffsets: from, toOffset: to); save() }
     private func save() { try? JSONEncoder().encode(sources).write(to: fileURL) }
     func cachedParsedRepo(for source: RepoSource) -> RepoParser.ParsedRepo? { parsedCache[source.id] }
@@ -543,7 +585,7 @@ private struct SourceDetailScreen: View {
             if parsed != nil {
                 categoryRow
                     .listRowBackground(Color.black).listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 14, leading: 0, bottom: 18, trailing: 0))
+                    .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 14, trailing: 0))
             }
             ForEach(visibleGroups) { g in
                 appRow(g)
@@ -645,19 +687,21 @@ private struct SourceDetailScreen: View {
         .background(Color.white.opacity(0.04))
     }
 
-    // Category chips (ALL · TOOLS · PAID · JAILBREAK · MEDIA · SOCIAL · CAR · EMU), two rows
+    // Category chips (ALL · TOOLS · PAID · JAILBREAK / MEDIA · SOCIAL · CAR · EMU) — compact, single-line, two rows
     private var categoryRow: some View {
         let cats = AppCategory.allCases
         let rows = [Array(cats.prefix(4)), Array(cats.dropFirst(4))]
-        return VStack(spacing: 8) {
+        return VStack(spacing: 6) {
             ForEach(0..<rows.count, id: \.self) { r in
-                HStack(spacing: 8) {
-                    ForEach(rows[r], id: \.self) { c in categoryChip(c) }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(rows[r], id: \.self) { c in categoryChip(c) }
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minWidth: UIScreen.main.bounds.width, alignment: .center)
                 }
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 16)
     }
 
     private func categoryChip(_ c: AppCategory) -> some View {
@@ -666,15 +710,17 @@ private struct SourceDetailScreen: View {
             UISelectionFeedbackGenerator().selectionChanged()
             withAnimation(.easeInOut(duration: 0.15)) { category = c }
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: c.icon).font(.system(size: 13, weight: .bold))
-                Text(c.title).font(.system(size: 13, weight: .heavy, design: .monospaced)).kerning(0.5)
+            HStack(spacing: 5) {
+                Image(systemName: c.icon).font(.system(size: 11, weight: .bold))
+                Text(c.title).font(.system(size: 12, weight: .heavy, design: .monospaced)).kerning(0.4)
             }
+            .lineLimit(1)
+            .fixedSize()
             .foregroundStyle(on ? Theme.accent : Theme.text)
-            .padding(.horizontal, 14).padding(.vertical, 10)
+            .padding(.horizontal, 11).padding(.vertical, 7)
             .background(on ? Theme.accent.opacity(0.18) : Color.white.opacity(0.05))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(on ? Theme.accent.opacity(0.7) : Theme.stroke, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(on ? Theme.accent.opacity(0.7) : Theme.stroke, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
     }
@@ -817,19 +863,8 @@ struct SourceIcon: View {
     let url: URL?
     let side: CGFloat
     var fallback: String = ""
-    var body: some View {
-        AsyncImage(url: url) { phase in
-            if let img = phase.image { img.resizable().scaledToFill() }
-            else {
-                ZStack {
-                    RoundedRectangle(cornerRadius: side * 0.22, style: .continuous).fill(Theme.accent.opacity(0.15))
-                    Text(String(fallback.prefix(1)).uppercased()).font(.system(size: side * 0.42, weight: .bold)).foregroundStyle(Theme.accent)
-                }
-            }
-        }
-        .frame(width: side, height: side)
-        .clipShape(RoundedRectangle(cornerRadius: side * 0.22, style: .continuous))
-    }
+    var body: some View { CachedIcon(url: url, side: side, fallback: fallback) }
+}
 }
 
 // MARK: - Inbox + downloader (progress-reporting)

@@ -23,16 +23,17 @@ enum ThemeBackground: String, CaseIterable, Identifiable {
 final class AppTheme: ObservableObject {
     static let shared = AppTheme()
     private let d = UserDefaults.standard
+    private var suppressRevisionBump = false
 
     /// Bumped on every change; RootView re-ids the tab content so every view re-reads Theme.*.
     @Published private(set) var revision = 0
     @Published var panelShown = false
 
-    @Published var accentHex: String { didSet { d.set(accentHex, forKey: Theme.keyAccent); bump() } }
-    @Published var isDark: Bool { didSet { d.set(isDark, forKey: Theme.keyDark); bump() } }
-    @Published var primaryHex: String { didSet { d.set(primaryHex, forKey: Theme.keyPrimary); bump() } }
-    @Published var secondaryHex: String { didSet { d.set(secondaryHex, forKey: Theme.keySecondary); bump() } }
-    @Published var background: ThemeBackground { didSet { d.set(background.rawValue, forKey: Theme.keyBackground); bump() } }
+    @Published var accentHex: String { didSet { d.set(accentHex, forKey: Theme.keyAccent); bumpIfNeeded() } }
+    @Published var isDark: Bool { didSet { d.set(isDark, forKey: Theme.keyDark); bumpIfNeeded() } }
+    @Published var primaryHex: String { didSet { d.set(primaryHex, forKey: Theme.keyPrimary); bumpIfNeeded() } }
+    @Published var secondaryHex: String { didSet { d.set(secondaryHex, forKey: Theme.keySecondary); bumpIfNeeded() } }
+    @Published var background: ThemeBackground { didSet { d.set(background.rawValue, forKey: Theme.keyBackground); bumpIfNeeded() } }
 
     private init() {
         accentHex  = Theme.accentHex
@@ -41,6 +42,7 @@ final class AppTheme: ObservableObject {
         secondaryHex = d.string(forKey: Theme.keySecondary) ?? (Theme.isDark ? "0B1016" : "FFF3E8")
         background = ThemeBackground(rawValue: d.string(forKey: Theme.keyBackground) ?? "") ?? .particles
     }
+    private func bumpIfNeeded() { if !suppressRevisionBump { bump() } }
     private func bump() { revision &+= 1 }
 
     var accent: Color { Color(hex: accentHex) }
@@ -57,25 +59,31 @@ final class AppTheme: ObservableObject {
     var activeGradient: ParticleGradient? {
         ParticleGradient.gradients.first {
             $0.colors.count >= 2 &&
-            ($0.colors[0].hexString() ?? "") == primaryHex.uppercased() &&
-            ($0.colors[1].hexString() ?? "") == secondaryHex.uppercased()
+            ($0.colors[0].hexString() ?? "").uppercased() == primaryHex.uppercased() &&
+            ($0.colors[1].hexString() ?? "").uppercased() == secondaryHex.uppercased()
         }
     }
 
     static let presets: [String] = ["2ED9C3", "FFA773", "64CCFF", "B366FF", "FF66B2", "90EE90", "FFCC00", "FF453A", "FFFFFF"]
 
     func apply(_ preset: ThemePreset) {
-        primaryHex = preset.primaryHex
-        secondaryHex = preset.secondaryHex
-        accentHex = preset.accentHex
+        applyTheme(primaryHex: preset.primaryHex, secondaryHex: preset.secondaryHex, accentHex: preset.accentHex)
     }
 
     func apply(_ gradient: ParticleGradient) {
         guard gradient.colors.count >= 2,
               let first = gradient.colors[0].hexString(),
               let second = gradient.colors[1].hexString() else { return }
-        primaryHex = first
-        secondaryHex = second
+        applyTheme(primaryHex: first, secondaryHex: second)
+    }
+
+    private func applyTheme(primaryHex: String? = nil, secondaryHex: String? = nil, accentHex: String? = nil) {
+        suppressRevisionBump = true
+        if let primaryHex { self.primaryHex = primaryHex }
+        if let secondaryHex { self.secondaryHex = secondaryHex }
+        if let accentHex { self.accentHex = accentHex }
+        suppressRevisionBump = false
+        bump()
     }
 }
 

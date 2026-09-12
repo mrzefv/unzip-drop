@@ -16,15 +16,6 @@ func xmlPlistData(fromMobileProvision data: Data) -> Data? {
     return data.subdata(in: start.lowerBound..<end.upperBound)
 }
 
-/// Parallel DAG signing toggle — pushed into the zsign engine via ZSignSetParallel.
-/// Independent frameworks/dylibs/plugins are signed concurrently (dispatch_apply),
-/// which is the main speedup on multi-framework apps. Default ON.
-nonisolated enum ParallelSigning {
-    private static let key = "uzd_parallel_signing"
-    static var isEnabled: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
-    static func set(_ v: Bool) { UserDefaults.standard.set(v, forKey: key) }
-}
-
 enum ZsignError: Error, LocalizedError {
     case fileNotFound(String)
     case signingFailed(code: Int32)
@@ -233,7 +224,7 @@ nonisolated struct SignOptions: Sendable {
 
     var skipEmbeddedProvision = false
     var surgicalMode = true
-    var parallelSigning = ParallelSigning.isEnabled
+    var parallelSigning = false
 
     static let none = SignOptions()
 

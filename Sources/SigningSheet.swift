@@ -621,7 +621,7 @@ struct SigningSheet: View {
                 toggle("SHA256 only", $o.sha256Only, note: "Skip SHA1 hashes — modern iOS verifies faster, ~5% smaller CodeResources")
                 toggle("Force re-sign", $o.forceResign, note: "Override existing signatures even on already-signed IPAs")
                 toggle("Surgical mode", $o.surgicalMode, note: "Use the faster signing prep path when possible")
-                toggle("Parallel signing", $o.parallelSigning, note: "Signs sibling frameworks and binaries concurrently inside zsign — auto-disabled if injecting dylibs")
+                toggle("Parallel signing", $o.parallelSigning, note: parallelSigningNote)
             }
             group("strip", "scissors", "Strip Content", badge: "\(stripCount)") {
                 toggle("Strip PlugIns", $o.stripExtensions, note: "Remove app extensions (Today widget, share sheet) — required for some sideloads")
@@ -813,7 +813,13 @@ struct SigningSheet: View {
          o.stripWatch ? "Remove Watch apps" : nil,
          o.thinToArm64Only ? "Thin to arm64" : nil, o.sha256Only ? "SHA256 only" : nil,
          o.surgicalMode ? "Surgical mode" : nil,
-         o.parallelSigning ? (dylibs.isEmpty ? "Parallel signing" : "Parallel signing (auto-disabled: dylibs)") : nil].compactMap { $0 }
+         o.parallelSigning ? (effectiveParallelSigning ? "Parallel signing" : "Parallel signing (auto-disabled: dylibs)") : nil].compactMap { $0 }
+    }
+    private var effectiveParallelSigning: Bool { o.parallelSigning && dylibs.isEmpty }
+    private var parallelSigningNote: String {
+        effectiveParallelSigning
+        ? "Signs sibling frameworks and binaries concurrently inside zsign"
+        : "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because dylib injection is selected"
     }
     private var plistList: [String] {
         [o.forceMinIOS12 ? "MinimumOSVersion 12.0" : nil, o.removeURLSchemes ? "Hide URL schemes" : nil,

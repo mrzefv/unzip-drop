@@ -819,14 +819,14 @@ struct SigningSheet: View {
     }
     private var generalSummary: [String] {
         let parallelDecision = currentParallelSigningDecision
-        [o.removeExistingLibraries ? "Remove existing libraries" : nil,
-         o.randomizeBundleID ? "Randomize bundle ID" : nil,
-         o.disableATS ? "Disable ATS" : nil,
-         o.weakDylibReferences ? "Weak dylib references" : nil,
-         o.stripWatch ? "Remove Watch apps" : nil,
-         o.thinToArm64Only ? "Thin to arm64" : nil, o.sha256Only ? "SHA256 only" : nil,
-         o.surgicalMode ? "Surgical mode" : nil,
-         o.parallelSigning ? parallelDecision.statusText : nil].compactMap { $0 }
+        return [o.removeExistingLibraries ? "Remove existing libraries" : nil,
+                o.randomizeBundleID ? "Randomize bundle ID" : nil,
+                o.disableATS ? "Disable ATS" : nil,
+                o.weakDylibReferences ? "Weak dylib references" : nil,
+                o.stripWatch ? "Remove Watch apps" : nil,
+                o.thinToArm64Only ? "Thin to arm64" : nil, o.sha256Only ? "SHA256 only" : nil,
+                o.surgicalMode ? "Surgical mode" : nil,
+                o.parallelSigning ? parallelDecision.statusText : nil].compactMap { $0 }
     }
     private var currentParallelSigningDecision: Signer.ParallelSigningDecision {
         var preview = SignOptions()

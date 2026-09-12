@@ -18,6 +18,7 @@ struct AccountScreen: View {
     @State private var newPass = ""
     @State private var toast: String?
     @State private var confirmSignOut = false
+    @State private var backgroundGif: AnimatedImage?
 
     private var role: UserRole { staff.isStaff ? staff.role : account.role }
     private var usernameColor: Color { Color(hex: account.usernameCustomization.colorHex) }
@@ -32,6 +33,14 @@ struct AccountScreen: View {
         .preferredColorScheme(AppTheme.shared.colorScheme)
         .task { await account.refreshProfile(); email = account.email ?? "" }
         .onChange(of: account.email) { email = $0 ?? "" }
+        .onAppear {
+            if backgroundGif == nil { backgroundGif = AnimatedImage.named("onboarding") }
+        }
+        .onChange(of: reduceMotion) {
+            if $0, account.usernameCustomization.gifBackground {
+                _ = account.updateUsernameCustomization(gifBackground: false)
+            }
+        }
     }
 
     // MARK: - Profile
@@ -47,7 +56,7 @@ struct AccountScreen: View {
                                 .fill(usernameColor.opacity(0.15))
                                 .frame(height: 170)
                                 .allowsHitTesting(false)
-                        } else if let gif = AnimatedImage.named("onboarding") {
+                        } else if let gif = backgroundGif {
                             gif
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 170)
@@ -123,7 +132,6 @@ struct AccountScreen: View {
                         .pickerStyle(.menu)
                         Toggle("Animated GIF background", isOn: gifBackgroundBinding)
                             .foregroundStyle(Theme.text)
-                            .disabled(reduceMotion)
                         if reduceMotion {
                             Text("Animated backgrounds are disabled when Reduce Motion is enabled.")
                                 .font(.caption)
@@ -239,7 +247,10 @@ struct AccountScreen: View {
     private var gifBackgroundBinding: Binding<Bool> {
         Binding(
             get: { account.usernameCustomization.gifBackground },
-            set: { value in _ = account.updateUsernameCustomization(gifBackground: value) }
+            set: { value in
+                let next = reduceMotion ? false : value
+                _ = account.updateUsernameCustomization(gifBackground: next)
+            }
         )
     }
 

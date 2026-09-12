@@ -2194,7 +2194,7 @@ struct SigningTerminalView: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
     }
 
-    // Download · branding · Install
+    // Download · status · Install
     private var bottomBar: some View {
         VStack(spacing: 0) {
             Divider().overlay(Color.white.opacity(0.10))

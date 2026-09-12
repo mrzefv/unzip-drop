@@ -1002,7 +1002,7 @@ struct SigningSheet: View {
         s.skipIPad = o.skipIPad
         s.disableATS = o.disableATS
         s.surgicalMode = o.surgicalMode
-        s.parallelSigning = effectiveParallelSigning
+        s.parallelSigning = o.parallelSigning
         s.stripSCInfo = o.stripSCInfo
         s.stripPrivacyManifests = o.stripPrivacy
         s.stripWatchApps = o.stripWatch
@@ -1083,9 +1083,6 @@ struct SigningSheet: View {
 
     private func sign() async {
         showTerminal = true
-        // Let the terminal cover paint before the blocking zsign work begins — no lag.
-        await Task.yield()
-        try? await Task.sleep(nanoseconds: 60_000_000)   // ~1 frame
         if let r = macho, r.encrypted {
             error = "This IPA is still FairPlay-encrypted (cryptid ≠ 0). Signing it will produce an app that crashes at launch. Get a decrypted IPA first."
             UINotificationFeedbackGenerator().notificationOccurred(.error)
@@ -1094,9 +1091,17 @@ struct SigningSheet: View {
         guard let material = try? certs.activeMaterial() else { error = "No active certificate."; return }
         signing = true; error = nil; result = nil
         log = [">>> Signing \(name) with \(material.name)"]
+        let url = ipaURL
+        let options = buildOptionsValue()
         do {
-            let outcome = try await Signer.signDetached(ipaURL: ipaURL, material: material, options: buildOptionsValue(),
-                                                        onLog: { line in Task { @MainActor in log.append(line) } })
+            let outcome = try await Task.detached(priority: .userInitiated) {
+                try await Signer.signDetached(
+                    ipaURL: url,
+                    material: material,
+                    options: options,
+                    onLog: { line in Task { @MainActor in log.append(line) } }
+                )
+            }.value
             lastEntitlements = outcome.entitlements
             lastSizeBytes = outcome.sizeBytes
             let entry = try SignedStore.shared.add(outcome: outcome, icon: iconPNG ?? meta.iconPNG, certName: material.name)

@@ -314,10 +314,6 @@ nonisolated enum Signer {
         ipaURL: URL,
         appURL: URL? = nil
     ) -> Int64? {
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: ipaURL.path),
-           let ipaSize = attrs[.size] as? Int64 {
-            return ipaSize
-        }
         if let appURL {
             return directorySize(appURL)
         }

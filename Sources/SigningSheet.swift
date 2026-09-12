@@ -806,6 +806,7 @@ struct SigningSheet: View {
          o.disableSiri ? "Disable Siri" : nil, o.disableBackgroundModes ? "Disable Background Modes" : nil].compactMap { $0 }
     }
     private var generalSummary: [String] {
+        let parallelDecision = currentParallelSigningDecision
         [o.removeExistingLibraries ? "Remove existing libraries" : nil,
          o.randomizeBundleID ? "Randomize bundle ID" : nil,
          o.disableATS ? "Disable ATS" : nil,
@@ -813,34 +814,17 @@ struct SigningSheet: View {
          o.stripWatch ? "Remove Watch apps" : nil,
          o.thinToArm64Only ? "Thin to arm64" : nil, o.sha256Only ? "SHA256 only" : nil,
          o.surgicalMode ? "Surgical mode" : nil,
-         o.parallelSigning ? (effectiveParallelSigning ? "Parallel signing" : "Parallel signing (auto-disabled: dylibs)") : nil].compactMap { $0 }
+         o.parallelSigning ? parallelDecision.statusText : nil].compactMap { $0 }
     }
-    private var effectiveParallelSigning: Bool {
-        o.parallelSigning && dylibs.isEmpty && !parallelSigningBlockedBySize
+    private var currentParallelSigningDecision: Signer.ParallelSigningDecision {
+        var preview = SignOptions()
+        preview.surgicalMode = o.surgicalMode
+        preview.parallelSigning = o.parallelSigning
+        preview.injectDylibs = dylibs.map { ($0.url, o.weakDylibReferences ? true : $0.weak) }
+        return Signer.parallelSigningDecision(ipaURL: ipaURL, options: preview)
     }
-    private var ipaSizeForParallel: Int64? {
-        try? FileManager.default.attributesOfItem(atPath: ipaURL.path)[.size] as? Int64
-    }
-    private var parallelSigningBlockedBySize: Bool {
-        guard let n = ipaSizeForParallel else { return true }
-        return n > Signer.parallelSigningMaxIPABytes
-    }
-    private var parallelSigningNote: String {
-        if effectiveParallelSigning {
-            return "Signs sibling frameworks and binaries concurrently inside zsign"
-        }
-        if !dylibs.isEmpty {
-            return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because dylib injection is selected"
-        }
-        guard let ipaSizeForParallel else {
-            return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because the IPA size could not be determined safely"
-        }
-        if ipaSizeForParallel > Signer.parallelSigningMaxIPABytes {
-            let limit = ByteCountFormatter.string(fromByteCount: Signer.parallelSigningMaxIPABytes, countStyle: .file)
-            return "Signs sibling frameworks and binaries concurrently inside zsign — currently auto-disabled because this IPA exceeds the \(limit) safety cap"
-        }
-        return "Signs sibling frameworks and binaries concurrently inside zsign"
-    }
+    private var effectiveParallelSigning: Bool { currentParallelSigningDecision.isEnabled }
+    private var parallelSigningNote: String { currentParallelSigningDecision.noteText }
     private var plistList: [String] {
         [o.forceMinIOS12 ? "MinimumOSVersion 12.0" : nil, o.removeURLSchemes ? "Hide URL schemes" : nil,
          o.disableFileSharing ? "Disable file sharing" : nil,

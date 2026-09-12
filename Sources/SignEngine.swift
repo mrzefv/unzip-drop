@@ -242,6 +242,16 @@ nonisolated struct SignOptions: Sendable {
 nonisolated enum Signer {
     static let parallelSigningMaxIPABytes: Int64 = 500 * 1_024 * 1_024
 
+    actor ZSignExecutionGate {
+        static let shared = ZSignExecutionGate()
+
+        func run<T: Sendable>(parallel: Bool, _ operation: () throws -> T) throws -> T {
+            ZSignSetParallel(parallel)
+            defer { ZSignSetParallel(false) }
+            return try operation()
+        }
+    }
+
     enum ParallelSigningDecision: Equatable {
         case enabled
         case disabledByUser
@@ -252,16 +262,6 @@ nonisolated enum Signer {
         var isEnabled: Bool {
             if case .enabled = self { return true }
             return false
-        }
-
-        actor ZSignExecutionGate {
-            static let shared = ZSignExecutionGate()
-
-            func run<T: Sendable>(parallel: Bool, _ operation: () throws -> T) throws -> T {
-                ZSignSetParallel(parallel)
-                defer { ZSignSetParallel(false) }
-                return try operation()
-            }
         }
 
         var logMessage: String? {

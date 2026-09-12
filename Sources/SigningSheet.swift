@@ -2167,6 +2167,8 @@ struct SigningTerminalView: View {
                 Spacer()
                 Text("\(rows.count)").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.white.opacity(0.45))
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(title), \(rows.count) item\(rows.count == 1 ? "" : "s")")
             if rows.isEmpty {
                 Text(empty ?? "No activity yet")
                     .font(.system(size: 11, design: .monospaced))

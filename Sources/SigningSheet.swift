@@ -12,10 +12,14 @@ import UIKit
 import UniformTypeIdentifiers
 import ZIPFoundation
 
-private actor SigningLogSink {
-    private let onLine: @MainActor (String) -> Void
-    init(onLine: @escaping @MainActor (String) -> Void) { self.onLine = onLine }
-    func append(_ line: String) async { await onLine(line) }
+private final class SigningLogSink: @unchecked Sendable {
+    private let onLine: (String) -> Void
+    init(onLine: @escaping (String) -> Void) { self.onLine = onLine }
+    func append(_ line: String) {
+        DispatchQueue.main.async { [onLine] in
+            onLine(line)
+        }
+    }
 }
 
 struct SigningSheet: View {
@@ -1107,7 +1111,7 @@ struct SigningSheet: View {
                     ipaURL: url,
                     material: material,
                     options: options,
-                    onLog: { line in Task { await logSink.append(line) } }
+                    onLog: { line in logSink.append(line) }
                 )
             }.value
             lastEntitlements = outcome.entitlements

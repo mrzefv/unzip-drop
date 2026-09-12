@@ -187,8 +187,10 @@ final class ZefvAccount: ObservableObject {
     }
 
     private func saveCustomization(_ customization: UsernameCustomization, for username: String) {
-        guard !username.isEmpty, let data = try? JSONEncoder().encode(customization) else { return }
-        UserDefaults.standard.set(data, forKey: customizationKey(for: username))
+        guard !username.isEmpty,
+              let data = try? JSONEncoder().encode(customization),
+              let json = String(data: data, encoding: .utf8) else { return }
+        _ = Keychain.set(customizationKey(for: username), json)
     }
 
     private func loadCustomization(for username: String?) {
@@ -196,7 +198,8 @@ final class ZefvAccount: ObservableObject {
             usernameCustomization = .default
             return
         }
-        guard let data = UserDefaults.standard.data(forKey: customizationKey(for: username)),
+        guard let json = Keychain.get(customizationKey(for: username)),
+              let data = json.data(using: .utf8),
               let customization = try? JSONDecoder().decode(UsernameCustomization.self, from: data) else {
             usernameCustomization = .default
             return
@@ -209,9 +212,11 @@ final class ZefvAccount: ObservableObject {
     }
 
     private static func normalizeHex(_ value: String) -> String? {
-        let hex = value.trimmingCharacters(in: CharacterSet(charactersIn: "#")).uppercased()
-        guard hex.count == 6, Int(hex, radix: 16) != nil else { return nil }
-        return hex
+        let hex = value.hasPrefix("#") ? String(value.dropFirst()) : value
+        guard !hex.contains("#") else { return nil }
+        let normalized = hex.uppercased()
+        guard normalized.count == 6, Int(normalized, radix: 16) != nil else { return nil }
+        return normalized
     }
 
     enum Err: Error { case badURL, server(String)

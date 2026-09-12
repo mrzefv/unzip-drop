@@ -112,7 +112,7 @@ struct AccountScreen: View {
                                 Text(style.title).tag(style)
                             }
                         }
-                        .pickerStyle(.segmented)
+                        .pickerStyle(.menu)
                         Toggle("Animated GIF background", isOn: gifBackgroundBinding)
                             .foregroundStyle(Theme.text)
                     }

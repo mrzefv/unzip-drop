@@ -41,7 +41,7 @@ struct AccountChip: View {
                             .overlay(Circle().stroke(Theme.bg, lineWidth: 1.2))
                     }
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(account.username ?? "").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                        Text(account.username ?? "").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1).fixedSize()
                         Text(role == .member ? "REGISTERED" : role.badgeText)
                             .font(.system(size: 7, weight: .heavy, design: .monospaced)).kerning(0.8).foregroundStyle(Theme.accent)
                     }
@@ -58,8 +58,10 @@ struct AccountChip: View {
             .padding(.leading, 7).padding(.trailing, 7).padding(.vertical, 3)
             .background(Color.white.opacity(0.05)).clipShape(Capsule())
             .contentShape(Capsule())
+            .fixedSize(horizontal: true, vertical: false)   // never truncate the username
         }
         .buttonStyle(.plain)
+        .layoutPriority(1)
         .accessibilityLabel(account.isLoggedIn ? "Account" : "Sign in")
     }
 }

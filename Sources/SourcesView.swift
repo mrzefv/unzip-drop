@@ -455,23 +455,35 @@ private struct SourceDetailScreen: View {
 
     // Header: back · icon + NAME · search · sort
     private var header: some View {
-        HStack(spacing: 12) {
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
+        ZStack {
+            // centered: repo icon + name
+            HStack(spacing: 8) {
+                SourceIcon(url: current.iconURL, side: 24, fallback: current.name)
+                Text(current.name.uppercased()).font(.system(size: 17, weight: .bold)).kerning(0.6).foregroundStyle(Theme.text).lineLimit(1)
             }
-            Spacer()
-            Text("Browse").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
-            Spacer()
-            Button { withAnimation { showSearch.toggle() } } label: {
-                Image(systemName: "magnifyingglass").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
-            }
-            Menu {
-                ForEach(Sort.allCases, id: \.self) { s in Button(s.rawValue) { sort = s } }
-                Divider()
-                Button { Task { await load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                Link(destination: current.url) { Label("Open repo.json", systemImage: "safari") }
-            } label: {
-                Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 20, weight: .medium)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
+            .frame(maxWidth: .infinity).padding(.horizontal, 100)
+            // edges: ‹ Browse … search · sort
+            HStack(spacing: 12) {
+                Button { dismiss() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent)
+                        Text("Browse").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.text).lineLimit(1)
+                    }
+                    .frame(height: 30)
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                Button { withAnimation { showSearch.toggle() } } label: {
+                    Image(systemName: "magnifyingglass").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
+                }
+                Menu {
+                    ForEach(Sort.allCases, id: \.self) { s in Button(s.rawValue) { sort = s } }
+                    Divider()
+                    Button { Task { await load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                    Link(destination: current.url) { Label("Open repo.json", systemImage: "safari") }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 20, weight: .medium)).foregroundStyle(Theme.accent).frame(width: 30, height: 30)
+                }
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -479,10 +491,8 @@ private struct SourceDetailScreen: View {
 
     private var countBar: some View {
         HStack(spacing: 8) {
-            SourceIcon(url: current.iconURL, side: 22, fallback: current.name)
-            Text("\(groups.count.formatted()) Apps").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
-            Text("· \(current.name.uppercased())").font(.system(size: 12, weight: .bold)).kerning(0.5).foregroundStyle(Theme.subtle).lineLimit(1)
-            Spacer()
+            Text("\(groups.count.formatted()) Apps").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
+            Spacer(minLength: 6)
             AccountChip()
         }
         .padding(.horizontal, 16).padding(.vertical, 6)

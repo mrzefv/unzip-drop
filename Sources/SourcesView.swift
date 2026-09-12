@@ -193,6 +193,28 @@ final class SourceStore: ObservableObject {
         }
     }
 
+    private nonisolated static func requestParsedRepo(for source: RepoSource) async throws -> RepoParser.ParsedRepo {
+        var req = URLRequest(url: source.url); req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard (resp as? HTTPURLResponse)?.statusCode ?? 0 < 400 else {
+            throw GitHubError.badConfig("Source returned HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
+        }
+        return try RepoParser.parse(data: data, fallbackName: source.name)
+    }
+
+    private func applyParsedRepo(_ parsed: RepoParser.ParsedRepo, to source: RepoSource) {
+        var updated = source
+        if updated.name.isEmpty || updated.id.hasPrefix("custom-") { updated.name = parsed.name }
+        if updated.iconURL == nil { updated.iconURL = parsed.iconURL }
+        if let desc = parsed.description, !desc.isEmpty, updated.description.isEmpty || updated.id.hasPrefix("custom-") { updated.description = desc }
+        if let author = parsed.author { updated.author = author }
+        updated.appCount = parsed.groups.count
+        updated.lastFetched = Date()
+        parsedCache[source.id] = parsed
+        update(updated)
+    }
+
     func add(_ s: RepoSource) {
         let replacedIDs = sources.filter { $0.url == s.url }.map(\.id)
         replacedIDs.forEach { parsedCache.removeValue(forKey: $0) }
@@ -215,27 +237,20 @@ final class SourceStore: ObservableObject {
 
     /// Fetch + parse a repo.json, cache the parsed result, and update the source metadata.
     func fetch(_ s: RepoSource) async throws -> RepoParser.ParsedRepo {
-        var req = URLRequest(url: s.url); req.cachePolicy = .reloadIgnoringLocalCacheData
-        req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
-        let (d, resp) = try await URLSession.shared.data(for: req)
-        guard (resp as? HTTPURLResponse)?.statusCode ?? 0 < 400 else { throw GitHubError.badConfig("Source returned HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)") }
-        let parsed = try RepoParser.parse(data: d, fallbackName: s.name)
-        var u = s
-        if u.name.isEmpty || u.id.hasPrefix("custom-") { u.name = parsed.name }
-        if u.iconURL == nil { u.iconURL = parsed.iconURL }
-        if let desc = parsed.description, !desc.isEmpty, u.description.isEmpty || u.id.hasPrefix("custom-") { u.description = desc }
-        if let a = parsed.author { u.author = a }
-        u.appCount = parsed.groups.count; u.lastFetched = Date()
-        parsedCache[s.id] = parsed
-        update(u)
+        let parsed = try await Self.requestParsedRepo(for: s)
+        applyParsedRepo(parsed, to: s)
         return parsed
     }
 
     func prefetchSources() async {
         let snapshot = sources.filter { parsedCache[$0.id] == nil }
-        await withTaskGroup(of: Void.self) { group in
+        await withTaskGroup(of: (RepoSource, RepoParser.ParsedRepo?).self) { group in
             for source in snapshot {
-                group.addTask { _ = try? await fetch(source) }
+                group.addTask { (source, try? await Self.requestParsedRepo(for: source)) }
+            }
+            for await (source, parsed) in group {
+                guard let parsed else { continue }
+                applyParsedRepo(parsed, to: source)
             }
         }
     }

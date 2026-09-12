@@ -89,7 +89,7 @@ final class CertificateSearchManager: ObservableObject {
             case .expiryDate:
                 let exp1 = info(for: cert1).expirationDate
                 let exp2 = info(for: cert2).expirationDate
-                result = (exp1 ?? Date.distantFuture) > (exp2 ?? Date.distantFuture)
+                result = (exp1 ?? Date()) > (exp2 ?? Date())
             case .name:
                 result = cert1.name < cert2.name
             case .team:

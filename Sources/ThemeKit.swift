@@ -30,19 +30,53 @@ final class AppTheme: ObservableObject {
 
     @Published var accentHex: String { didSet { d.set(accentHex, forKey: Theme.keyAccent); bump() } }
     @Published var isDark: Bool { didSet { d.set(isDark, forKey: Theme.keyDark); bump() } }
+    @Published var primaryHex: String { didSet { d.set(primaryHex, forKey: Theme.keyPrimary); bump() } }
+    @Published var secondaryHex: String { didSet { d.set(secondaryHex, forKey: Theme.keySecondary); bump() } }
     @Published var background: ThemeBackground { didSet { d.set(background.rawValue, forKey: Theme.keyBackground); bump() } }
 
     private init() {
         accentHex  = Theme.accentHex
         isDark     = Theme.isDark
+        primaryHex = d.string(forKey: Theme.keyPrimary) ?? (Theme.isDark ? "163041" : "CFE8FF")
+        secondaryHex = d.string(forKey: Theme.keySecondary) ?? (Theme.isDark ? "0B1016" : "FFF3E8")
         background = ThemeBackground(rawValue: d.string(forKey: Theme.keyBackground) ?? "") ?? .particles
     }
     private func bump() { revision &+= 1 }
 
     var accent: Color { Color(hex: accentHex) }
+    var primaryColor: Color { Color(hex: primaryHex) }
+    var secondaryColor: Color { Color(hex: secondaryHex) }
     var colorScheme: ColorScheme { isDark ? .dark : .light }
+    var activePreset: ThemePreset? {
+        ThemePreset.presets.first {
+            $0.primaryHex.uppercased() == primaryHex.uppercased() &&
+            $0.secondaryHex.uppercased() == secondaryHex.uppercased() &&
+            $0.accentHex.uppercased() == accentHex.uppercased()
+        }
+    }
+    var activeGradient: ParticleGradient? {
+        ParticleGradient.gradients.first {
+            $0.colors.count >= 2 &&
+            ($0.colors[0].hexString() ?? "") == primaryHex.uppercased() &&
+            ($0.colors[1].hexString() ?? "") == secondaryHex.uppercased()
+        }
+    }
 
     static let presets: [String] = ["2ED9C3", "FFA773", "64CCFF", "B366FF", "FF66B2", "90EE90", "FFCC00", "FF453A", "FFFFFF"]
+
+    func apply(_ preset: ThemePreset) {
+        primaryHex = preset.primaryHex
+        secondaryHex = preset.secondaryHex
+        accentHex = preset.accentHex
+    }
+
+    func apply(_ gradient: ParticleGradient) {
+        guard gradient.colors.count >= 2,
+              let first = gradient.colors[0].hexString(),
+              let second = gradient.colors[1].hexString() else { return }
+        primaryHex = first
+        secondaryHex = second
+    }
 }
 
 // MARK: - Palette button (top bar)
@@ -74,6 +108,20 @@ struct ThemePanel: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            Menu {
+                ForEach(ThemePreset.presets) { preset in
+                    Button { theme.apply(preset) } label: {
+                        Label(preset.name, systemImage: theme.activePreset?.id == preset.id ? "checkmark" : "paintpalette")
+                    }
+                }
+            } label: {
+                row(icon: "paintpalette.fill", swatch: nil, label: "THEME", value: theme.activePreset?.name ?? "Custom") {
+                    Image(systemName: "chevron.down").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.subtle)
+                }
+            }
+            .buttonStyle(.plain)
+            .background(panelCard)
+
             // Accent color
             VStack(spacing: 0) {
                 Button { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showSwatches.toggle() } } label: {
@@ -101,6 +149,20 @@ struct ThemePanel: View {
                     .padding(.horizontal, 14).padding(.bottom, 12)
                 }
             }
+            .background(panelCard)
+
+            Menu {
+                ForEach(ParticleGradient.gradients, id: \.name) { gradient in
+                    Button { theme.apply(gradient) } label: {
+                        Label(gradient.name, systemImage: theme.activeGradient?.name == gradient.name ? "checkmark" : "sparkles")
+                    }
+                }
+            } label: {
+                row(icon: "sparkles", swatch: nil, label: "DYNAMIC COLORS", value: theme.activeGradient?.name ?? "Custom mix") {
+                    Image(systemName: "chevron.down").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.subtle)
+                }
+            }
+            .buttonStyle(.plain)
             .background(panelCard)
 
             // Appearance
@@ -159,6 +221,7 @@ struct ThemePanel: View {
 /// Drifting node network (mSign look) tinted with the accent. Non-interactive.
 struct ParticleBackground: View {
     var accent: Color = Theme.accent
+    var colors: [Color] = [Theme.accent]
     var count: Int = 44
     var linkDistance: CGFloat = 120
 
@@ -191,6 +254,7 @@ struct ParticleBackground: View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
             Canvas { ctx, size in
                 let ns = sim.step(to: tl.date, in: size, count: count)
+                let palette = colors.isEmpty ? [accent] : colors
                 var lines = Path()
                 for i in 0..<ns.count {
                     for j in (i + 1)..<ns.count {
@@ -201,10 +265,11 @@ struct ParticleBackground: View {
                         lines.addLine(to: CGPoint(x: ns[j].x, y: ns[j].y))
                     }
                 }
-                ctx.stroke(lines, with: .color(accent.opacity(0.22)), lineWidth: 0.6)
-                for n in ns {
+                ctx.stroke(lines, with: .color(palette[0].opacity(0.22)), lineWidth: 0.6)
+                for (index, n) in ns.enumerated() {
                     let r: CGFloat = 2.2
-                    ctx.fill(Path(ellipseIn: CGRect(x: n.x - r, y: n.y - r, width: r * 2, height: r * 2)), with: .color(accent.opacity(0.85)))
+                    let color = palette[index % palette.count]
+                    ctx.fill(Path(ellipseIn: CGRect(x: n.x - r, y: n.y - r, width: r * 2, height: r * 2)), with: .color(color.opacity(0.85)))
                 }
             }
         }
@@ -215,17 +280,53 @@ struct ParticleBackground: View {
 
 /// Static hairline grid.
 struct GridBackground: View {
-    var accent: Color = Theme.accent
+    var primary: Color = Theme.accent
+    var secondary: Color = Theme.accent
     var body: some View {
         Canvas { ctx, size in
-            var p = Path()
+            var vertical = Path()
+            var horizontal = Path()
             let step: CGFloat = 28
-            var x: CGFloat = 0; while x <= size.width { p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: size.height)); x += step }
-            var y: CGFloat = 0; while y <= size.height { p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: size.width, y: y)); y += step }
-            ctx.stroke(p, with: .color(accent.opacity(0.07)), lineWidth: 0.5)
+            var x: CGFloat = 0; while x <= size.width { vertical.move(to: CGPoint(x: x, y: 0)); vertical.addLine(to: CGPoint(x: x, y: size.height)); x += step }
+            var y: CGFloat = 0; while y <= size.height { horizontal.move(to: CGPoint(x: 0, y: y)); horizontal.addLine(to: CGPoint(x: size.width, y: y)); y += step }
+            ctx.stroke(vertical, with: .color(primary.opacity(0.08)), lineWidth: 0.5)
+            ctx.stroke(horizontal, with: .color(secondary.opacity(0.07)), lineWidth: 0.5)
         }
         .allowsHitTesting(false)
         .ignoresSafeArea()
+    }
+}
+
+struct AmbientGradientBackground: View {
+    var primary: Color
+    var secondary: Color
+    var accent: Color
+    var isDark: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
+            GeometryReader { proxy in
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                let width = max(proxy.size.width, 1)
+                let height = max(proxy.size.height, 1)
+                ZStack {
+                    glow(color: primary, size: width * 0.95, x: width * (0.18 + 0.06 * sin(t / 6)), y: height * (0.22 + 0.04 * cos(t / 5)))
+                    glow(color: secondary, size: width * 0.9, x: width * (0.82 + 0.05 * cos(t / 7)), y: height * (0.28 + 0.05 * sin(t / 4.5)))
+                    glow(color: accent, size: width, x: width * (0.5 + 0.08 * sin(t / 8)), y: height * (0.84 + 0.04 * cos(t / 6.5)))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .allowsHitTesting(false)
+        .ignoresSafeArea()
+    }
+
+    private func glow(color: Color, size: CGFloat, x: CGFloat, y: CGFloat) -> some View {
+        Circle()
+            .fill(color.opacity(isDark ? 0.22 : 0.16))
+            .frame(width: size, height: size)
+            .blur(radius: size * 0.16)
+            .position(x: x, y: y)
     }
 }
 
@@ -233,10 +334,16 @@ struct GridBackground: View {
 struct ThemeBackgroundLayer: View {
     @ObservedObject private var theme = AppTheme.shared
     var body: some View {
-        switch theme.background {
-        case .particles: ParticleBackground(accent: theme.accent)
-        case .grid:      GridBackground(accent: theme.accent)
-        case .none:      EmptyView()
+        ZStack {
+            AmbientGradientBackground(primary: theme.primaryColor, secondary: theme.secondaryColor, accent: theme.accent, isDark: theme.isDark)
+            switch theme.background {
+            case .particles:
+                ParticleBackground(accent: theme.accent, colors: [theme.accent, theme.primaryColor, theme.secondaryColor])
+            case .grid:
+                GridBackground(primary: theme.primaryColor, secondary: theme.secondaryColor)
+            case .none:
+                EmptyView()
+            }
         }
     }
 }

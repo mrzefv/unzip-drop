@@ -26,8 +26,8 @@ struct ThemePreset: Identifiable {
     
     func apply() {
         Theme.setAccentColor(hex: accentHex)
-        UserDefaults.standard.set(primaryHex, forKey: "theme_primary_hex")
-        UserDefaults.standard.set(secondaryHex, forKey: "theme_secondary_hex")
+        UserDefaults.standard.set(primaryHex, forKey: Theme.keyPrimary)
+        UserDefaults.standard.set(secondaryHex, forKey: Theme.keySecondary)
     }
 }
 

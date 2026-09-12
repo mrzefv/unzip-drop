@@ -10,6 +10,8 @@ nonisolated enum Theme {
     static let keyAccent     = "theme_accent_hex"
     static let keyDark       = "theme_dark"
     static let keyBackground = "theme_background"
+    static let keyPrimary    = "theme_primary_hex"
+    static let keySecondary  = "theme_secondary_hex"
     static let defaultAccent = "2ED9C3"
 
     static var isDark: Bool {

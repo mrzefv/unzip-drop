@@ -38,11 +38,59 @@ nonisolated struct SourceApp: Identifiable, Equatable, Sendable {
     var featured: Bool = false
     var tintHex: String? = nil
 
-    /// Parsed `updated` (ISO date / datetime) for sorting.
-    var updatedDate: Date? {
-        let a = ISO8601DateFormatter(); a.formatOptions = [.withInternetDateTime]
-        let b = ISO8601DateFormatter(); b.formatOptions = [.withFullDate]
-        return a.date(from: updated) ?? b.date(from: updated)
+    // Precomputed once at parse time — never touch formatters or lowercase() in a View body.
+    var updatedDate: Date? = nil
+    var searchKey: String = ""
+    var sizeValue: Double = 0
+    var categoryRaw: String? = nil          // repo-provided "category" if any
+    var category: AppCategory = .tools
+
+    nonisolated(unsafe) private static let isoFull: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f }()
+    nonisolated(unsafe) private static let isoDate: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions = [.withFullDate]; return f }()
+
+    func precomputed() -> SourceApp {
+        var a = self
+        a.updatedDate = Self.isoFull.date(from: updated) ?? Self.isoDate.date(from: updated)
+        a.searchKey = (name + " " + subtitle + " " + bundle).lowercased()
+        a.sizeValue = Double(sizeMB.split(separator: " ").first ?? "") ?? 0
+        a.category = AppCategory.infer(explicit: categoryRaw, text: name + " " + subtitle + " " + description.prefix(400))
+        return a
+    }
+}
+
+/// Browse categories (chip row under News). Repo "category" wins; otherwise inferred from text.
+nonisolated enum AppCategory: String, CaseIterable, Sendable {
+    case all, tools, paid, jailbreak, media, social, car, emu
+    var title: String { rawValue.uppercased() }
+    var icon: String {
+        switch self {
+        case .all: return "app.badge"; case .tools: return "wrench.and.screwdriver.fill"; case .paid: return "dollarsign"
+        case .jailbreak: return "lock.open.fill"; case .media: return "film.stack.fill"; case .social: return "person.3.fill"
+        case .car: return "car.fill"; case .emu: return "gamecontroller.fill"
+        }
+    }
+    private static let rules: [(AppCategory, [String])] = [
+        (.jailbreak, ["jailbreak", "dopamine", "trollstore", "palera", "unc0ver", "checkra", "sileo", "cydia", "rootless", "tweak", "ellekit", "substrate"]),
+        (.emu,       ["emulator", "emu ", "delta", "ppsspp", "dolphin", "retroarch", "provenance", "gba", "nds", "nintendo", "playstation", "ps1", "n64", "snes", "gamecube", "citra", "melon"]),
+        (.car,       ["carplay", "car play", "car ", "vehicle", "obd", "tesla", "dash cam", "waze", "gps", "navigation", "driving", "auto "]),
+        (.social,    ["social", "instagram", "snapchat", "tiktok", "twitter", "reddit", "discord", "telegram", "whatsapp", "messenger", "facebook", "threads", "bereal", "chat"]),
+        (.media,     ["music", "video", "stream", "movie", "netflix", "spotify", "youtube", "audiomack", "soundcloud", "player", "podcast", "tv", "anime", "manga", "photo", "camera", "editor", "vlc"]),
+        (.tools,     ["tool", "utility", "manager", "file", "vpn", "proxy", "terminal", "ssh", "signer", "sign ", "certificate", "inspector", "ipa", "installer", "downloader", "browser", "keyboard", "clean", "backup"]),
+    ]
+    static func infer(explicit: String?, text: String) -> AppCategory {
+        if let e = explicit?.lowercased() {
+            if e.contains("jail") { return .jailbreak }
+            if e.contains("emu") || e.contains("game") { return .emu }
+            if e.contains("car") || e.contains("auto") { return .car }
+            if e.contains("social") || e.contains("messag") { return .social }
+            if e.contains("media") || e.contains("music") || e.contains("video") || e.contains("photo") || e.contains("entertain") { return .media }
+            if e.contains("tool") || e.contains("util") || e.contains("dev") || e.contains("product") { return .tools }
+            if e.contains("paid") { return .paid }
+        }
+        let t = text.lowercased()
+        if t.contains("paid app") || t.contains("paid version") || t.contains("✓paid") || t.contains("✓ paid") { return .paid }
+        for (cat, keys) in rules where keys.contains(where: { t.contains($0) }) { return cat }
+        return .tools
     }
 }
 
@@ -91,7 +139,37 @@ nonisolated enum RepoParser {
         let author: String?
         let apps: [SourceApp]
         let news: [SourceNews]
-        var groups: [AppGroup] { AppGroup.group(apps) }
+        // Built once (off the main thread) so the list, sort and search are free at render time.
+        let groups: [AppGroup]
+        let byUpdated: [AppGroup]
+        let byName: [AppGroup]
+        let bySize: [AppGroup]
+        let featuredNews: [SourceNews]
+        let groupIndex: [String: Int]
+
+        init(name: String, iconURL: URL?, description: String?, author: String?, apps rawApps: [SourceApp], news: [SourceNews]) {
+            self.name = name; self.iconURL = iconURL; self.description = description; self.author = author
+            let apps = rawApps.map { $0.precomputed() }
+            self.apps = apps
+            self.news = news
+            let g = AppGroup.group(apps)
+            groups = g
+            byUpdated = g.sorted { ($0.latest.updatedDate ?? .distantPast) > ($1.latest.updatedDate ?? .distantPast) }
+            byName    = g.sorted { $0.latest.name.localizedCaseInsensitiveCompare($1.latest.name) == .orderedAscending }
+            bySize    = g.sorted { $0.latest.sizeValue > $1.latest.sizeValue }
+            var idx: [String: Int] = [:]; for (i, x) in g.enumerated() { idx[x.bundle] = i }
+            groupIndex = idx
+            featuredNews = news.isEmpty ? g.filter { $0.latest.featured }.prefix(12).map { grp in
+                let a = grp.latest
+                return SourceNews(id: "feat-" + a.bundle, title: a.name, caption: a.description, imageURL: a.screenshots.first ?? a.iconURL,
+                                  url: nil, appID: a.bundle, date: a.updated, tintHex: a.tintHex)
+            } : news
+        }
+
+        func sorted(_ key: String) -> [AppGroup] {
+            switch key { case "Name": return byName; case "Size": return bySize; default: return byUpdated }
+        }
+        func group(bundle: String) -> AppGroup? { groupIndex[bundle].map { groups[$0] } }
     }
 
     static func parse(data: Data, fallbackName: String) throws -> ParsedRepo {
@@ -165,7 +243,8 @@ nonisolated enum RepoParser {
         return SourceApp(id: bundle + "@" + version, name: name, bundle: bundle, subtitle: subtitle, version: version,
                          sizeMB: sizeMB, updated: updated, downloads: downloads, description: desc,
                          iconURL: icon, downloadURL: dl, screenshots: shots,
-                         featured: (a["featured"] as? Bool) ?? false, tintHex: a["tintColor"] as? String)
+                         featured: (a["featured"] as? Bool) ?? false, tintHex: a["tintColor"] as? String,
+                         categoryRaw: (a["category"] as? String) ?? (a["genre"] as? String) ?? (a["type"] as? String))
     }
 }
 
@@ -194,6 +273,16 @@ final class SourceStore: ObservableObject {
         }
     }
 
+    // Raw repo.json bytes cached on disk so a cold launch shows the list instantly, then refreshes.
+    private nonisolated static let rawCacheDir: URL = {
+        let d = AppPaths.dir("sources").appendingPathComponent("raw", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }()
+    private nonisolated static func rawCacheURL(_ id: String) -> URL {
+        rawCacheDir.appendingPathComponent(id.replacingOccurrences(of: "/", with: "_") + ".json")
+    }
+
     private nonisolated static func requestParsedRepo(for source: RepoSource) async throws -> RepoParser.ParsedRepo {
         var req = URLRequest(url: source.url); req.cachePolicy = .reloadIgnoringLocalCacheData
         req.setValue("unzip-drop-ios", forHTTPHeaderField: "User-Agent")
@@ -201,7 +290,45 @@ final class SourceStore: ObservableObject {
         guard (resp as? HTTPURLResponse)?.statusCode ?? 0 < 400 else {
             throw GitHubError.badConfig("Source returned HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
         }
-        return try RepoParser.parse(data: data, fallbackName: source.name)
+        let parsed = try await Task.detached(priority: .userInitiated) { try RepoParser.parse(data: data, fallbackName: source.name) }.value
+        try? data.write(to: rawCacheURL(source.id), options: .atomic)
+        return parsed
+    }
+
+    /// Parse the on-disk copy (if any) off the main thread.
+    private nonisolated static func cachedParsedRepoFromDisk(for source: RepoSource) async -> RepoParser.ParsedRepo? {
+        let url = rawCacheURL(source.id)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return await Task.detached(priority: .userInitiated) { try? RepoParser.parse(data: data, fallbackName: source.name) }.value
+    }
+
+    /// Call once at launch: hydrate every source from disk (instant), then refresh from the network in the background.
+    func warmUpAtLaunch() async {
+        let snapshot = sources
+        await withTaskGroup(of: (RepoSource, RepoParser.ParsedRepo?).self) { group in
+            for src in snapshot where parsedCache[src.id] == nil {
+                group.addTask { (src, await Self.cachedParsedRepoFromDisk(for: src)) }
+            }
+            for await (src, parsed) in group {
+                if let parsed, parsedCache[src.id] == nil { applyParsedRepo(parsed, to: src) }
+            }
+        }
+        await refreshAllInBackground()
+    }
+
+    /// Refresh every source from the network without evicting what's already cached.
+    func refreshAllInBackground() async {
+        let snapshot = sources.filter { !prefetchingIDs.contains($0.id) }
+        snapshot.forEach { prefetchingIDs.insert($0.id) }
+        await withTaskGroup(of: (RepoSource, RepoParser.ParsedRepo?).self) { group in
+            for source in snapshot {
+                group.addTask(priority: .utility) { (source, try? await Self.requestParsedRepo(for: source)) }
+            }
+            for await (source, parsed) in group {
+                prefetchingIDs.remove(source.id)
+                if let parsed { applyParsedRepo(parsed, to: source) }
+            }
+        }
     }
 
     private func applyParsedRepo(_ parsed: RepoParser.ParsedRepo, to source: RepoSource) {
@@ -244,6 +371,10 @@ final class SourceStore: ObservableObject {
     }
 
     func prefetchSources() async {
+        // Fill any hole left by warmUpAtLaunch (e.g. a source added since).
+        for src in sources where parsedCache[src.id] == nil {
+            if let p = await Self.cachedParsedRepoFromDisk(for: src), parsedCache[src.id] == nil { applyParsedRepo(p, to: src) }
+        }
         let snapshot = sources.filter { parsedCache[$0.id] == nil && !prefetchingIDs.contains($0.id) }
         snapshot.forEach { prefetchingIDs.insert($0.id) }
         await withTaskGroup(of: (RepoSource, RepoParser.ParsedRepo?).self) { group in
@@ -365,27 +496,32 @@ private struct SourceDetailScreen: View {
     private enum Sort: String, CaseIterable { case updated = "Recently updated", name = "Name", size = "Size" }
 
     private var current: RepoSource { store.sources.first { $0.id == source.id } ?? source }
-    private var groups: [AppGroup] {
-        var list = parsed?.groups ?? []
-        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        if !q.isEmpty { list = list.filter { g in g.versions.contains { $0.name.lowercased().contains(q) || $0.subtitle.lowercased().contains(q) || $0.bundle.lowercased().contains(q) } } }
-        switch sort {
-        case .updated: list.sort { ($0.latest.updatedDate ?? .distantPast) > ($1.latest.updatedDate ?? .distantPast) }
-        case .name: list.sort { $0.latest.name.lowercased() < $1.latest.name.lowercased() }
-        case .size: list.sort { (Double($0.latest.sizeMB.split(separator: " ").first ?? "") ?? 0) > (Double($1.latest.sizeMB.split(separator: " ").first ?? "") ?? 0) }
-        }
-        return list
-    }
-    private var visibleGroups: [AppGroup] { Array(groups.prefix(visibleGroupCount)) }
 
-    /// News from the source, else featured apps as news cards.
-    private var news: [SourceNews] {
-        guard let p = parsed else { return [] }
-        if !p.news.isEmpty { return p.news }
-        return p.groups.filter { $0.latest.featured }.prefix(12).map { g in
-            let a = g.latest
-            return SourceNews(id: "feat-" + a.bundle, title: a.name, caption: a.description, imageURL: a.screenshots.first ?? a.iconURL,
-                              url: nil, appID: a.bundle, date: a.updated, tintHex: a.tintHex)
+    /// The list actually rendered. Recomputed off-main (debounced) when search/sort/parsed change — never in `body`.
+    @State private var groups: [AppGroup] = []
+    @State private var filterTask: Task<Void, Never>?
+    @State private var category: AppCategory = .all
+    private var visibleGroups: [AppGroup] { Array(groups.prefix(visibleGroupCount)) }
+    private var news: [SourceNews] { parsed?.featuredNews ?? [] }
+
+    private func recompute(debounce: Bool) {
+        filterTask?.cancel()
+        guard let p = parsed else { groups = []; return }
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        let base = p.sorted(sort.rawValue == "Name" ? "Name" : (sort.rawValue == "Size" ? "Size" : "Updated"))
+        let cat = category
+        if q.isEmpty && cat == .all { groups = base; return }
+        filterTask = Task {
+            if debounce { try? await Task.sleep(nanoseconds: 120_000_000) }
+            guard !Task.isCancelled else { return }
+            let out = await Task.detached(priority: .userInitiated) {
+                base.filter { g in
+                    (cat == .all || g.latest.category == cat) &&
+                    (q.isEmpty || g.versions.contains { $0.searchKey.contains(q) })
+                }
+            }.value
+            guard !Task.isCancelled else { return }
+            groups = out
         }
     }
 
@@ -403,6 +539,11 @@ private struct SourceDetailScreen: View {
                 newsSection
                     .listRowBackground(Color.black).listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 4, trailing: 0))
+            }
+            if parsed != nil {
+                categoryRow
+                    .listRowBackground(Color.black).listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 14, leading: 0, bottom: 18, trailing: 0))
             }
             ForEach(visibleGroups) { g in
                 appRow(g)
@@ -435,11 +576,16 @@ private struct SourceDetailScreen: View {
             if let cached = store.cachedParsedRepo(for: current) {
                 parsed = cached
                 loading = false
+                recompute(debounce: false)
+                // Already warm: refresh quietly only if the copy is older than 10 minutes.
+                if let t = current.lastFetched, Date().timeIntervalSince(t) < 600 { return }
             }
             await load(showSpinner: parsed == nil)
         }
-        .onChange(of: search) { _ in visibleGroupCount = 6 }
-        .onChange(of: sort) { _ in visibleGroupCount = 6 }
+        .onChange(of: search) { _ in visibleGroupCount = 6; recompute(debounce: true) }
+        .onChange(of: sort) { _ in visibleGroupCount = 6; recompute(debounce: false) }
+        .onChange(of: category) { _ in visibleGroupCount = 6; recompute(debounce: false) }
+        .onChange(of: parsed?.apps.count) { _ in recompute(debounce: false) }
         .sheet(item: $openGroup) { g in
             AppDetailSheet(source: current, group: g)
                 .then { view in
@@ -499,6 +645,40 @@ private struct SourceDetailScreen: View {
         .background(Color.white.opacity(0.04))
     }
 
+    // Category chips (ALL · TOOLS · PAID · JAILBREAK · MEDIA · SOCIAL · CAR · EMU), two rows
+    private var categoryRow: some View {
+        let cats = AppCategory.allCases
+        let rows = [Array(cats.prefix(4)), Array(cats.dropFirst(4))]
+        return VStack(spacing: 8) {
+            ForEach(0..<rows.count, id: \.self) { r in
+                HStack(spacing: 8) {
+                    ForEach(rows[r], id: \.self) { c in categoryChip(c) }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+    }
+
+    private func categoryChip(_ c: AppCategory) -> some View {
+        let on = c == category
+        return Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            withAnimation(.easeInOut(duration: 0.15)) { category = c }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: c.icon).font(.system(size: 13, weight: .bold))
+                Text(c.title).font(.system(size: 13, weight: .heavy, design: .monospaced)).kerning(0.5)
+            }
+            .foregroundStyle(on ? Theme.accent : Theme.text)
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(on ? Theme.accent.opacity(0.18) : Color.white.opacity(0.05))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(on ? Theme.accent.opacity(0.7) : Theme.stroke, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+    }
+
     private var newsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(parsed?.news.isEmpty == false ? "NEWS" : "FEATURED")
@@ -537,7 +717,7 @@ private struct SourceDetailScreen: View {
     }
 
     private func openNews(_ n: SourceNews) {
-        if let id = n.appID, let g = parsed?.groups.first(where: { $0.bundle == id }) { openGroup = g; return }
+        if let id = n.appID, let g = parsed?.group(bundle: id) { openGroup = g; return }
         if let u = n.url { UIApplication.shared.open(u) }
     }
 
@@ -612,6 +792,7 @@ private struct SourceDetailScreen: View {
         do { parsed = try await store.fetch(current) } catch { self.error = error.localizedDescription }
         visibleGroupCount = 6
         loading = false
+        recompute(debounce: false)
     }
 
     private func loadMoreIfNeeded(current group: AppGroup) {

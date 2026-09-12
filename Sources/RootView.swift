@@ -76,6 +76,7 @@ struct RootView: View {
                         .preferredColorScheme(theme.colorScheme)
                 }
         }
+        .task { await SourceStore.shared.warmUpAtLaunch() }   // repos parsed from disk instantly, refreshed in background
         .onChange(of: nav.requestedTab) { t in
             guard let t else { return }
             nav.requestedTab = nil
